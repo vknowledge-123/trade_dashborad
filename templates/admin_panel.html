@@ -1,0 +1,335 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="admin-grid">
+  <div class="panel panel-accent panel-compact">
+    <div class="panel-header">
+      <h3>Kite API Credentials</h3>
+      <span class="pill">Admin only</span>
+    </div>
+    <form class="inquiry" method="post" action="/admin/kite/credentials">
+      <label>
+        API Key
+        <input type="text" name="api_key" value="{{ creds['api_key'] if creds else '' }}" required />
+      </label>
+      <label>
+        API Secret
+        <input type="password" name="api_secret" value="{{ creds['api_secret'] if creds else '' }}" required />
+      </label>
+      <button class="btn btn-primary" type="submit">Save Credentials</button>
+    </form>
+    <div class="mini-row">
+      <span class="muted">Need a fresh token?</span>
+      <a class="btn btn-ghost btn-mini" href="/admin/kite/login">Generate Access Token</a>
+    </div>
+  </div>
+
+  <div class="panel panel-accent panel-2fa panel-2fa-compact panel-2fa-inline panel-2fa-audit">
+    <div class="panel-header">
+      <h3>Admin 2FA</h3>
+      <div class="pill-row">
+        <span class="pill">Google Authenticator</span>
+        {% if admin and admin["totp_enabled"] %}
+          <span class="pill positive">Enabled</span>
+        {% endif %}
+      </div>
+    </div>
+    {% if admin and admin["totp_enabled"] %}
+      <p class="muted">2FA is enabled for this admin.</p>
+    {% else %}
+      <p class="muted">Add an extra security layer using TOTP codes.</p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="/admin/2fa/setup">Enable 2FA</a>
+      </div>
+    {% endif %}
+    <div class="panel-divider"></div>
+    <div class="panel-header panel-subhead">
+      <h3>Admin Login Audit</h3>
+      <span class="pill">Last 12</span>
+    </div>
+    {% if audit_logs %}
+      <div class="table audit-table">
+        <div class="table-row table-head">
+          <span>Email</span>
+          <span>IP</span>
+          <span>Status</span>
+        </div>
+        {% for row in audit_logs %}
+          <div class="table-row">
+            <span>{{ row["email"] }}</span>
+            <span class="mono">{{ row["ip"] }}</span>
+            {% if row["success"] %}
+              <span class="positive mono">Success</span>
+            {% else %}
+              <span class="negative mono">Fail</span>
+            {% endif %}
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="muted">No login activity yet.</p>
+    {% endif %}
+  </div>
+
+  
+  <div class="panel panel-wide panel-accent">
+    <div class="panel-header">
+      <h3>User Activity</h3>
+      <span class="pill">Recent 20</span>
+    </div>
+    {% if users_activity %}
+      <div class="table">
+        <div class="table-row table-head user-activity-head">
+          <span>User</span>
+          <span>Trial</span>
+          <span>Last Login</span>
+          <span>Logins</span>
+        </div>
+        {% for u in users_activity %}
+          <div class="table-row user-activity-row">
+            <span>
+              <div style="display:flex; flex-direction:column; gap:2px;">
+                <span>{{ u["full_name"] }}</span>
+                <span class="muted">{{ u["email"] }}</span>
+                <span class="muted">{{ u["phone"] if u["phone"] else "-" }}</span>
+                <span class="muted mono">{{ u["created_at"] if u["created_at"] else "-" }}</span>
+              </div>
+            </span>
+            <span class="mono">
+              {% if u["trial"]["active"] %}
+                <span class="positive">Active</span>
+                <span class="muted">({{ u["trial"]["remaining_days"] }}d left)</span>
+              {% else %}
+                <span class="negative">Expired</span>
+              {% endif %}
+              <div class="muted">Ends: {{ u["trial"]["end_date"] }}</div>
+            </span>
+            <span class="mono muted">{{ u["last_login_at"] if u["last_login_at"] else "-" }}</span>
+            <span class="mono">{{ u["login_count"] if u["login_count"] else 0 }}</span>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="muted">No user activity yet.</p>
+    {% endif %}
+  </div>
+
+
+  <div class="panel panel-wide panel-accent">
+    <div class="panel-header">
+      <h3>Inquiries</h3>
+      <span class="pill">Latest 20</span>
+    </div>
+    <div class="inquiry-tools" style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
+      <input id="inq-search" class="inquiry-search" type="text" placeholder="Search name, email, subject..." />
+      <select id="inq-filter" class="inquiry-filter">
+        <option value="all">All</option>
+        <option value="open">Open</option>
+        <option value="closed">Closed</option>
+      </select>
+    </div>
+    {% if inquiries %}
+      <div class="table">
+        <div class="table-row table-head inquiry-head">
+          <span>User</span>
+          <span>Message</span>
+          <span>Contact</span>
+          <span>Status</span>
+          <span>Subject</span>
+          <span>Time</span>
+        </div>
+        {% for row in inquiries %}
+          <div class="table-row inquiry-row inquiry-row-grid"
+               data-status="{{ row['status'] }}"
+               data-search="{{ (row['full_name'] ~ ' ' ~ row['email'] ~ ' ' ~ row['subject'] ~ ' ' ~ row['message']) | lower }}">
+            <span>{{ row["full_name"] }}</span>
+            <span class="muted">{{ row["message"] }}</span>
+            <span class="mono contact-col">
+              <span>{{ row["phone"] if row["phone"] else "-" }}</span>
+              <span class="muted">{{ row["email"] }}</span>
+            </span>
+            <span>
+              <form method="post" action="/admin/inquiry/status">
+                <input type="hidden" name="inquiry_id" value="{{ row['id'] }}" />
+                {% if row["status"] == "closed" %}
+                  <input type="hidden" name="status" value="open" />
+                  <button class="pill" type="submit">Closed</button>
+                {% else %}
+                  <input type="hidden" name="status" value="closed" />
+                  <button class="pill" type="submit">Open</button>
+                {% endif %}
+              </form>
+            </span>
+            <span class="mono">{{ row["subject"] }}</span>
+            <span class="mono muted">{{ row["created_at_pretty"] }}</span>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="muted">No inquiries yet.</p>
+    {% endif %}
+  </div>
+
+</section>
+
+<style>
+.admin-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 18px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(0,212,255,0.10), rgba(99,102,241,0.12));
+  border: 1px solid rgba(99,210,255,0.20);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.06);
+  margin-bottom: 14px;
+}
+.admin-hero h1 {
+  font-family: 'Syne', sans-serif;
+  font-size: clamp(20px, 2.2vw, 26px);
+  margin-bottom: 4px;
+  background: linear-gradient(135deg, #ffffff, #8ee6ff);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.admin-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.panel-accent {
+  border: 1px solid rgba(99,210,255,0.18);
+  box-shadow: 0 10px 28px rgba(0,0,0,0.22);
+  background: rgba(12, 18, 32, 0.55);
+}
+.panel-2fa {
+  position: relative;
+}
+.panel-2fa-compact {
+  padding: 10px 12px;
+}
+.panel-2fa-compact .panel-header {
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+.panel-2fa-compact .muted {
+  font-size: 12px;
+  margin: 0;
+}
+.panel-2fa-inline {
+  min-height: 0;
+}
+.panel-2fa-inline .panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.panel-2fa-inline .muted {
+  display: block;
+}
+.panel-divider {
+  height: 1px;
+  margin: 10px 0;
+  background: rgba(255,255,255,0.06);
+}
+.panel-subhead {
+  margin-top: 2px;
+}
+.audit-table .table-row {
+  background: rgba(255,255,255,0.02);
+}
+.pill-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.panel-compact {
+  padding: 14px;
+}
+.btn-mini {
+  padding: 8px 14px;
+  font-size: 12px;
+}
+.mini-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+}
+.panel-wide {
+  grid-column: 1 / -1;
+}
+.inquiry-tools {
+  padding: 6px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.table {
+  gap: 6px;
+}
+.table-row {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.04);
+}
+.table-row.table-head {
+  background: transparent;
+  border: none;
+}
+.table-row span.muted {
+  font-size: 12px;
+}
+@media (max-width: 900px) {
+  .admin-grid { grid-template-columns: 1fr; }
+  .admin-hero { flex-direction: column; align-items: flex-start; }
+}
+
+.inquiry-row-grid,
+.inquiry-head {
+  grid-template-columns: 1.1fr 2fr 1.4fr 0.7fr 1.1fr 0.9fr;
+  align-items: center;
+}
+.inquiry-row-grid span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.inquiry-row-grid span:nth-child(2) {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
+}
+.contact-col {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+</style>
+
+<script>
+  (function () {
+    const search = document.getElementById("inq-search");
+    const filter = document.getElementById("inq-filter");
+    const rows = Array.from(document.querySelectorAll(".inquiry-row"));
+    const apply = () => {
+      const q = (search?.value || "").toLowerCase().trim();
+      const f = (filter?.value || "all");
+      rows.forEach((row) => {
+        const status = row.dataset.status || "open";
+        const hay = row.dataset.search || "";
+        const matchText = !q || hay.includes(q);
+        const matchStatus = f === "all" || status === f;
+        row.style.display = matchText && matchStatus ? "" : "none";
+      });
+    };
+    if (search) search.addEventListener("input", apply);
+    if (filter) filter.addEventListener("change", apply);
+  })();
+</script>
+{% endblock %}

@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="dash-hero">
+  <div>
+    <h1>Inquiry Desk</h1>
+    <p class="muted">Share your trade question. Our desk will get back to you quickly.</p>
+  </div>
+  <div class="hero-actions">
+    <a class="btn btn-ghost" href="/dashboard">Back to Dashboard</a>
+    {% if not user %}
+      <a class="btn btn-primary" href="/register">Register to Continue</a>
+    {% endif %}
+  </div>
+</section>
+
+<section class="dash-grid">
+  <div class="panel">
+    <div class="panel-header">
+      <h3>Detail Inquiry</h3>
+      <span class="pill">Ask the desk</span>
+    </div>
+    <form class="inquiry" method="post" action="/inquiry">
+      <label>
+        Subject
+        <input type="text" name="subject" required />
+      </label>
+      <label>
+        Message
+        <textarea name="message" rows="6" required></textarea>
+      </label>
+      <button class="btn btn-primary" type="submit">Send Inquiry</button>
+    </form>
+  </div>
+
+  <div class="panel">
+    <div class="panel-header">
+      <h3>What to Ask</h3>
+      <span class="pill neutral">Examples</span>
+    </div>
+    <div class="table">
+      <div class="table-row">
+        <span>Options strategy for NIFTY weekly</span>
+        <span class="muted">Risk + entry view</span>
+      </div>
+      <div class="table-row">
+        <span>Bank Nifty breakout levels</span>
+        <span class="muted">Support/resistance</span>
+      </div>
+      <div class="table-row">
+        <span>Sector rotation trade idea</span>
+        <span class="muted">Top sector today</span>
+      </div>
+      <div class="table-row">
+        <span>Portfolio rebalance suggestion</span>
+        <span class="muted">Short-term plan</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-header">
+      <h3>Response Flow</h3>
+      <span class="pill positive">Fast reply</span>
+    </div>
+    <div class="table">
+      <div class="table-row">
+        <span>Submit inquiry</span>
+        <span class="muted">2 minutes</span>
+      </div>
+      <div class="table-row">
+        <span>Desk review</span>
+        <span class="muted">Same day</span>
+      </div>
+      <div class="table-row">
+        <span>Actionable response</span>
+        <span class="muted">Email / SMS</span>
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}

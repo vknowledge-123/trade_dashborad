@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="680" viewBox="0 0 1200 680">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1222"/>
+      <stop offset="1" stop-color="#081022"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#00e5a0"/>
+      <stop offset="1" stop-color="#00d4ff"/>
+    </linearGradient>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="10" result="b"/>
+      <feColorMatrix in="b" type="matrix"
+        values="1 0 0 0 0
+                0 1 0 0 0
+                0 0 1 0 0
+                0 0 0 0.35 0"/>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <rect x="0" y="0" width="1200" height="680" rx="28" fill="url(#bg)"/>
+  <rect x="22" y="22" width="1156" height="636" rx="22" fill="rgba(255,255,255,0.03)" stroke="rgba(255,255,255,0.08)"/>
+
+  <!-- Top bar -->
+  <rect x="42" y="44" width="1116" height="64" rx="16" fill="rgba(0,0,0,0.25)" stroke="rgba(255,255,255,0.06)"/>
+  <rect x="60" y="60" width="150" height="32" rx="12" fill="url(#accent)" opacity="0.95"/>
+  <text x="74" y="82" fill="#081022" font-size="16" font-family="Inter, Arial, sans-serif" font-weight="800">Dhan + Chartink</text>
+  <text x="240" y="82" fill="#a9b7d6" font-size="14" font-family="Inter, Arial, sans-serif">Scanners • Alerts • Trade plan (demo)</text>
+
+  <!-- Left panel -->
+  <rect x="42" y="126" width="340" height="512" rx="18" fill="rgba(0,0,0,0.22)" stroke="rgba(255,255,255,0.06)"/>
+  <text x="66" y="162" fill="#e8f0fe" font-size="16" font-family="Inter, Arial, sans-serif" font-weight="700">Trade Plan</text>
+  <g fill="#6b7fa3" font-size="13" font-family="Inter, Arial, sans-serif">
+    <text x="66" y="194">Entry: 1,245.50</text>
+    <text x="66" y="218">Stoploss: 1,218.00</text>
+    <text x="66" y="242">Target 1: 1,276.00</text>
+    <text x="66" y="266">Target 2: 1,310.00</text>
+  </g>
+
+  <text x="66" y="318" fill="#e8f0fe" font-size="14" font-family="Inter, Arial, sans-serif" font-weight="700">Alerts</text>
+  <g>
+    <rect x="66" y="336" width="292" height="46" rx="14" fill="rgba(255,255,255,0.03)" stroke="rgba(0,229,160,0.18)"/>
+    <text x="84" y="364" fill="#e8f0fe" font-size="13" font-family="JetBrains Mono, monospace">HDFCBANK  RSI↑</text>
+    <rect x="66" y="392" width="292" height="46" rx="14" fill="rgba(255,255,255,0.03)" stroke="rgba(0,212,255,0.14)"/>
+    <text x="84" y="420" fill="#e8f0fe" font-size="13" font-family="JetBrains Mono, monospace">INFY      VOL↑</text>
+    <rect x="66" y="448" width="292" height="46" rx="14" fill="rgba(255,255,255,0.03)" stroke="rgba(0,212,255,0.14)"/>
+    <text x="84" y="476" fill="#e8f0fe" font-size="13" font-family="JetBrains Mono, monospace">LT        BO↑</text>
+  </g>
+
+  <!-- Main chart -->
+  <rect x="402" y="126" width="756" height="512" rx="18" fill="rgba(0,0,0,0.22)" stroke="rgba(255,255,255,0.06)"/>
+  <text x="430" y="162" fill="#e8f0fe" font-size="16" font-family="Inter, Arial, sans-serif" font-weight="700">Demo Scanner Chart</text>
+  <text x="430" y="188" fill="#6b7fa3" font-size="13" font-family="Inter, Arial, sans-serif">Overlay + zones (mock)</text>
+
+  <!-- Zones -->
+  <rect x="430" y="310" width="704" height="90" rx="14" fill="rgba(0,229,160,0.06)" stroke="rgba(0,229,160,0.14)"/>
+  <rect x="430" y="430" width="704" height="80" rx="14" fill="rgba(0,212,255,0.05)" stroke="rgba(0,212,255,0.12)"/>
+
+  <!-- Path -->
+  <path d="M430 540 C520 560, 610 530, 700 500 C780 474, 870 430, 960 410 C1040 392, 1100 360, 1134 330"
+        fill="none" stroke="url(#accent)" stroke-width="4" filter="url(#soft)"/>
+
+  <!-- Markers -->
+  <g>
+    <circle cx="560" cy="530" r="6" fill="#00d4ff"/>
+    <circle cx="740" cy="500" r="6" fill="#00e5a0"/>
+    <circle cx="920" cy="410" r="6" fill="#00e5a0"/>
+  </g>
+
+  <text x="430" y="626" fill="#6b7fa3" font-size="12" font-family="Inter, Arial, sans-serif">
+    Demo image (placeholder) — replace with real screenshots if needed.
+  </text>
+</svg>
+

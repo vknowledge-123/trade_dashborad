@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="auth">
+  <div class="auth-card">
+    <h2>Welcome back</h2>
+    <p class="muted">Login to continue your trading insights.</p>
+
+    {% if error %}
+      <div class="alert">{{ error }}</div>
+    {% endif %}
+
+    <form method="post" action="/login" class="auth-form">
+      <label>
+        Email
+        <input type="email" name="email" required />
+      </label>
+      <label>
+        Password
+        <input type="password" name="password" required />
+      </label>
+      <button class="btn btn-primary" type="submit">Login</button>
+    </form>
+
+    <div class="auth-footer">
+      New here? <a href="/register">Start Free Trial</a>
+    </div>
+  </div>
+</section>
+{% endblock %}

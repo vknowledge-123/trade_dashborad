@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="auth">
+  <div class="auth-card">
+    <h2>Admin Setup</h2>
+    <p class="muted">Create the admin account. If an admin already exists, it will be replaced.</p>
+
+    {% if error %}
+      <div class="alert">{{ error }}</div>
+    {% endif %}
+
+    <form method="post" action="/admin/setup" class="auth-form">
+      <label>
+        Full Name
+        <input type="text" name="full_name" required />
+      </label>
+      <label>
+        Email
+        <input type="email" name="email" required />
+      </label>
+      <label>
+        Phone
+        <input type="text" name="phone" required />
+      </label>
+      <label>
+        Password
+        <input type="password" name="password" required />
+      </label>
+      <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; text-transform: none; letter-spacing: 0;">
+        <input type="checkbox" id="show-pass-admin-setup" />
+        Show password
+      </label>
+      <button class="btn btn-primary" type="submit">Create Admin</button>
+    </form>
+    <div class="auth-footer">
+      Already have admin? <a href="/admin/login">Login here</a>
+    </div>
+  </div>
+</section>
+<script>
+  (function () {
+    const checkbox = document.getElementById("show-pass-admin-setup");
+    if (!checkbox) return;
+    const input = document.querySelector('input[name="password"]');
+    checkbox.addEventListener("change", () => {
+      input.type = checkbox.checked ? "text" : "password";
+    });
+  })();
+</script>
+{% endblock %}

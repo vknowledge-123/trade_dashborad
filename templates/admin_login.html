@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="auth">
+  <div class="auth-card">
+    <h2>Admin Login</h2>
+    <p class="muted">Restricted access. Admin credentials only.</p>
+
+    {% if error %}
+      <div class="alert">{{ error }}</div>
+    {% endif %}
+
+    <form method="post" action="/admin/login" class="auth-form">
+      <label>
+        Email
+        <input type="email" name="email" required />
+      </label>
+      <label>
+        Password
+        <input type="password" name="password" required />
+      </label>
+      <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; text-transform: none; letter-spacing: 0;">
+        <input type="checkbox" id="show-pass-admin-login" />
+        Show password
+      </label>
+      <button class="btn btn-primary" type="submit">Login</button>
+    </form>
+    <div class="auth-footer">
+      First time? <a href="/admin/setup">Create admin account</a>
+    </div>
+  </div>
+</section>
+<script>
+  (function () {
+    const checkbox = document.getElementById("show-pass-admin-login");
+    if (!checkbox) return;
+    const input = document.querySelector('input[name="password"]');
+    checkbox.addEventListener("change", () => {
+      input.type = checkbox.checked ? "text" : "password";
+    });
+  })();
+</script>
+{% endblock %}

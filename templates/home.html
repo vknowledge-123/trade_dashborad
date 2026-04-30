@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero">
+  <div class="hero-copy">
+    <div class="eyebrow">Premium market intelligence</div>
+    <h1>Trade smarter with a dashboard built for speed and clarity.</h1>
+    <p>
+      Track top gainers and losers, see sector heat, and manage your free trial
+      from one elegant, focused workspace.
+    </p>
+    <div class="hero-actions">
+      <a class="btn btn-primary" href="/register">Start Free Trial</a>
+      <a class="btn btn-ghost" href="/login">Login</a>
+    </div>
+    <div class="hero-stats">
+      <div>
+        <div class="stat-value">20</div>
+        <div class="stat-label">Top Movers</div>
+      </div>
+      <div>
+        <div class="stat-value">14</div>
+        <div class="stat-label">Sectors Tracked</div>
+      </div>
+      <div>
+        <div class="stat-value">1 Day</div>
+        <div class="stat-label">Free Trial</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="hero-card">
+    <div class="card-header">Market Pulse</div>
+    <div class="card-body">
+      <div class="pulse-row positive">
+        <span>IT</span>
+        <span>+2.3%</span>
+      </div>
+      <div class="pulse-row positive">
+        <span>Banking</span>
+        <span>+1.8%</span>
+      </div>
+      <div class="pulse-row negative">
+        <span>Metals</span>
+        <span>-1.4%</span>
+      </div>
+      <div class="pulse-row positive">
+        <span>FMCG</span>
+        <span>+0.9%</span>
+      </div>
+      <div class="pulse-row neutral">
+        <span>Telecom</span>
+        <span>+0.1%</span>
+      </div>
+      <div class="card-footer">
+        Live sector heat with sentiment overlays.
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="feature-grid">
+  <div class="feature">
+    <h3>Gainers & Losers</h3>
+    <p>Instantly spot momentum with top 20 winners and losers updated live.</p>
+  </div>
+  <div class="feature">
+    <h3>Sector Heat</h3>
+    <p>Identify which sector is attracting capital and where it is cooling.</p>
+  </div>
+  <div class="feature">
+    <h3>Inquiry Ready</h3>
+    <p>Submit your trade inquiry and receive tailored support from our team.</p>
+  </div>
+</section>
+{% endblock %}

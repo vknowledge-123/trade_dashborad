@@ -1,0 +1,598 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="svc-container">
+<section class="svc-hero" aria-label="Services header">
+  <div class="svc-hero-left">
+    <div class="svc-hero-kicker">Services</div>
+    <div class="svc-hero-kicker-sub">Broker integrations &middot; Chartink scanners</div>
+  </div>
+  <div class="svc-hero-center">
+    <h1>Algo Services &amp; Dashboards</h1>
+  </div>
+  <div class="svc-hero-right">
+    <p>
+      Signal dashboards, scanner workflows, and broker-ready execution support built for clarity and speed.
+    </p>
+  </div>
+</section>
+
+<section class="svc-layout" aria-label="Services layout">
+  <div class="svc-layout-left">
+    <section class="svc-compare" aria-label="Service dashboards preview">
+  <article class="svc-card">
+    <div class="svc-card-top svc-blue">
+      <h2>CHARTINK ALGO &mdash; BREAKOUT</h2>
+      <div class="svc-card-sub">
+        <span class="svc-pill">Broker: Zerodha</span>
+        <span class="svc-pill svc-pill-ghost">Execution workflow</span>
+      </div>
+    </div>
+
+    <div class="svc-stats">
+      <div class="svc-stat">
+        <div class="svc-stat-label">Total Alerts</div>
+        <div class="svc-stat-val svc-red">14</div>
+      </div>
+      <div class="svc-stat">
+        <div class="svc-stat-label">Signals Triggered</div>
+        <div class="svc-stat-val svc-blue-text">9</div>
+      </div>
+      <div class="svc-stat">
+        <div class="svc-stat-label">Trades Executed</div>
+        <div class="svc-stat-val svc-blue-text">6</div>
+      </div>
+      <div class="svc-stat">
+        <div class="svc-stat-label">Profit / Loss</div>
+        <div class="svc-stat-val svc-green">+&#8377;9,500</div>
+      </div>
+    </div>
+
+    <div class="svc-meta">
+      <span><strong>Strategy:</strong> Breakout Scanner</span>
+      <span class="svc-sep">|</span>
+      <span><strong>Segment:</strong> NSE</span>
+      <span class="svc-sep">|</span>
+      <span><strong>Timeframe:</strong> 5 Min</span>
+    </div>
+
+    <div class="svc-module">
+      <div class="svc-module-head">
+        <h3>Breakout Scanner</h3>
+      </div>
+      <div class="svc-module-sub svc-blue">
+        <span><strong>Total Alerts:</strong> 14</span>
+        <span class="svc-sep">|</span>
+        <span><strong>Active Positions:</strong> 3</span>
+      </div>
+
+      <div class="svc-table">
+        <div class="svc-table-row svc-table-head">
+          <span>Time</span><span>Stock</span><span>Signal</span><span>Action</span><span>Price</span><span>Status</span>
+        </div>
+        <div class="svc-table-row">
+          <span class="mono">11:35</span><span class="svc-stock">RELIANCE</span><span>Breakout</span>
+          <span><span class="svc-chip svc-buy">BUY</span></span><span class="mono">&#8377;2,450.10</span><span class="svc-status ok">Executed</span>
+        </div>
+        <div class="svc-table-row">
+          <span class="mono">10:45</span><span class="svc-stock">HDFCBANK</span><span>Breakdown</span>
+          <span><span class="svc-chip svc-sell">SELL</span></span><span class="mono">&#8377;1,330.50</span><span class="svc-status ok">Executed</span>
+        </div>
+        <div class="svc-table-row">
+          <span class="mono">11:05</span><span class="svc-stock">AXISBANK</span><span>Breakout</span>
+          <span><span class="svc-chip svc-buy">BUY</span></span><span class="mono">&#8377;1,430.10</span><span class="svc-status ok">Executed</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="svc-metrics">
+      <div class="svc-metric"><span>Win Rate</span><strong class="svc-green">66.7%</strong></div>
+      <div class="svc-metric"><span>Total P&amp;L</span><strong class="svc-green">+&#8377;9,500</strong></div>
+      <div class="svc-metric"><span>Risk/Reward</span><strong class="svc-green">2.8</strong></div>
+    </div>
+
+  </article>
+
+  <article class="svc-card">
+    <div class="svc-card-top svc-green-top">
+      <h2>CHARTINK ALGO &mdash; MOMENTUM</h2>
+      <div class="svc-card-sub">
+        <span class="svc-pill">Broker: Dhan</span>
+        <span class="svc-pill svc-pill-ghost">Tracking dashboard</span>
+      </div>
+    </div>
+
+    <div class="svc-stats">
+      <div class="svc-stat">
+        <div class="svc-stat-label">Total Alerts</div>
+        <div class="svc-stat-val svc-red">18</div>
+      </div>
+      <div class="svc-stat">
+        <div class="svc-stat-label">Signals Triggered</div>
+        <div class="svc-stat-val svc-blue-text">11</div>
+      </div>
+      <div class="svc-stat">
+        <div class="svc-stat-label">Trades Executed</div>
+        <div class="svc-stat-val svc-blue-text">8</div>
+      </div>
+      <div class="svc-stat">
+        <div class="svc-stat-label">Profit / Loss</div>
+        <div class="svc-stat-val svc-green">+&#8377;7,200</div>
+      </div>
+    </div>
+
+    <div class="svc-meta">
+      <span><strong>Strategy:</strong> Momentum Trader</span>
+      <span class="svc-sep">|</span>
+      <span><strong>Segment:</strong> NSE</span>
+      <span class="svc-sep">|</span>
+      <span><strong>Timeframe:</strong> 15 Min</span>
+    </div>
+
+    <div class="svc-module">
+      <div class="svc-module-head">
+        <h3>Momentum Trader</h3>
+      </div>
+      <div class="svc-module-sub svc-green-sub">
+        <span><strong>Total Alerts:</strong> 18</span>
+        <span class="svc-sep">|</span>
+        <span><strong>Active Positions:</strong> 2</span>
+      </div>
+
+      <div class="svc-table">
+        <div class="svc-table-row svc-table-head">
+          <span>Time</span><span>Stock</span><span>Signal</span><span>Action</span><span>Price</span><span>Status</span>
+        </div>
+        <div class="svc-table-row">
+          <span class="mono">12:00</span><span class="svc-stock">TATASTEEL</span><span>Bullish Move</span>
+          <span><span class="svc-chip svc-buy">BUY</span></span><span class="mono">&#8377;262.20</span><span class="svc-status ok">Executed</span>
+        </div>
+        <div class="svc-table-row">
+          <span class="mono">12:00</span><span class="svc-stock">ICICIBANK</span><span>Bearish Move</span>
+          <span><span class="svc-chip svc-sell">SELL</span></span><span class="mono">&#8377;2,046.45</span><span class="svc-status ok">Executed</span>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="svc-metrics">
+      <div class="svc-metric"><span>Win Rate</span><strong class="svc-green">72.7%</strong></div>
+      <div class="svc-metric"><span>Total P&amp;L</span><strong class="svc-green">+&#8377;7,200</strong></div>
+      <div class="svc-metric"><span>Risk/Reward</span><strong class="svc-green">2.3</strong></div>
+    </div>
+
+  </article>
+    </section>
+  </div>
+  <aside class="svc-layout-right">
+    <section class="svc-simple">
+      <div class="panel-header">
+        <h3>What you get</h3>
+        <span class="pill">Overview</span>
+      </div>
+      <div class="table" style="margin-top: 10px;">
+        <div class="table-row table-head" style="grid-template-columns: 1.05fr 1.95fr;">
+          <span>Service</span>
+          <span>Details</span>
+        </div>
+        <div class="table-row" style="grid-template-columns: 1.05fr 1.95fr;">
+          <span class="mono">Scanner Signals</span>
+          <span class="muted">Strategy-wise Chartink scanners (breakouts, volume, trend)</span>
+        </div>
+        <div class="table-row" style="grid-template-columns: 1.05fr 1.95fr;">
+          <span class="mono">Broker Workflow</span>
+          <span class="muted">Execution-ready token/login workflow + trade tracking</span>
+        </div>
+        <div class="table-row" style="grid-template-columns: 1.05fr 1.95fr;">
+          <span class="mono">Dashboards</span>
+          <span class="muted">Market snapshot, sectors, watchlists, and activity views</span>
+        </div>
+        <div class="table-row" style="grid-template-columns: 1.05fr 1.95fr;">
+          <span class="mono">Support</span>
+          <span class="muted">Onboarding + support via inquiry</span>
+        </div>
+      </div>
+      <p class="muted" style="margin-top: 12px;">
+        For final integration, please register and connect with our team for onboarding.
+      </p>
+    </section>
+  </aside>
+</section>
+
+<style>
+  .svc-container {
+    max-width: 1320px;
+    margin: 0 auto;
+    padding: 0 6px;
+  }
+
+  .svc-hero {
+    border-radius: 20px;
+    padding: 18px clamp(14px, 2.4vw, 22px);
+    border: 1px solid rgba(255,255,255,0.12);
+    background:
+      radial-gradient(120% 140% at 10% 0%, rgba(0,229,160,0.14), transparent 55%),
+      radial-gradient(120% 140% at 90% 0%, rgba(255,255,255,0.06), transparent 58%),
+      linear-gradient(180deg, rgba(0,0,0,0.26), rgba(0,0,0,0.18));
+    box-shadow: 0 18px 52px rgba(0,0,0,0.38);
+    display: grid;
+    grid-template-columns: 1fr 1.35fr 1fr;
+    gap: 14px;
+    align-items: center;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .svc-hero::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(90deg, rgba(255,255,255,0.06), transparent 40%),
+      radial-gradient(80% 120% at 50% 0%, rgba(0, 229, 160, 0.10), transparent 55%);
+    opacity: 0.55;
+    pointer-events: none;
+  }
+
+  .svc-hero > * { position: relative; z-index: 1; }
+
+  .svc-hero-kicker {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 900;
+    font-size: 14px;
+    letter-spacing: 0.4px;
+    color: rgba(232,240,254,0.92);
+  }
+
+  .svc-hero-kicker::before {
+    content: "";
+    width: 10px;
+    height: 10px;
+    border-radius: 99px;
+    background: linear-gradient(135deg, #00e5a0, #ffb830);
+    box-shadow: 0 0 0 4px rgba(0,229,160,0.14), 0 10px 24px rgba(0,0,0,0.25);
+  }
+
+  .svc-hero-kicker-sub {
+    margin-top: 8px;
+    color: rgba(232,240,254,0.62);
+    font-weight: 600;
+    font-size: 12.5px;
+  }
+
+  .svc-hero-center h1 {
+    margin: 0;
+    text-align: center;
+    font-family: 'Syne', sans-serif;
+    font-weight: 900;
+    line-height: 1.05;
+    font-size: clamp(22px, 2.4vw, 34px);
+    letter-spacing: -0.3px;
+    color: rgba(255,255,255,0.96);
+    text-shadow: 0 10px 30px rgba(0,0,0,0.32);
+    white-space: nowrap;
+  }
+
+  .svc-hero-right p {
+    margin: 0;
+    color: rgba(232,240,254,0.76);
+    font-weight: 600;
+    font-size: 13.5px;
+    line-height: 1.35;
+    text-align: right;
+  }
+
+  .svc-compare {
+    margin-top: 14px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .svc-layout {
+    margin-top: 14px;
+    display: grid;
+    grid-template-columns: 2.2fr 1fr;
+    gap: 12px;
+    align-items: start;
+  }
+
+  .svc-layout-left .svc-compare {
+    margin-top: 0;
+  }
+
+  .svc-layout-right {
+    position: sticky;
+    top: 88px;
+  }
+
+  .svc-card {
+    border-radius: 18px;
+    overflow: hidden;
+    background:
+      radial-gradient(120% 140% at 0% 0%, rgba(0,229,160,0.06), transparent 55%),
+      radial-gradient(120% 140% at 100% 0%, rgba(0,0,0,0.55), transparent 60%),
+      linear-gradient(180deg, rgba(0,0,0,0.34), rgba(0,0,0,0.22));
+    border: 1px solid rgba(255,255,255,0.10);
+    box-shadow: 0 22px 70px rgba(0,0,0,0.52);
+    backdrop-filter: blur(12px);
+    transform: translateY(0);
+    transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+    position: relative;
+  }
+
+  .svc-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(0, 229, 160, 0.18);
+    box-shadow: 0 28px 90px rgba(0,0,0,0.58);
+  }
+
+  .svc-card-top {
+    padding: 16px 18px;
+    text-align: center;
+    letter-spacing: 0.6px;
+    font-family: 'Syne', sans-serif;
+    font-weight: 900;
+    font-size: 18px;
+    color: #fff;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+
+  .svc-blue {
+    background:
+      radial-gradient(120% 140% at 0% 0%, rgba(255,255,255,0.10), transparent 55%),
+      linear-gradient(135deg, rgba(28, 34, 52, 0.98), rgba(10, 14, 24, 0.92));
+    border-bottom: 1px solid rgba(255,255,255,0.14);
+  }
+
+  .svc-green-top {
+    background:
+      radial-gradient(120% 140% at 0% 0%, rgba(255,255,255,0.10), transparent 55%),
+      linear-gradient(135deg, rgba(18, 22, 34, 0.96), rgba(0, 229, 160, 0.18));
+    border-bottom: 1px solid rgba(255,255,255,0.14);
+  }
+
+  .svc-card h2 { margin: 0; font-size: 18px; line-height: 1.1; }
+
+  .svc-card-sub {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .svc-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 5px 9px;
+    border-radius: 999px;
+    font-weight: 800;
+    font-size: 11.5px;
+    letter-spacing: 0.2px;
+    background: rgba(255,255,255,0.10);
+    border: 1px solid rgba(255,255,255,0.18);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.10);
+    color: rgba(255,255,255,0.92);
+  }
+  .svc-pill-ghost {
+    background: rgba(0,0,0,0.22);
+    border-color: rgba(255,255,255,0.14);
+    color: rgba(255,255,255,0.86);
+  }
+
+  .svc-stats {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+    padding: 14px 12px 10px;
+  }
+
+  .svc-stat {
+    background:
+      linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.04));
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 12px;
+    padding: 8px 10px;
+    text-align: center;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.10);
+    transition: transform 160ms ease, border-color 160ms ease;
+  }
+  .svc-stat:hover { transform: translateY(-1px); border-color: rgba(0, 229, 160, 0.20); }
+
+  .svc-stat-label {
+    color: rgba(232,240,254,0.82);
+    font-size: 11.5px;
+    font-weight: 700;
+  }
+
+  .svc-stat-val {
+    margin-top: 6px;
+    font-size: 20px;
+    font-weight: 900;
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+
+  .svc-red { color: #ff4d6d; }
+  .svc-green { color: #00e5a0; }
+  .svc-blue-text { color: rgba(232,240,254,0.92); }
+
+  .svc-meta {
+    margin: 0 12px 10px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: linear-gradient(180deg, rgba(0,0,0,0.26), rgba(0,0,0,0.18));
+    border: 1px solid rgba(255,255,255,0.10);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+    color: rgba(232,240,254,0.86);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    justify-content: center;
+    font-size: 12.5px;
+  }
+
+  .svc-sep { opacity: 0.55; }
+
+  .svc-module {
+    margin: 0 12px 12px;
+    border-radius: 14px;
+    overflow: hidden;
+    background: radial-gradient(120% 140% at 0% 0%, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
+    border: 1px solid rgba(255,255,255,0.12);
+  }
+
+  .svc-module-head {
+    padding: 10px 12px;
+    background: radial-gradient(120% 120% at 0% 0%, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+  }
+  .svc-module-head h3 { margin: 0; font-size: 15px; font-weight: 900; }
+
+  .svc-module-sub {
+    padding: 8px 12px;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    color: rgba(255,255,255,0.92);
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+  }
+
+  .svc-green-sub {
+    background: linear-gradient(135deg, rgba(0, 229, 160, 0.22), rgba(255, 184, 48, 0.10));
+  }
+
+  .svc-table {
+    padding: 10px 10px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .svc-table-row {
+    display: grid;
+    grid-template-columns: 0.9fr 1.25fr 1.25fr 0.9fr 1.1fr 1.2fr;
+    gap: 10px;
+    align-items: center;
+    padding: 7px 9px;
+    border-radius: 12px;
+    background: rgba(0,0,0,0.18);
+    border: 1px solid rgba(255,255,255,0.07);
+    font-size: 11.25px;
+    transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+  }
+  .svc-table-row > span { min-width: 0; }
+  .svc-table-row > span:nth-child(1) { white-space: nowrap; }
+  .svc-table-row > span:nth-child(2) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .svc-table-row > span:nth-child(3) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: rgba(232,240,254,0.86); }
+  .svc-table-row > span:nth-child(4) { justify-self: center; }
+  .svc-table-row > span:nth-child(5) { justify-self: end; white-space: nowrap; }
+  .svc-table-row > span:nth-child(6) { justify-self: end; white-space: nowrap; }
+  .svc-table-row:not(.svc-table-head):hover {
+    background: rgba(0,0,0,0.26);
+    border-color: rgba(0, 229, 160, 0.16);
+    transform: translateY(-1px);
+  }
+  .svc-table-head {
+    background: rgba(255,255,255,0.04);
+    border-color: rgba(255,255,255,0.10);
+    font-weight: 900;
+    color: rgba(232,240,254,0.90);
+  }
+  .svc-table-head > span { letter-spacing: 0.2px; }
+  .svc-stock { font-weight: 900; letter-spacing: 0.2px; }
+  .svc-status { font-weight: 900; }
+  .svc-status { font-size: 11px; }
+  .svc-status.ok { color: #00e5a0; }
+  .svc-status.warn { color: #ffb830; }
+  .svc-status.bad { color: #ff4d6d; }
+
+  .svc-chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px 7px;
+    border-radius: 10px;
+    font-weight: 900;
+    font-size: 10.5px;
+    letter-spacing: 0.6px;
+    border: 1px solid rgba(255,255,255,0.12);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.10);
+  }
+  .svc-buy { background: rgba(0,229,160,0.18); color: #00e5a0; border-color: rgba(0,229,160,0.30); }
+  .svc-sell { background: rgba(255,77,109,0.16); color: #ff4d6d; border-color: rgba(255,77,109,0.30); }
+
+  @media (max-width: 520px) {
+    .svc-table-row {
+      grid-template-columns: 0.9fr 1.2fr 1.1fr 0.9fr 1.1fr 1.1fr;
+      font-size: 11px;
+    }
+  }
+
+  .svc-metrics {
+    margin: 0 12px 10px;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .svc-metric {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.10);
+    border-radius: 12px;
+    padding: 8px 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 11.75px;
+    color: rgba(232,240,254,0.82);
+  }
+  .svc-metric strong { font-size: 13px; }
+
+  .svc-simple {
+    border-radius: 18px;
+    padding: 14px 14px;
+    border: 1px solid rgba(255,255,255,0.08);
+    background: linear-gradient(180deg, rgba(0,0,0,0.42), rgba(0,0,0,0.28));
+    box-shadow: 0 18px 56px rgba(0,0,0,0.52);
+  }
+  .svc-simple .muted { color: rgba(232,240,254,0.56); }
+  .svc-simple .mono { color: rgba(232,240,254,0.80); }
+  .svc-simple .panel-header h3 {
+    font-family: 'Syne', sans-serif;
+    font-weight: 900;
+    letter-spacing: -0.2px;
+  }
+  .svc-simple .pill {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.10);
+  }
+  .svc-simple .table-row {
+    background: rgba(0,0,0,0.22);
+    border: 1px solid rgba(255,255,255,0.05);
+  }
+  .svc-simple .table-head {
+    background: rgba(0,0,0,0.28);
+    border-color: rgba(255,255,255,0.08);
+  }
+
+  @media (max-width: 980px) {
+    .svc-container { padding: 0 8px; }
+    .svc-hero { grid-template-columns: 1fr; }
+    .svc-hero-center h1 { text-align: left; }
+    .svc-hero-center h1 { white-space: normal; }
+    .svc-hero-right p { text-align: left; }
+    .svc-layout { grid-template-columns: 1fr; }
+    .svc-layout-right { position: static; }
+    .svc-compare { grid-template-columns: 1fr; }
+  }
+</style>
+</div>
+{% endblock %}

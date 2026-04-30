@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="auth">
+  <div class="auth-card">
+    <h2>Enable Admin 2FA</h2>
+    <p class="muted">Use Google Authenticator. You can add the setup key manually.</p>
+    {% if error %}
+      <div class="alert">{{ error }}</div>
+    {% endif %}
+    <div class="panel" style="margin: 14px 0;">
+      <div class="panel-header">
+        <h3>Setup Key</h3>
+        <span class="pill">TOTP</span>
+      </div>
+      <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center;">
+        <div style="background: #fff; padding: 10px; border-radius: 12px; border: 1px solid rgba(0,0,0,0.08);">
+          <img src="/admin/2fa/qr" alt="TOTP QR Code" style="width: 160px; height: 160px; display: block;" />
+        </div>
+        <div style="min-width: 220px;">
+          <p class="muted" style="margin-bottom: 6px;">Scan QR code in Google Authenticator.</p>
+          <p class="muted" style="word-break: break-all;">{{ secret }}</p>
+          <p class="muted" style="margin-top: 6px; word-break: break-all;">{{ otpauth }}</p>
+        </div>
+      </div>
+    </div>
+    <form method="post" action="/admin/2fa/setup" class="auth-form">
+      <label>
+        Authentication Code
+        <input type="text" name="code" inputmode="numeric" pattern="[0-9]{6}" placeholder="123456" required />
+      </label>
+      <button class="btn btn-primary" type="submit">Enable 2FA</button>
+    </form>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+venv/
+
+# Env files / secrets
+.env
+
+# Common Python build/test artifacts
+.pytest_cache/
+build/
+dist/
+*.egg-info/

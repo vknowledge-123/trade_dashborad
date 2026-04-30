@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="auth">
+  <div class="auth-card">
+    <h2>Admin 2FA</h2>
+    <p class="muted">Enter the 6-digit code from Google Authenticator.</p>
+    {% if error %}
+      <div class="alert">{{ error }}</div>
+    {% endif %}
+    <form method="post" action="/admin/2fa" class="auth-form">
+      <label>
+        Authentication Code
+        <input type="text" name="code" inputmode="numeric" pattern="[0-9]{6}" placeholder="123456" required />
+      </label>
+      <button class="btn btn-primary" type="submit">Verify</button>
+    </form>
+  </div>
+</section>
+{% endblock %}

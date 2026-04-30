@@ -1,0 +1,334 @@
+
+﻿{% extends "base.html" %}
+{% block content %}
+
+<div class="dash-shell">
+  
+
+<!-- Status Bar -->
+<section class="dash-hero">
+  <div class="hero-badge">
+    {% if trial %}
+      <div class="trial-chip {{ 'active' if trial.active else 'expired' }}">
+        {% if trial.active %}
+          🎯 Free Trial · {{ trial.remaining_days }} days left (ends {{ trial.end_date }})
+        {% else %}
+          ⛔ Premium subscription required. For better service, contact our team.
+          <a href="/register" class="trial-link">Start free trial for 1 day.</a>
+        {% endif %}
+      </div>
+    {% else %}
+      <div class="trial-chip active">
+        <span class="trial-cta">Get started with a 1-day free trial. Continue with a subscription.</span>
+      </div>
+    {% endif %}
+    <div class="status-line">
+      <span class="status-dot {{ 'positive' if snapshot.connected else 'negative' }}"></span>
+      <span class="{{ 'positive' if snapshot.connected else 'negative' }}">
+        {{ '🟢 Live feed connected' if snapshot.connected else '🔴 Waiting for live feed' }}
+      </span>
+    </div>
+  </div>
+</section>
+
+<!-- Promo Strip -->
+<div class="promo-strip promo-rich">
+  <span class="promo-strip-label">⚡ Direct Trade</span>
+  <span class="promo-strip-text">Automate Chartink signals → Zerodha &amp; Dhan in real-time.</span>
+  <div class="inquiry-note">💬 Want to learn more or get started? Submit your inquiry and our team will reach out to guide you step-by-step.  <a href="/register" class="promo-strip-cta">Register Now →</a>
+</div>
+</div>
+
+
+<!-- Main Grid -->
+<section class="dash-grid">
+
+  <!-- Gainers Panel -->
+  <div class="panel panel-gainers">
+    <div class="panel-header">
+      <div class="panel-title-group">
+        <span class="panel-icon panel-icon-green">▲</span>
+        <div>
+          <h3>Top 20 Gainers</h3>
+          <div class="panel-sub">Best performing stocks today</div>
+        </div>
+      </div>
+      <span class="pill positive">% vs Prev Close</span>
+    </div>
+    <div class="table" id="gainers-body">
+      <div class="table-row table-head">
+        <span>Symbol</span>
+        <span>Price</span>
+        <span>Change %</span>
+      </div>
+      {% for g in snapshot.gainers %}
+        <div class="table-row" style="--row-delay: {{ loop.index0 * 0.18 }}s">
+          <span>{{ g.symbol }}{% if g.is_fno %} <span class="fno-tag">F&O</span>{% endif %}</span>
+          <span class="mono">{{ g.price }}</span>
+          <span class="positive mono">+{{ g.change }}%</span>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- Losers Panel -->
+  <div class="panel panel-losers">
+    <div class="panel-header">
+      <div class="panel-title-group">
+        <span class="panel-icon panel-icon-red">▼</span>
+        <div>
+          <h3>Top 20 Losers</h3>
+          <div class="panel-sub">Underperforming stocks today</div>
+        </div>
+      </div>
+      <span class="pill negative">% vs Prev Close</span>
+    </div>
+    <div class="table" id="losers-body">
+      <div class="table-row table-head">
+        <span>Symbol</span>
+        <span>Price</span>
+        <span>Change %</span>
+      </div>
+      {% for l in snapshot.losers %}
+        <div class="table-row" style="--row-delay: {{ loop.index0 * 0.22 }}s">
+          <span>{{ l.symbol }}{% if l.is_fno %} <span class="fno-tag">F&O</span>{% endif %}</span>
+          <span class="mono">{{ l.price }}</span>
+          <span class="negative mono">{{ l.change }}%</span>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- Sector Panel -->
+  <div class="panel panel-sector">
+    <div class="panel-header">
+      <div class="panel-title-group">
+        <span class="panel-icon panel-icon-cyan">◈</span>
+        <div>
+          <h3>Nifty Sector Strength</h3>
+          <div class="panel-sub">Sectoral momentum index</div>
+        </div>
+      </div>
+      <span class="pill neutral">% vs Prev Close</span>
+    </div>
+    <div class="sector-split">
+      <div class="sector-grid" id="sector-gainers">
+        <div class="sector-row sector-head">
+          <div>Top Gainers</div>
+          <div>Price</div>
+          <div>Change %</div>
+        </div>
+        {% for s in snapshot.sector_gainers %}
+          <div class="sector-row">
+            <div class="sector-name">{{ s.sector }}</div>
+            <div class="sector-price">{{ s.price }}</div>
+            <div class="sector-change positive">
+              {% if s.change > 0 %}+{% endif %}{{ s.change }}%
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+      <div class="sector-grid" id="sector-losers">
+        <div class="sector-row sector-head">
+          <div>Top Losers</div>
+          <div>Price</div>
+          <div>Change %</div>
+        </div>
+        {% for s in snapshot.sector_losers %}
+          <div class="sector-row">
+            <div class="sector-name">{{ s.sector }}</div>
+            <div class="sector-price">{{ s.price }}</div>
+            <div class="sector-change negative">
+              {% if s.change > 0 %}+{% endif %}{{ s.change }}%
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+</section>
+
+</div>
+
+<style>
+.trial-link { color: var(--cyan); text-decoration: none; font-weight: 600; }
+.trial-link:hover { text-decoration: underline; }
+.trial-cta { color: #ffdd66; }
+
+.page { padding: 12px 16px 22px; }
+.dash-shell { margin: 6px; border-radius: 18px; }
+.dash-shell::after { border-radius: 14px; }
+.dash-hero { margin: 8px 8px 10px; }
+.promo-strip { margin: 10px 8px 12px; }
+.dash-grid { padding: 12px 12px 16px; gap: 12px; }
+
+.hero-badge {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+.trial-chip { max-width: 70%; line-height: 1.35; }
+.status-line { display: flex; align-items: center; gap: 7px; }
+
+.promo-strip { grid-template-columns: auto minmax(0, 1fr) auto; }
+.promo-strip-text { min-width: 0; white-space: normal; line-height: 1.4; }
+
+.sector-split { display: grid; grid-template-columns: 1fr; gap: 10px; }
+
+@media (max-width: 900px) {
+  .trial-chip { max-width: 100%; }
+  .hero-badge { justify-content: flex-start; }
+}
+
+/* Dashboard overrides (force apply) */
+.panel-header { gap: 10px !important; padding-bottom: 10px !important; border-bottom: 1px solid rgba(255,255,255,0.05) !important; }
+.panel-title-group { display: flex !important; align-items: center !important; gap: 10px !important; }
+.panel-icon { width: 32px !important; height: 32px !important; border-radius: 9px !important; display: flex !important; align-items: center !important; justify-content: center !important; font-weight: 800 !important; }
+.panel-icon-green { background: rgba(0,229,160,0.12) !important; color: #00e5a0 !important; border: 1px solid rgba(0,229,160,0.25) !important; }
+.panel-icon-red   { background: rgba(255,77,109,0.12) !important; color: #ff4d6d !important; border: 1px solid rgba(255,77,109,0.25) !important; }
+.panel-icon-cyan  { background: rgba(0,212,255,0.12) !important; color: #00d4ff !important; border: 1px solid rgba(0,212,255,0.25) !important; }
+.panel-sub { font-size: 11px !important; color: #6b7fa3 !important; margin-top: 1px !important; }
+
+
+/* full-bleed layout */
+
+.page { padding: 0 !important; }
+.dash-shell { margin: 0 !important; border-radius: 0 !important; }
+.dash-shell::after { border-radius: 0 !important; }
+.dash-hero, .promo-strip, .dash-grid { margin-left: 0 !important; margin-right: 0 !important; }
+
+
+
+.dash-shell { padding: 0 !important; }
+.dash-hero { margin: 0 !important; padding: 0 !important; }
+.promo-strip { margin: 0 !important; border-radius: 0 !important; }
+.dash-grid { padding: 0 !important; }
+
+
+
+.dash-shell { border: none !important; box-shadow: none !important; }
+.dash-shell::after { border: none !important; }
+
+
+
+/* Top strip polish */
+.hero-badge {
+  padding: 10px 14px !important;
+  background: linear-gradient(135deg, rgba(14,24,46,0.85), rgba(12,18,32,0.65)) !important;
+  border-radius: 10px !important;
+  border: none !important;
+}
+.trial-chip { font-size: 12px !important; }
+.status-line { font-size: 12px !important; }
+
+.promo-strip {
+  padding: 10px 14px !important;
+  background: transparent !important;
+  border: none !important;
+}
+.promo-strip-cta {
+  padding: 8px 16px !important;
+}
+
+
+
+.hero-badge { margin: 6px 8px !important; }
+.promo-strip { margin: 6px 8px !important; border-radius: 10px !important; }
+
+
+
+/* Promo strip polish */
+.promo-strip {
+  background: rgba(7, 12, 24, 0.65) !important;
+  border: 1px solid rgba(99,210,255,0.14) !important;
+  border-radius: 12px !important;
+  box-shadow: 0 10px 24px rgba(0,0,0,0.22) !important;
+}
+ .promo-strip-label {
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  color: #7be6ff !important;
+}
+.promo-strip-text {
+  font-size: 13px !important;
+  color: #dbe7ff !important;
+  font-weight: 500 !important;
+}
+.promo-strip-cta {
+  font-weight: 800 !important;
+  color: #fff !important;
+  background: linear-gradient(135deg, #00d4ff 0%, #6366f1 100%) !important;
+  box-shadow: 0 10px 24px rgba(0,212,255,0.35) !important;
+  text-decoration: none !important;
+}
+
+/* Keep panels off the screen edge while outer gap stays zero */
+.dash-shell { padding: 8px !important; }
+.dash-grid { padding: 0 !important; }
+
+
+
+.promo-strip {
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+}
+.promo-strip-label {
+  font-size: 12px;
+  font-weight: 800;
+  color: #7be6ff;
+  letter-spacing: 0.3px;
+}
+.promo-strip-sub {
+  font-size: 11px;
+  color: #8aa3c7;
+}
+.promo-strip-cta {
+  padding: 6px 12px !important;
+  border-radius: 999px !important;
+  font-size: 11px !important;
+}
+@media (max-width: 900px) {
+  .promo-strip { grid-template-columns: 1fr; }
+  .promo-strip-cta { justify-self: start; }
+}
+
+
+
+.promo-strip-note {
+  display: block;
+  font-size: 11px;
+  color: #a7bddc;
+  margin-top: 4px;
+}
+
+
+
+/* Dark blur glass for promo strip */
+.promo-rich {
+  background: rgba(10, 14, 24, 0.65) !important;
+  border: 1px solid rgba(99, 210, 255, 0.18) !important;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.promo-rich .promo-strip-text { color: #cfd8ea !important; }
+.promo-rich .promo-strip-note { color: #b2c0d8 !important; }
+.promo-rich .promo-strip-label { color: #7be6ff !important; }
+
+
+
+
+/* Show base background fully */
+.dash-shell {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.dash-shell::after { display: none !important; }
+
+</style>
+
+{% endblock %}
+{% block extra_scripts %}{% endblock %}
