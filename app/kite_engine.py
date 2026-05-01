@@ -15,6 +15,7 @@ from app.config import KITE_ACCESS_TOKEN_KEY, KITE_TOKEN_UPDATED_KEY
 from app.db import load_market_cache, save_market_cache
 
 SNAPSHOT_CACHE_KEY = "latest_snapshot"
+CLOSED_SNAPSHOT_CACHE_KEY = "latest_closed_snapshot"
 HTTP_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                   "(KHTML, like Gecko) Chrome/135.0 Safari/537.36",
@@ -130,11 +131,35 @@ class MarketEngine:
     def _cached_snapshot(self):
         return load_market_cache(SNAPSHOT_CACHE_KEY)
 
+    def _cached_closed_snapshot(self):
+        return load_market_cache(CLOSED_SNAPSHOT_CACHE_KEY)
+
     def _save_snapshot(self, snapshot):
         try:
             save_market_cache(SNAPSHOT_CACHE_KEY, snapshot)
         except Exception:
             return
+
+    def _save_closed_snapshot(self, snapshot):
+        try:
+            save_market_cache(CLOSED_SNAPSHOT_CACHE_KEY, snapshot)
+        except Exception:
+            return
+
+    def _stock_row_count(self, snapshot):
+        return len(snapshot.get("gainers") or []) + len(snapshot.get("losers") or [])
+
+    def _sector_row_count(self, snapshot):
+        return len(snapshot.get("sector_gainers") or []) + len(snapshot.get("sector_losers") or [])
+
+    def _with_runtime_fields(self, snapshot, market_open, source=None):
+        runtime = dict(snapshot)
+        runtime["connected"] = self.connected
+        runtime["error"] = self.last_error
+        runtime["market_open"] = market_open
+        if source:
+            runtime["snapshot_source"] = source
+        return runtime
 
     def _merge_with_cached_snapshot(self, snapshot, cached):
         if not cached:
@@ -518,6 +543,10 @@ class MarketEngine:
                     self.sector_latest = sector_rows
             self.last_snapshot_source = "historical_eod"
             self.last_closed_refresh_ts = now_ts
+            snapshot = self._build_snapshot(False)
+            if self._stock_row_count(snapshot):
+                self._save_snapshot(snapshot)
+                self._save_closed_snapshot(snapshot)
             return True
         return False
 
@@ -654,6 +683,7 @@ class MarketEngine:
                 elif not self.sector_latest:
                     self._ensure_background_refresh(market_open=True, reason="sector_bootstrap")
             else:
+                closed_cached = self._cached_closed_snapshot()
                 rest_ok = True
                 if not self.latest:
                     rest_ok = self._refresh_rest_snapshot(force=True)
@@ -661,13 +691,21 @@ class MarketEngine:
                     self._refresh_sector_snapshot(force=True)
                 if (not rest_ok or not self.latest or not self.sector_latest):
                     self._ensure_background_refresh(market_open=False, reason="closed_market_bootstrap")
+                if closed_cached and self._stock_row_count(closed_cached):
+                    return self._with_runtime_fields(closed_cached, False, "closed_cache")
 
         snapshot = self._build_snapshot(market_open)
         cached = self._cached_snapshot()
         has_stock_data = any(snapshot.get(key) for key in ("gainers", "losers"))
         has_sector_data = any(snapshot.get(key) for key in ("sector_gainers", "sector_losers"))
+        if not market_open:
+            closed_cached = self._cached_closed_snapshot()
+            if closed_cached and self._stock_row_count(closed_cached) > self._stock_row_count(snapshot):
+                return self._with_runtime_fields(closed_cached, False, "closed_cache")
         if has_stock_data:
             self._save_snapshot(snapshot)
+            if not market_open:
+                self._save_closed_snapshot(snapshot)
             return snapshot
         if has_sector_data and cached and any(cached.get(key) for key in ("gainers", "losers")):
             return self._merge_with_cached_snapshot(snapshot, cached)
