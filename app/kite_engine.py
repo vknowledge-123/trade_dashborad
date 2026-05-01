@@ -674,6 +674,12 @@ class MarketEngine:
             return snap
 
         market_open = self._is_market_open()
+        closed_cached = self._cached_closed_snapshot() if not market_open else None
+        if not market_open and closed_cached and self._stock_row_count(closed_cached):
+            if self.kite and (not self.latest or not self.sector_latest):
+                self._ensure_background_refresh(market_open=False, reason="closed_market_bootstrap")
+            return self._with_runtime_fields(closed_cached, False, "closed_cache")
+
         if self.kite:
             if market_open:
                 if not self.latest:
@@ -683,7 +689,6 @@ class MarketEngine:
                 elif not self.sector_latest:
                     self._ensure_background_refresh(market_open=True, reason="sector_bootstrap")
             else:
-                closed_cached = self._cached_closed_snapshot()
                 rest_ok = True
                 if not self.latest:
                     rest_ok = self._refresh_rest_snapshot(force=True)
@@ -691,16 +696,13 @@ class MarketEngine:
                     self._refresh_sector_snapshot(force=True)
                 if (not rest_ok or not self.latest or not self.sector_latest):
                     self._ensure_background_refresh(market_open=False, reason="closed_market_bootstrap")
-                if closed_cached and self._stock_row_count(closed_cached):
-                    return self._with_runtime_fields(closed_cached, False, "closed_cache")
 
         snapshot = self._build_snapshot(market_open)
         cached = self._cached_snapshot()
         has_stock_data = any(snapshot.get(key) for key in ("gainers", "losers"))
         has_sector_data = any(snapshot.get(key) for key in ("sector_gainers", "sector_losers"))
-        if not market_open:
-            closed_cached = self._cached_closed_snapshot()
-            if closed_cached and self._stock_row_count(closed_cached) > self._stock_row_count(snapshot):
+        if not market_open and closed_cached:
+            if self._stock_row_count(closed_cached) > self._stock_row_count(snapshot):
                 return self._with_runtime_fields(closed_cached, False, "closed_cache")
         if has_stock_data:
             self._save_snapshot(snapshot)
