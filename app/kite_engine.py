@@ -136,13 +136,35 @@ class MarketEngine:
         except Exception:
             return
 
+    def _merge_with_cached_snapshot(self, snapshot, cached):
+        if not cached:
+            return snapshot
+        merged = dict(cached)
+        merged.update(snapshot)
+        if snapshot.get("gainers") or snapshot.get("losers"):
+            merged["gainers"] = snapshot.get("gainers", [])
+            merged["losers"] = snapshot.get("losers", [])
+        if snapshot.get("sector_gainers") or snapshot.get("sector_losers"):
+            merged["sectors"] = snapshot.get("sectors", [])
+            merged["sector_gainers"] = snapshot.get("sector_gainers", [])
+            merged["sector_losers"] = snapshot.get("sector_losers", [])
+        merged["connected"] = snapshot.get("connected")
+        merged["error"] = snapshot.get("error")
+        merged["market_open"] = snapshot.get("market_open")
+        merged["snapshot_source"] = snapshot.get("snapshot_source")
+        merged["updated_at"] = snapshot.get("updated_at") or cached.get("updated_at")
+        return merged
+
     def _run_refresh_job(self, reason, market_open):
         try:
             if market_open:
                 self._refresh_rest_snapshot(force=reason == "initial")
                 self._refresh_sector_snapshot(force=True)
             else:
-                self._refresh_closed_market_snapshot(force=True)
+                rest_ok = self._refresh_rest_snapshot(force=True)
+                self._refresh_sector_snapshot(force=True)
+                if not rest_ok or not self.latest:
+                    self._refresh_closed_market_snapshot(force=True)
         except Exception as exc:
             self.last_error = str(exc)
         finally:
@@ -632,16 +654,26 @@ class MarketEngine:
                 elif not self.sector_latest:
                     self._ensure_background_refresh(market_open=True, reason="sector_bootstrap")
             else:
-                if not self.latest or not self.sector_latest:
+                rest_ok = True
+                if not self.latest:
+                    rest_ok = self._refresh_rest_snapshot(force=True)
+                if not self.sector_latest:
+                    self._refresh_sector_snapshot(force=True)
+                if (not rest_ok or not self.latest or not self.sector_latest):
                     self._ensure_background_refresh(market_open=False, reason="closed_market_bootstrap")
 
         snapshot = self._build_snapshot(market_open)
-        has_data = any(snapshot.get(key) for key in ("gainers", "losers", "sector_gainers", "sector_losers"))
-        if has_data:
+        cached = self._cached_snapshot()
+        has_stock_data = any(snapshot.get(key) for key in ("gainers", "losers"))
+        has_sector_data = any(snapshot.get(key) for key in ("sector_gainers", "sector_losers"))
+        if has_stock_data:
             self._save_snapshot(snapshot)
             return snapshot
-
-        cached = self._cached_snapshot()
+        if has_sector_data and cached and any(cached.get(key) for key in ("gainers", "losers")):
+            return self._merge_with_cached_snapshot(snapshot, cached)
+        if has_sector_data and not cached:
+            self._save_snapshot(snapshot)
+            return snapshot
         if cached:
             cached["connected"] = self.connected
             cached["error"] = self.last_error
