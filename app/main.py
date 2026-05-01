@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 import io
 import math
+import threading
 
 import pyotp
 import qrcode
@@ -227,7 +228,11 @@ def on_startup():
     creds = get_kite_credentials()
     token = engine.token_from_redis()
     if creds and token:
-        engine.start(creds["api_key"], token, SECTOR_INDICES)
+        threading.Thread(
+            target=engine.start,
+            args=(creds["api_key"], token, SECTOR_INDICES),
+            daemon=True,
+        ).start()
 
 
 # --- Helpers ---
@@ -383,6 +388,15 @@ def guest_dashboard_status(request: Request):
         "stage": stage,
         "remaining_text": remaining_text,
     }
+
+
+def start_engine_in_background(api_key: str, access_token: str):
+    thread = threading.Thread(
+        target=engine.start,
+        args=(api_key, access_token, SECTOR_INDICES),
+        daemon=True,
+    )
+    thread.start()
 
 
 # --- Public Routes ---
@@ -1032,20 +1046,20 @@ def admin_kite_login(request: Request):
 
 
 @app.get("/zerodha/callback")
-def kite_callback(request: Request, request_token: str = None):
+def kite_callback(request: Request, request_token: str = None, status: str = None):
     admin = require_admin(request)
     if not admin:
         return RedirectResponse(url="/admin/login", status_code=302)
 
     creds = get_kite_credentials()
-    if not creds or not request_token:
-        return RedirectResponse(url="/admin", status_code=302)
+    if not creds or status != "success" or not request_token:
+        return RedirectResponse(url="/admin?kite=failed", status_code=302)
 
     kite = KiteConnect(api_key=creds["api_key"])
     data = kite.generate_session(request_token, api_secret=creds["api_secret"])
     access_token = data.get("access_token")
     if access_token:
         engine.save_token(access_token)
-        engine.start(creds["api_key"], access_token, SECTOR_INDICES)
+        start_engine_in_background(creds["api_key"], access_token)
 
-    return RedirectResponse(url="/admin", status_code=302)
+    return RedirectResponse(url="/admin?kite=connected", status_code=302)
