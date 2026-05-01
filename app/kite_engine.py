@@ -94,6 +94,9 @@ class MarketEngine:
         self.last_closed_refresh_ts = 0
         self.last_membership_refresh_date = None
         self.last_snapshot_source = "empty"
+        self.refresh_lock = threading.Lock()
+        self.refresh_thread = None
+        self.refresh_reason = None
         self.http = requests.Session()
         self.http.headers.update(HTTP_HEADERS)
 
@@ -132,6 +135,34 @@ class MarketEngine:
             save_market_cache(SNAPSHOT_CACHE_KEY, snapshot)
         except Exception:
             return
+
+    def _run_refresh_job(self, reason, market_open):
+        try:
+            if market_open:
+                self._refresh_rest_snapshot(force=reason == "initial")
+                self._refresh_sector_snapshot(force=True)
+            else:
+                self._refresh_closed_market_snapshot(force=True)
+        except Exception as exc:
+            self.last_error = str(exc)
+        finally:
+            with self.refresh_lock:
+                self.refresh_thread = None
+                self.refresh_reason = None
+
+    def _ensure_background_refresh(self, market_open, reason="initial"):
+        with self.refresh_lock:
+            if self.refresh_thread and self.refresh_thread.is_alive():
+                return False
+            thread = threading.Thread(
+                target=self._run_refresh_job,
+                args=(reason, market_open),
+                daemon=True,
+            )
+            self.refresh_thread = thread
+            self.refresh_reason = reason
+            thread.start()
+            return True
 
     def _fetch_sector_constituent_url(self, page_url):
         try:
@@ -595,12 +626,14 @@ class MarketEngine:
         if self.kite:
             if market_open:
                 if not self.latest:
-                    self._refresh_rest_snapshot(force=True)
+                    self._ensure_background_refresh(market_open=True, reason="initial")
                 elif not self.connected:
-                    self._refresh_rest_snapshot(force=False)
-                self._refresh_sector_snapshot(force=not bool(self.sector_latest))
+                    self._ensure_background_refresh(market_open=True, reason="reconnect")
+                elif not self.sector_latest:
+                    self._ensure_background_refresh(market_open=True, reason="sector_bootstrap")
             else:
-                self._refresh_closed_market_snapshot(force=not bool(self.latest) or not bool(self.sector_latest))
+                if not self.latest or not self.sector_latest:
+                    self._ensure_background_refresh(market_open=False, reason="closed_market_bootstrap")
 
         snapshot = self._build_snapshot(market_open)
         has_data = any(snapshot.get(key) for key in ("gainers", "losers", "sector_gainers", "sector_losers"))
