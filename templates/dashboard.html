@@ -4,18 +4,39 @@
 <div class="dash-shell">
   <section class="dash-hero">
     <div class="hero-badge">
-      {% if trial %}
+      {% if guest_trial %}
+        {% if guest_trial.stage == "fresh" %}
+          <div class="trial-chip active">
+            <span class="trial-cta">Guest dashboard access is live instantly.</span>
+            Explore the market dashboard freely. We will ask you to register after 1 day.
+            <a href="/register" class="trial-link">Create account now</a>
+          </div>
+        {% elif guest_trial.stage == "register" %}
+          <div class="trial-chip register-stage">
+            <span class="trial-cta">It is time to register on the platform.</span>
+            Your dashboard access continues, but create your account now so your journey stays connected before the premium invitation starts after 1 week.
+            <a href="/register" class="trial-link">Register now</a>
+          </div>
+        {% else %}
+          <div class="trial-chip premium-stage">
+            <span class="trial-cta">Your first week is complete. Join premium now.</span>
+            Unlock academy access, premium strategy, live Q&amp;A, and direct mentor support with Amol Charpe.
+            <a href="/premium" class="trial-link">View premium plans</a>
+          </div>
+        {% endif %}
+      {% elif trial %}
         <div class="trial-chip {{ 'active' if trial.active else 'expired' }}">
           {% if trial.active %}
-            Free Trial · {{ trial.remaining_days }} days left (ends {{ trial.end_date }})
+            Platform trial · {{ trial.remaining_days }} days left (ends {{ trial.end_date }})
+            <a href="/premium" class="trial-link">Explore premium</a>
           {% else %}
-            Premium subscription required. For better service, contact our team.
-            <a href="/register" class="trial-link">Start free trial for 1 day.</a>
+            Your 1-week platform trial is complete. Join premium to continue with academy access and mentor support.
+            <a href="/premium" class="trial-link">Join premium</a>
           {% endif %}
         </div>
       {% else %}
         <div class="trial-chip active">
-          <span class="trial-cta">Get started with a 1-day free trial. Continue with a subscription.</span>
+          <span class="trial-cta">Premium members get Academy access, live Q&amp;A, and direct mentor support.</span>
         </div>
       {% endif %}
       <div class="status-line">
@@ -32,11 +53,11 @@
   </section>
 
   <div class="promo-strip promo-rich">
-    <span class="promo-strip-label">Direct Trade</span>
-    <span class="promo-strip-text">Automate Chartink signals to Zerodha and Dhan in real time.</span>
+    <span class="promo-strip-label">Academy</span>
+    <span class="promo-strip-text">Learn SL hunting, operator concepts, liquidity zones, pyramiding, and premium equity, Nifty, and Banknifty strategy with Mentor Amol Charpe.</span>
     <div class="inquiry-note">
-      Want to learn more or get started? Submit your inquiry and our team will reach out to guide you step by step.
-      <a href="/register" class="promo-strip-cta">Register Now</a>
+      Premium plans include a 20-hour course, trading psychology, technical indicators, and live Q&amp;A support.
+      <a href="/premium" class="promo-strip-cta">View Premium</a>
     </div>
   </div>
 
@@ -174,6 +195,14 @@
 .trial-link { color: var(--cyan); text-decoration: none; font-weight: 600; }
 .trial-link:hover { text-decoration: underline; }
 .trial-cta { color: #ffdd66; }
+.trial-chip.register-stage {
+  background: rgba(255, 184, 48, 0.10);
+  border: 1px solid rgba(255, 184, 48, 0.18);
+}
+.trial-chip.premium-stage {
+  background: rgba(0, 212, 255, 0.10);
+  border: 1px solid rgba(0, 212, 255, 0.18);
+}
 
 .page { padding: 0 !important; }
 .dash-shell {
@@ -403,4 +432,3 @@
 </style>
 
 {% endblock %}
-{% block extra_scripts %}{% endblock %}

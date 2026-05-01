@@ -169,6 +169,160 @@
     {% endif %}
   </div>
 
+  <div class="panel panel-wide panel-accent">
+    <div class="panel-header">
+      <h3>Premium Course Settings</h3>
+      <span class="pill">Public pricing</span>
+    </div>
+    <form class="inquiry" method="post" action="/admin/course/settings">
+      <div class="course-settings-grid">
+        <label>
+          4 Months Price
+          <input type="number" name="four_month_price" min="0" step="1" value="{{ course_settings['four_month_price'] if course_settings else 5000 }}" required />
+        </label>
+        <label>
+          1 Year Price
+          <input type="number" name="one_year_price" min="0" step="1" value="{{ course_settings['one_year_price'] if course_settings else 10000 }}" required />
+        </label>
+      </div>
+      <label>
+        Support Highlight
+        <textarea name="support_text" rows="3" required>{{ course_settings['support_text'] if course_settings else '' }}</textarea>
+      </label>
+      <button class="btn btn-primary" type="submit">Save Course Pricing</button>
+    </form>
+  </div>
+
+  <div class="panel panel-wide panel-accent">
+    <div class="panel-header">
+      <h3>Academy Videos</h3>
+      <span class="pill">YouTube private links</span>
+    </div>
+    <form class="inquiry" method="post" action="/admin/academy/videos">
+      <div class="academy-video-grid">
+        <label>
+          Class Title
+          <input type="text" name="title" placeholder="Liquidity Zones Masterclass" required />
+        </label>
+        <label>
+          YouTube Link
+          <input type="url" name="youtube_url" placeholder="https://www.youtube.com/watch?v=..." required />
+        </label>
+        <label>
+          Sort Order
+          <input type="number" name="sort_order" min="0" step="1" value="0" />
+        </label>
+        <label>
+          Publish Status
+          <select name="is_published">
+            <option value="1">Published</option>
+            <option value="0">Hidden</option>
+          </select>
+        </label>
+      </div>
+      <button class="btn btn-primary" type="submit">Add Class Video</button>
+    </form>
+
+    {% if academy_videos %}
+      <div class="table academy-admin-table">
+        <div class="table-row table-head academy-video-head">
+          <span>Order</span>
+          <span>Title</span>
+          <span>Status</span>
+          <span>Link</span>
+          <span>Action</span>
+        </div>
+        {% for video in academy_videos %}
+          <div class="table-row academy-video-head">
+            <span class="mono">{{ video["sort_order"] }}</span>
+            <span>{{ video["title"] }}</span>
+            <span>{% if video["is_published"] %}<span class="positive">Published</span>{% else %}<span class="negative">Hidden</span>{% endif %}</span>
+            <span class="mono"><a class="tv-link" href="{{ video['youtube_url'] }}" target="_blank" rel="noopener noreferrer">Open</a></span>
+            <span>
+              <form method="post" action="/admin/academy/videos/delete">
+                <input type="hidden" name="video_id" value="{{ video['id'] }}" />
+                <button class="btn btn-ghost btn-mini" type="submit">Delete</button>
+              </form>
+            </span>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="muted">No academy videos added yet.</p>
+    {% endif %}
+  </div>
+
+  <div class="panel panel-wide panel-accent">
+    <div class="panel-header">
+      <h3>Academy Licenses</h3>
+      <span class="pill">Generate access keys</span>
+    </div>
+    {% if generated_license %}
+      <div class="license-banner">
+        <div>
+          <strong>New license generated:</strong>
+          <span class="mono">{{ generated_license["license_key"] }}</span>
+        </div>
+        <div class="muted">{{ generated_license["assigned_email"] }} · {{ generated_license["plan_name"] }} · {{ generated_license["duration_days"] }} days</div>
+      </div>
+    {% endif %}
+    <form class="inquiry" method="post" action="/admin/academy/licenses">
+      <div class="academy-video-grid">
+        <label>
+          User Email
+          <input type="email" name="assigned_email" placeholder="student@example.com" required />
+        </label>
+        <label>
+          Plan Name
+          <input type="text" name="plan_name" value="4 Months Premium + Academy" required />
+        </label>
+        <label>
+          Duration Days
+          <input type="number" name="duration_days" min="1" step="1" value="120" required />
+        </label>
+        <label>
+          Notes
+          <input type="text" name="notes" placeholder="Optional note" />
+        </label>
+      </div>
+      <button class="btn btn-primary" type="submit">Generate License Key</button>
+    </form>
+
+    {% if academy_licenses %}
+      <div class="table academy-admin-table">
+        <div class="table-row table-head academy-license-head">
+          <span>Email</span>
+          <span>License Key</span>
+          <span>Plan</span>
+          <span>Status</span>
+          <span>Expires</span>
+        </div>
+        {% for license in academy_licenses %}
+          <div class="table-row academy-license-head">
+            <span>{{ license["assigned_email"] }}</span>
+            <span class="mono">{{ license["license_key"] }}</span>
+            <span>{{ license["plan_name"] }}<div class="muted">{{ license["duration_days"] }} days</div></span>
+            <span>
+              {% if license["activated_by_user_id"] and license["status"] == "active" %}
+                <span class="positive">Activated</span>
+                {% if license["activated_user_email"] %}
+                  <div class="muted">{{ license["activated_user_email"] }}</div>
+                {% endif %}
+              {% elif license["status"] == "active" %}
+                <span class="pill">Ready</span>
+              {% else %}
+                <span class="negative">{{ license["status"] }}</span>
+              {% endif %}
+            </span>
+            <span class="mono">{{ license["expires_at"] if license["expires_at"] else "-" }}</span>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="muted">No licenses generated yet.</p>
+    {% endif %}
+  </div>
+
 </section>
 
 <style>
@@ -308,6 +462,40 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+.course-settings-grid,
+.academy-video-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.academy-admin-table {
+  margin-top: 14px;
+}
+.academy-video-head {
+  grid-template-columns: 0.5fr 1.3fr 0.7fr 0.8fr 0.6fr;
+}
+.academy-license-head {
+  grid-template-columns: 1fr 1.1fr 1fr 0.9fr 0.9fr;
+}
+.license-banner {
+  margin-bottom: 14px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(0, 229, 160, 0.18);
+  background: rgba(0, 229, 160, 0.08);
+  color: #eafff7;
+}
+
+@media (max-width: 900px) {
+  .course-settings-grid,
+  .academy-video-grid {
+    grid-template-columns: 1fr;
+  }
+  .academy-video-head,
+  .academy-license-head {
+    grid-template-columns: 1fr;
+  }
 }
 
 </style>

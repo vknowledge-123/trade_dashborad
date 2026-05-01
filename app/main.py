@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 import io
+import math
 
 import pyotp
 import qrcode
@@ -30,6 +31,15 @@ from app.db import (
     save_kite_credentials,
     get_kite_credentials,
     create_inquiry,
+    get_course_settings,
+    update_course_settings,
+    add_academy_video,
+    delete_academy_video,
+    get_academy_videos,
+    create_academy_license,
+    get_recent_academy_licenses,
+    get_active_license_for_user,
+    activate_academy_license,
 )
 from app.config import (
     REDIS_HOST,
@@ -207,6 +217,9 @@ engine = MarketEngine(redis_client)
 engine.fno_override = SIMULATION_FNO_STOCKS
 engine.nifty500_set = {s.upper() for s in NIFTY_500_STOCKS}
 engine.demo_mode = False
+GUEST_REGISTER_PROMPT_HOURS = 24
+GUEST_PREMIUM_PROMPT_DAYS = 7
+USER_PREMIUM_PROMPT_DAYS = 7
 
 @app.on_event("startup")
 def on_startup():
@@ -317,13 +330,58 @@ def require_admin(request: Request):
 def trial_status(user_row):
     start = datetime.fromisoformat(user_row["trial_start"])
     days = int(user_row["trial_days"])
+    if not user_row["is_admin"]:
+        days = max(days, USER_PREMIUM_PROMPT_DAYS)
     end = start + timedelta(days=days)
     now = datetime.utcnow()
-    remaining = (end - now).days
+    remaining_seconds = max(0, int((end - now).total_seconds()))
+    remaining_days = math.ceil(remaining_seconds / 86400) if remaining_seconds else 0
     return {
         "active": now <= end,
         "end_date": end.strftime("%Y-%m-%d"),
-        "remaining_days": max(0, remaining),
+        "remaining_days": remaining_days,
+        "total_days": days,
+    }
+
+
+def guest_dashboard_status(request: Request):
+    now = datetime.utcnow()
+    raw_started = request.session.get("guest_dashboard_started_at")
+    started_at = None
+    if raw_started:
+        try:
+            started_at = datetime.fromisoformat(raw_started)
+        except Exception:
+            started_at = None
+    if not started_at:
+        started_at = now
+        request.session["guest_dashboard_started_at"] = started_at.isoformat(timespec="seconds")
+
+    register_prompt_at = started_at + timedelta(hours=GUEST_REGISTER_PROMPT_HOURS)
+    premium_prompt_at = started_at + timedelta(days=GUEST_PREMIUM_PROMPT_DAYS)
+    register_remaining_seconds = max(0, int((register_prompt_at - now).total_seconds()))
+    hours_left = register_remaining_seconds // 3600
+    minutes_left = max(1, register_remaining_seconds // 60) if register_remaining_seconds else 0
+
+    if now >= premium_prompt_at:
+        stage = "premium"
+        remaining_text = "Premium invitation active"
+    elif now >= register_prompt_at:
+        stage = "register"
+        remaining_text = "Registration recommended"
+    elif hours_left >= 1:
+        stage = "fresh"
+        remaining_text = f"{hours_left}h before registration prompt"
+    else:
+        stage = "fresh"
+        remaining_text = f"{minutes_left}m before registration prompt"
+
+    return {
+        "started_at": started_at.isoformat(timespec="seconds"),
+        "register_prompt_at": register_prompt_at.isoformat(timespec="seconds"),
+        "premium_prompt_at": premium_prompt_at.isoformat(timespec="seconds"),
+        "stage": stage,
+        "remaining_text": remaining_text,
     }
 
 
@@ -352,7 +410,7 @@ def register_post(
         return templates.TemplateResponse(request, "register.html", {"error": "Email already registered.", "user": None, "admin": None})
 
     password_hash = hash_password(password)
-    user_id = create_user(full_name, email, phone, password_hash, trial_days=1)
+    user_id = create_user(full_name, email, phone, password_hash, trial_days=USER_PREMIUM_PROMPT_DAYS)
     request.session["user_id"] = user_id
     return RedirectResponse(url="/dashboard", status_code=302)
 
@@ -392,10 +450,11 @@ def logout(request: Request):
 
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard(request: Request):
-    user = require_login(request)
-    if not user:
-        return RedirectResponse(url="/login", status_code=302)
-
+    user = current_user(request)
+    admin = current_admin(request)
+    guest_trial = None
+    if not user and not admin:
+        guest_trial = guest_dashboard_status(request)
     snapshot = engine.get_snapshot()
     trial = trial_status(user) if user else None
 
@@ -404,29 +463,22 @@ def dashboard(request: Request):
         "dashboard.html",
         {
             "user": user,
-            "admin": None,
+            "admin": admin,
             "trial": trial,
+            "guest_trial": guest_trial,
             "snapshot": snapshot,
-            "public_mode": True if user is None else False,
+            "public_mode": True if not user and not admin else False,
         },
     )
 
 
 @app.get("/api/market-snapshot")
 def market_snapshot(request: Request):
-    user = current_user(request)
-    admin = current_admin(request)
-    if not user and not admin:
-        return JSONResponse({"detail": "Not authenticated."}, status_code=401)
     return JSONResponse(engine.get_snapshot())
 
 
 @app.get("/api/sector-breakdown")
 def sector_breakdown(request: Request, sector: str):
-    user = current_user(request)
-    admin = current_admin(request)
-    if not user and not admin:
-        return JSONResponse({"detail": "Not authenticated."}, status_code=401)
     return JSONResponse(engine.get_sector_breakdown(sector))
 
 @app.get("/inquiry", response_class=HTMLResponse)
@@ -474,6 +526,89 @@ def services(request: Request):
     )
 
 
+@app.get("/premium", response_class=HTMLResponse)
+def premium(request: Request):
+    user = current_user(request)
+    admin = current_admin(request)
+    course_settings = get_course_settings()
+    videos = get_academy_videos()
+    return templates.TemplateResponse(
+        request,
+        "premium.html",
+        {
+            "title": "Academy & Premium Subscription",
+            "user": user,
+            "admin": admin,
+            "public_mode": True if not user and not admin else False,
+            "course_settings": course_settings,
+            "course_video_count": len(videos),
+            "guest_expired": request.query_params.get("guest") == "expired",
+        },
+    )
+
+
+@app.get("/academy", response_class=HTMLResponse)
+def academy(request: Request):
+    admin = current_admin(request)
+    user = current_user(request)
+    if not admin and not user:
+        return RedirectResponse(url="/login", status_code=302)
+
+    active_license = None
+    academy_access = False
+    if admin:
+        academy_access = True
+    elif user:
+        active_license = get_active_license_for_user(user["id"])
+        academy_access = active_license is not None
+
+    return templates.TemplateResponse(
+        request,
+        "academy.html",
+        {
+            "title": "Academy",
+            "user": user,
+            "admin": admin,
+            "public_mode": False,
+            "course_settings": get_course_settings(),
+            "academy_videos": get_academy_videos(include_unpublished=bool(admin)),
+            "academy_access": academy_access,
+            "active_license": active_license,
+            "license_error": None,
+            "license_success": request.query_params.get("activated") == "1",
+        },
+    )
+
+
+@app.post("/academy/license", response_class=HTMLResponse)
+def academy_activate_license(request: Request, license_key: str = Form(...)):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=302)
+
+    result = activate_academy_license(user["id"], user["email"], license_key)
+    if result["ok"]:
+        return RedirectResponse(url="/academy?activated=1", status_code=302)
+
+    active_license = get_active_license_for_user(user["id"])
+    return templates.TemplateResponse(
+        request,
+        "academy.html",
+        {
+            "title": "Academy",
+            "user": user,
+            "admin": None,
+            "public_mode": False,
+            "course_settings": get_course_settings(),
+            "academy_videos": get_academy_videos(),
+            "academy_access": active_license is not None,
+            "active_license": active_license,
+            "license_error": result["error"],
+            "license_success": False,
+        },
+    )
+
+
 # --- Admin Routes ---
 
 @app.get("/admin", response_class=HTMLResponse)
@@ -489,6 +624,10 @@ def admin_home(request: Request):
         audit_logs = get_admin_login_audit(12)
         inquiries = get_inquiries(20)
         recent_users = get_recent_users(20)
+        course_settings = get_course_settings()
+        academy_videos = get_academy_videos(include_unpublished=True)
+        academy_licenses = get_recent_academy_licenses(30)
+        generated_license = request.session.pop("last_generated_license", None)
         users_activity = []
         for u in recent_users:
             trial = trial_status(u)
@@ -514,6 +653,10 @@ def admin_home(request: Request):
                 "audit_logs": audit_logs,
                 "inquiries": inquiries,
                 "users_activity": users_activity,
+                "course_settings": course_settings,
+                "academy_videos": academy_videos,
+                "academy_licenses": academy_licenses,
+                "generated_license": generated_license,
             },
         )
 
@@ -807,6 +950,69 @@ def admin_inquiry_status(
         return RedirectResponse(url="/admin/login", status_code=302)
     status = "closed" if status == "closed" else "open"
     update_inquiry_status(inquiry_id, status)
+    return RedirectResponse(url="/admin", status_code=302)
+
+
+@app.post("/admin/course/settings")
+def admin_course_settings(
+    request: Request,
+    four_month_price: int = Form(...),
+    one_year_price: int = Form(...),
+    support_text: str = Form(...),
+):
+    admin = require_admin(request)
+    if not admin:
+        return RedirectResponse(url="/admin/login", status_code=302)
+
+    update_course_settings(four_month_price, one_year_price, support_text)
+    return RedirectResponse(url="/admin", status_code=302)
+
+
+@app.post("/admin/academy/videos")
+def admin_add_video(
+    request: Request,
+    title: str = Form(...),
+    youtube_url: str = Form(...),
+    sort_order: int = Form(0),
+    is_published: int = Form(1),
+):
+    admin = require_admin(request)
+    if not admin:
+        return RedirectResponse(url="/admin/login", status_code=302)
+
+    add_academy_video(title, youtube_url, sort_order, is_published)
+    return RedirectResponse(url="/admin", status_code=302)
+
+
+@app.post("/admin/academy/videos/delete")
+def admin_delete_video(request: Request, video_id: int = Form(...)):
+    admin = require_admin(request)
+    if not admin:
+        return RedirectResponse(url="/admin/login", status_code=302)
+
+    delete_academy_video(video_id)
+    return RedirectResponse(url="/admin", status_code=302)
+
+
+@app.post("/admin/academy/licenses")
+def admin_generate_license(
+    request: Request,
+    assigned_email: str = Form(...),
+    plan_name: str = Form(...),
+    duration_days: int = Form(...),
+    notes: str = Form(""),
+):
+    admin = require_admin(request)
+    if not admin:
+        return RedirectResponse(url="/admin/login", status_code=302)
+
+    generated = create_academy_license(assigned_email, plan_name, duration_days, notes)
+    request.session["last_generated_license"] = {
+        "license_key": generated["license_key"],
+        "assigned_email": assigned_email.strip().lower(),
+        "plan_name": plan_name.strip(),
+        "duration_days": int(duration_days),
+    }
     return RedirectResponse(url="/admin", status_code=302)
 
 

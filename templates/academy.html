@@ -1,0 +1,250 @@
+{% extends "base.html" %}
+{% block content %}
+
+<section class="academy-shell">
+  <div class="panel academy-header">
+    <div>
+      <span class="premium-kicker">Academy Access</span>
+      <h1>Premium Classes With Mentor Amol Charpe</h1>
+      <p>
+        Enter your license key to unlock every class link. Once activated, all current academy
+        lessons become available for your account until the license expires.
+      </p>
+    </div>
+    <div class="academy-status-box">
+      {% if admin %}
+        <div class="academy-status-title">Admin Access</div>
+        <div class="academy-status-value">All classes visible</div>
+      {% elif active_license %}
+        <div class="academy-status-title">License Active</div>
+        <div class="academy-status-value">{{ active_license["plan_name"] }}</div>
+        <div class="academy-status-meta">Valid until {{ active_license["expires_at"] }}</div>
+      {% else %}
+        <div class="academy-status-title">Locked</div>
+        <div class="academy-status-value">Enter license key</div>
+        <div class="academy-status-meta">No active academy license found.</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="academy-grid">
+    <div class="panel">
+      <div class="panel-header">
+        <h3>Class Library</h3>
+        <span class="pill">{{ academy_videos|length }} classes</span>
+      </div>
+      {% if academy_videos %}
+        <div class="academy-video-list">
+          {% for video in academy_videos %}
+            <div class="academy-video-card {{ '' if academy_access else 'locked' }}">
+              <div>
+                <div class="academy-video-title">{{ loop.index }}. {{ video["title"] }}</div>
+                <div class="academy-video-meta">YouTube private link</div>
+              </div>
+              {% if academy_access %}
+                <a class="btn btn-primary" href="{{ video['youtube_url'] }}" target="_blank" rel="noopener noreferrer">Open Class</a>
+              {% else %}
+                <span class="pill">Locked</span>
+              {% endif %}
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="muted">No class videos have been published yet.</p>
+      {% endif %}
+    </div>
+
+    <div class="panel">
+      <div class="panel-header">
+        <h3>Unlock Academy</h3>
+        <span class="pill">License required</span>
+      </div>
+      {% if license_success %}
+        <div class="academy-success">License activated successfully. Your classes are now unlocked.</div>
+      {% endif %}
+      {% if license_error %}
+        <div class="academy-error">{{ license_error }}</div>
+      {% endif %}
+      {% if not admin %}
+        <form class="inquiry" method="post" action="/academy/license">
+          <label>
+            License Key
+            <input type="text" name="license_key" placeholder="IONE-AB12-CD34-EF56-GH78" required />
+          </label>
+          <button class="btn btn-primary" type="submit">Activate License</button>
+        </form>
+      {% endif %}
+      <div class="academy-help">
+        <div class="academy-help-title">Need a license?</div>
+        <p>
+          Choose a premium plan, then the admin can generate a duration-based license key for your email.
+          After activation, all academy class links stay unlocked for your account until expiry.
+        </p>
+        <div class="academy-mentor-card">
+          <div class="academy-mentor-title">One To One Live Mentorship</div>
+          <div class="academy-mentor-price">₹15,000</div>
+          <p>Learn directly from Mentor Amol Charpe with focused one-to-one live mentorship and direct support.</p>
+        </div>
+        <a class="btn btn-ghost" href="/premium">View Premium Plans</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+.premium-kicker {
+  display: inline-flex;
+  margin-bottom: 12px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.05);
+  color: #8fdfff;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.academy-shell {
+  display: grid;
+  gap: 16px;
+}
+.academy-header {
+  display: grid;
+  grid-template-columns: 1.25fr 0.75fr;
+  gap: 16px;
+  padding: 22px;
+}
+.academy-header h1 {
+  font-family: 'Syne', sans-serif;
+  font-size: clamp(28px, 4vw, 44px);
+  margin-bottom: 10px;
+}
+.academy-header p {
+  color: #c6d7f0;
+  line-height: 1.7;
+  max-width: 64ch;
+}
+.academy-status-box {
+  padding: 18px;
+  border-radius: 20px;
+  border: 1px solid rgba(99, 210, 255, 0.18);
+  background: linear-gradient(135deg, rgba(0, 212, 255, 0.08), rgba(99, 102, 241, 0.08));
+}
+.academy-status-title {
+  color: #8fdfff;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.academy-status-value {
+  margin-top: 10px;
+  font-size: 24px;
+  font-weight: 800;
+  color: #fff;
+}
+.academy-status-meta {
+  margin-top: 8px;
+  color: #b8cbe7;
+  line-height: 1.5;
+}
+.academy-grid {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr;
+  gap: 16px;
+}
+.academy-video-list {
+  display: grid;
+  gap: 10px;
+}
+.academy-video-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 16px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.academy-video-card.locked {
+  opacity: 0.8;
+}
+.academy-video-title {
+  font-weight: 700;
+  color: #f5f9ff;
+}
+.academy-video-meta {
+  margin-top: 4px;
+  color: #8ca5c8;
+  font-size: 12px;
+}
+.academy-success,
+.academy-error {
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+}
+.academy-success {
+  border: 1px solid rgba(0, 229, 160, 0.18);
+  background: rgba(0, 229, 160, 0.08);
+  color: #eafff4;
+}
+.academy-error {
+  border: 1px solid rgba(255, 77, 109, 0.18);
+  background: rgba(255, 77, 109, 0.08);
+  color: #ffe5ea;
+}
+.academy-help {
+  margin-top: 16px;
+  padding: 16px;
+  border-radius: 18px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.academy-help-title {
+  margin-bottom: 8px;
+  font-weight: 700;
+  color: #f8fbff;
+}
+.academy-help p {
+  color: #bfd0ea;
+  line-height: 1.6;
+  margin-bottom: 14px;
+}
+.academy-mentor-card {
+  margin-bottom: 14px;
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 184, 48, 0.18);
+  background: rgba(255, 184, 48, 0.08);
+}
+.academy-mentor-title {
+  font-weight: 700;
+  color: #fff0cf;
+}
+.academy-mentor-price {
+  margin: 8px 0;
+  font-size: 24px;
+  font-weight: 800;
+  color: #fff;
+}
+.academy-mentor-card p {
+  margin: 0;
+  color: #ffe7b3;
+}
+
+@media (max-width: 900px) {
+  .academy-header,
+  .academy-grid {
+    grid-template-columns: 1fr;
+  }
+  .academy-video-card {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+</style>
+
+{% endblock %}

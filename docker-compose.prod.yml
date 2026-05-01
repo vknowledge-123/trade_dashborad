@@ -1,0 +1,33 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: trade_dashboard_app
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+      TRADE_DASHBOARD_DB_PATH: /data/trade_dashboard.db
+    depends_on:
+      - redis
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - app_data:/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: trade_dashboard_redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+
+volumes:
+  app_data:
+  redis_data:
+
