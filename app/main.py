@@ -420,6 +420,15 @@ def market_snapshot(request: Request):
         return JSONResponse({"detail": "Not authenticated."}, status_code=401)
     return JSONResponse(engine.get_snapshot())
 
+
+@app.get("/api/sector-breakdown")
+def sector_breakdown(request: Request, sector: str):
+    user = current_user(request)
+    admin = current_admin(request)
+    if not user and not admin:
+        return JSONResponse({"detail": "Not authenticated."}, status_code=401)
+    return JSONResponse(engine.get_sector_breakdown(sector))
+
 @app.get("/inquiry", response_class=HTMLResponse)
 def inquiry_get(request: Request):
     user = require_login(request)
@@ -541,6 +550,17 @@ def admin_setup_post(
         )
     if get_admin_user():
         return RedirectResponse(url="/admin/login", status_code=302)
+    existing = get_user_by_email(email)
+    if existing:
+        return templates.TemplateResponse(
+            request,
+            "admin_setup.html",
+            {
+                "error": "That email is already registered as a user. Use a different email or remove the old user account first.",
+                "admin": None,
+                "user": None,
+            },
+        )
 
     password_hash = hash_password(password)
     admin_id = create_user(full_name, email, phone, password_hash, trial_days=1, is_admin=1)

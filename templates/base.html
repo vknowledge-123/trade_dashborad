@@ -262,6 +262,34 @@ body::after {
   letter-spacing: 0.1px;
 }
 
+.nav-tool {
+  width: 38px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(8, 12, 24, 0.7);
+  color: #e8f0fe;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.nav-tool:hover,
+.nav-tool:focus-visible {
+  border-color: rgba(99, 210, 255, 0.35);
+  background: rgba(0, 212, 255, 0.12);
+  color: var(--cyan);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.nav-tool svg {
+  width: 18px;
+  height: 18px;
+}
+
 .nav-link {
   font-size: 12.5px;
   font-weight: 600;
@@ -443,7 +471,7 @@ body::after {
 
 .table-row {
   display: grid;
-  grid-template-columns: 1.4fr 1fr 1fr;
+  grid-template-columns: 1.3fr 0.9fr 0.9fr auto;
   gap: 10px;
   padding: 8px 12px;
   border-radius: var(--radius-sm);
@@ -513,6 +541,31 @@ body::after {
   transform: none;
 }
 .table-head::after { display: none; }
+
+.tv-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 74px;
+  padding: 7px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(99, 210, 255, 0.22);
+  background: rgba(0, 212, 255, 0.09);
+  color: #dff8ff;
+  text-decoration: none;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  transition: all 0.2s ease;
+}
+
+.tv-link:hover {
+  border-color: rgba(99, 210, 255, 0.4);
+  background: rgba(0, 212, 255, 0.16);
+  color: #ffffff;
+  transform: translateY(-1px);
+}
 
 /* ─── FnO tag ────────────────────────────────────────────── */
 .fno-tag {
@@ -1111,6 +1164,149 @@ body {
   transform: translateY(0);
 }
 
+body.modal-open {
+  overflow: hidden;
+}
+
+.calc-modal[hidden] { display: none; }
+.calc-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1250;
+}
+
+.calc-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(2, 7, 18, 0.72);
+  backdrop-filter: blur(8px);
+}
+
+.calc-modal-card {
+  position: relative;
+  width: min(520px, calc(100vw - 24px));
+  margin: 28px auto;
+  background: linear-gradient(180deg, rgba(9, 15, 28, 0.98), rgba(6, 10, 20, 0.98));
+  border: 1px solid rgba(123, 230, 255, 0.18);
+  border-radius: 18px;
+  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+.calc-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.calc-modal-title {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.calc-modal-subtitle {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #8ca5c8;
+}
+
+.calc-modal-close {
+  width: 36px;
+  height: 36px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #f4f8ff;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.calc-modal-body {
+  padding: 18px 20px 20px;
+}
+
+.calc-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.calc-field {
+  display: grid;
+  gap: 7px;
+}
+
+.calc-field label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #8ca5c8;
+}
+
+.calc-field input {
+  width: 100%;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 12px;
+  padding: 12px 13px;
+  background: rgba(255,255,255,0.04);
+  color: var(--text);
+  font-size: 14px;
+  outline: none;
+}
+
+.calc-field input:focus {
+  border-color: rgba(0,212,255,0.45);
+  box-shadow: 0 0 0 3px rgba(0,212,255,0.10);
+}
+
+.calc-results {
+  margin-top: 16px;
+  display: grid;
+  gap: 10px;
+}
+
+.calc-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.calc-stat {
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.07);
+}
+
+.calc-stat-label {
+  font-size: 11px;
+  color: #8ca5c8;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.calc-stat-value {
+  margin-top: 6px;
+  font-size: 19px;
+  font-weight: 800;
+  color: #f6fbff;
+}
+
+.calc-note {
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(0, 212, 255, 0.08);
+  border: 1px solid rgba(0, 212, 255, 0.12);
+  color: #cbefff;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 /* ─── Responsive ─────────────────────────────────────────── */
 @media (max-width: 900px) {
   .page { padding: 10px clamp(12px, 4vw, 28px) 24px; }
@@ -1121,6 +1317,8 @@ body {
   .nav { flex-wrap: wrap; justify-content: center; }
   .dash-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .promo-bar { flex-direction: column; align-items: flex-start; }
+  .calc-grid,
+  .calc-summary { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 600px) {
@@ -1133,12 +1331,13 @@ body {
   .brand-name { font-size: 17px; }
   .nav { width: 100%; justify-content: center; gap: 6px; padding: 6px; }
   .nav-link { padding: 7px 12px; font-size: 12px; }
+  .nav-tool { width: 34px; height: 34px; }
   .hero-stats { flex-direction: column; gap: 16px; }
   .hero-actions { width: 100%; }
   .hero-actions .btn { width: 100%; }
   .dash-grid { grid-template-columns: 1fr; }
   .panel { padding: 12px; }
-  .table-row { grid-template-columns: 1.2fr 0.9fr 0.9fr; font-size: 12px; }
+  .table-row { grid-template-columns: 1.1fr 0.8fr 0.8fr auto; font-size: 12px; }
   .sector-row { grid-template-columns: 1.6fr 0.9fr 0.7fr; }
   .hero-badge { border-radius: var(--radius); padding: 10px 12px; }
   .promo-strip { padding: 10px 12px; }
@@ -1146,6 +1345,7 @@ body {
   .promo-strip-cta { width: 100%; text-align: center; }
   .auth-card { padding: 26px; }
   .auth-form input, .auth-form textarea { font-size: 13px; }
+  .calc-modal-card { width: calc(100vw - 16px); margin: 8px auto; }
 }
 
 .inquiry-search,
@@ -1184,10 +1384,30 @@ body {
     <nav class="nav">
       {% if admin %}
         <span class="nav-user">Admin</span>
+        <button class="nav-tool" id="quantity-calculator-trigger" type="button" aria-label="Open quantity calculator">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="5" y="3" width="14" height="18" rx="2"></rect>
+            <line x1="8" y1="7" x2="16" y2="7"></line>
+            <line x1="8" y1="12" x2="10" y2="12"></line>
+            <line x1="14" y1="12" x2="16" y2="12"></line>
+            <line x1="8" y1="16" x2="10" y2="16"></line>
+            <line x1="14" y1="16" x2="16" y2="16"></line>
+          </svg>
+        </button>
         <a class="nav-link" href="/admin">Admin Panel</a>
         <a class="nav-link" href="/admin/logout">Logout</a>
       {% elif user %}
         <span class="nav-user">Hi, {{ user["full_name"] }}</span>
+        <button class="nav-tool" id="quantity-calculator-trigger" type="button" aria-label="Open quantity calculator">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="5" y="3" width="14" height="18" rx="2"></rect>
+            <line x1="8" y1="7" x2="16" y2="7"></line>
+            <line x1="8" y1="12" x2="10" y2="12"></line>
+            <line x1="14" y1="12" x2="16" y2="12"></line>
+            <line x1="8" y1="16" x2="10" y2="16"></line>
+            <line x1="14" y1="16" x2="16" y2="16"></line>
+          </svg>
+        </button>
         <a class="nav-link" href="/services">Services</a>
         <a class="nav-link" href="/inquiry">Inquiry</a>
         <a class="nav-link" href="/logout">Logout</a>
@@ -1199,6 +1419,52 @@ body {
       {% endif %}
     </nav>
   </header>
+
+  <div class="calc-modal" id="quantity-calculator-modal" hidden>
+    <div class="calc-modal-backdrop" data-close-quantity-modal="1"></div>
+    <div class="calc-modal-card" role="dialog" aria-modal="true" aria-labelledby="quantity-calculator-title">
+      <div class="calc-modal-header">
+        <div>
+          <div class="calc-modal-title" id="quantity-calculator-title">Quantity Calculator</div>
+          <div class="calc-modal-subtitle">Enter entry price, exit price, and your max risk per trade.</div>
+        </div>
+        <button type="button" class="calc-modal-close" id="quantity-calculator-close" aria-label="Close">×</button>
+      </div>
+      <div class="calc-modal-body">
+        <div class="calc-grid">
+          <div class="calc-field">
+            <label for="calc-risk">Per Trade Risk</label>
+            <input id="calc-risk" type="number" min="0" step="0.01" placeholder="1000" />
+          </div>
+          <div class="calc-field">
+            <label for="calc-entry">Entry Price</label>
+            <input id="calc-entry" type="number" min="0" step="0.01" placeholder="250.00" />
+          </div>
+          <div class="calc-field">
+            <label for="calc-exit">Exit Price</label>
+            <input id="calc-exit" type="number" min="0" step="0.01" placeholder="245.00" />
+          </div>
+        </div>
+        <div class="calc-results">
+          <div class="calc-summary">
+            <div class="calc-stat">
+              <div class="calc-stat-label">Suggested Quantity</div>
+              <div class="calc-stat-value" id="calc-quantity">0</div>
+            </div>
+            <div class="calc-stat">
+              <div class="calc-stat-label">Risk Per Share</div>
+              <div class="calc-stat-value" id="calc-risk-per-share">0.00</div>
+            </div>
+            <div class="calc-stat">
+              <div class="calc-stat-label">Used Risk</div>
+              <div class="calc-stat-value" id="calc-used-risk">0.00</div>
+            </div>
+          </div>
+          <div class="calc-note" id="calc-note">Quantity is calculated as floor(per trade risk / absolute difference between entry and exit).</div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <main class="page">
     {% block content %}{% endblock %}
@@ -1222,6 +1488,100 @@ body {
   const losersBody = document.getElementById("losers-body");
   const sectorGainers = document.getElementById("sector-gainers");
   const sectorLosers = document.getElementById("sector-losers");
+  const sectorModal = document.getElementById("sector-modal");
+  const sectorModalTitle = document.getElementById("sector-modal-title");
+  const sectorModalMeta = document.getElementById("sector-modal-meta");
+  const sectorModalBody = document.getElementById("sector-modal-body");
+  const sectorModalClose = document.getElementById("sector-modal-close");
+  const tradingViewUrl = (symbol) => `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(`NSE:${symbol}`)}`;
+  const calcTrigger = document.getElementById("quantity-calculator-trigger");
+  const calcModal = document.getElementById("quantity-calculator-modal");
+  const calcClose = document.getElementById("quantity-calculator-close");
+  const calcRisk = document.getElementById("calc-risk");
+  const calcEntry = document.getElementById("calc-entry");
+  const calcExit = document.getElementById("calc-exit");
+  const calcQuantity = document.getElementById("calc-quantity");
+  const calcRiskPerShare = document.getElementById("calc-risk-per-share");
+  const calcUsedRisk = document.getElementById("calc-used-risk");
+  const calcNote = document.getElementById("calc-note");
+
+  const closeQuantityCalculator = () => {
+    if (!calcModal) return;
+    calcModal.hidden = true;
+    document.body.classList.remove("modal-open");
+  };
+
+  const openQuantityCalculator = () => {
+    if (!calcModal) return;
+    calcModal.hidden = false;
+    document.body.classList.add("modal-open");
+    if (calcRisk) calcRisk.focus();
+  };
+
+  const formatNumber = (value, digits = 2) => {
+    if (!Number.isFinite(value)) return "0.00";
+    return value.toLocaleString(undefined, {
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits,
+    });
+  };
+
+  const updateQuantityCalculator = () => {
+    if (!calcRisk || !calcEntry || !calcExit || !calcQuantity || !calcRiskPerShare || !calcUsedRisk || !calcNote) {
+      return;
+    }
+    const tradeRisk = Number(calcRisk.value);
+    const entry = Number(calcEntry.value);
+    const exit = Number(calcExit.value);
+    const perShareRisk = Math.abs(entry - exit);
+
+    if (!tradeRisk || !entry || !exit) {
+      calcQuantity.textContent = "0";
+      calcRiskPerShare.textContent = "0.00";
+      calcUsedRisk.textContent = "0.00";
+      calcNote.textContent = "Enter all three values to calculate quantity.";
+      return;
+    }
+
+    if (perShareRisk <= 0) {
+      calcQuantity.textContent = "0";
+      calcRiskPerShare.textContent = "0.00";
+      calcUsedRisk.textContent = "0.00";
+      calcNote.textContent = "Entry and exit price must be different.";
+      return;
+    }
+
+    const quantity = Math.floor(tradeRisk / perShareRisk);
+    const usedRisk = quantity * perShareRisk;
+    const remainingRisk = Math.max(0, tradeRisk - usedRisk);
+
+    calcQuantity.textContent = Math.max(0, quantity).toLocaleString();
+    calcRiskPerShare.textContent = formatNumber(perShareRisk);
+    calcUsedRisk.textContent = formatNumber(usedRisk);
+    calcNote.textContent = quantity > 0
+      ? `Estimated quantity ${quantity.toLocaleString()} shares. Remaining unused risk: ${formatNumber(remainingRisk)}.`
+      : "Per-share risk is larger than your trade risk, so quantity is 0.";
+  };
+
+  if (calcTrigger && calcModal) {
+    calcTrigger.addEventListener("click", openQuantityCalculator);
+    if (calcClose) {
+      calcClose.addEventListener("click", closeQuantityCalculator);
+    }
+    calcModal.addEventListener("click", (event) => {
+      if (event.target.closest("[data-close-quantity-modal='1']")) {
+        closeQuantityCalculator();
+      }
+    });
+    [calcRisk, calcEntry, calcExit].forEach((input) => {
+      if (input) input.addEventListener("input", updateQuantityCalculator);
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && calcModal && !calcModal.hidden) {
+        closeQuantityCalculator();
+      }
+    });
+  }
 
   if (gainersBody && losersBody && sectorGainers && sectorLosers) {
     const ensureHead = (container) => {
@@ -1229,7 +1589,7 @@ body {
       if (!head) {
         head = document.createElement("div");
         head.className = "table-row table-head";
-        head.innerHTML = "<span>Symbol</span><span>Price</span><span>Change %</span>";
+        head.innerHTML = "<span>Symbol</span><span>Price</span><span>Change %</span><span>Chart</span>";
       }
       return head;
     };
@@ -1246,6 +1606,7 @@ body {
         <span class="cell-symbol">${row.symbol} ${fno}</span>
         <span class="cell-price">${row.price}</span>
         <span class="cell-change ${positive ? "positive" : "negative"}">${sign}${row.change}%</span>
+        <a class="tv-link" href="${tradingViewUrl(row.symbol)}" target="_blank" rel="noopener noreferrer">TradingView</a>
       `;
       return el;
     };
@@ -1268,12 +1629,14 @@ body {
           const symbolCell = el.querySelector('.cell-symbol');
           const priceCell = el.querySelector('.cell-price');
           const changeCell = el.querySelector('.cell-change');
+          const chartLink = el.querySelector('.tv-link');
           if (symbolCell) symbolCell.innerHTML = `${row.symbol} ${fno}`;
           if (priceCell) priceCell.textContent = row.price;
           if (changeCell) {
             changeCell.className = `cell-change ${positive ? "positive" : "negative"}`;
             changeCell.textContent = `${sign}${row.change}%`;
           }
+          if (chartLink) chartLink.href = tradingViewUrl(row.symbol);
         }
         return el;
       });
@@ -1286,14 +1649,97 @@ body {
       const cls = row.change > 0 ? "positive" : row.change < 0 ? "negative" : "neutral";
       const sign = row.change > 0 ? "+" : "";
       const el = document.createElement("div");
-      el.className = "sector-row";
+      el.className = "sector-row sector-clickable";
       el.dataset.sector = row.sector;
+      el.setAttribute("role", "button");
+      el.setAttribute("tabindex", "0");
       el.innerHTML = `
         <div class="sector-name">${row.sector}</div>
         <div class="sector-price">${row.price ?? "-"}</div>
         <div class="sector-change ${cls}">${sign}${row.change}%</div>
       `;
       return el;
+    };
+
+    const closeSectorModal = () => {
+      if (!sectorModal) return;
+      sectorModal.hidden = true;
+      document.body.classList.remove("modal-open");
+    };
+
+    const openSectorModal = () => {
+      if (!sectorModal) return;
+      sectorModal.hidden = false;
+      document.body.classList.add("modal-open");
+    };
+
+    const renderSectorBreakdown = (payload) => {
+      if (!sectorModal || !sectorModalBody || !sectorModalTitle || !sectorModalMeta) return;
+      const stocks = payload.stocks || [];
+      sectorModalTitle.textContent = payload.sector || "Sector Stocks";
+      const marketState = payload.market_open === false ? "Market closed snapshot" : "Live/API ranking";
+      sectorModalMeta.textContent = `${payload.constituent_count || stocks.length} stocks · ${marketState}`;
+      sectorModalBody.innerHTML = "";
+
+      if (!stocks.length) {
+        const empty = document.createElement("div");
+        empty.className = "sector-stock-empty";
+        empty.textContent = "No sector constituents are available for this dashboard view.";
+        sectorModalBody.appendChild(empty);
+        return;
+      }
+
+      stocks.forEach((stock) => {
+        const sign = stock.change > 0 ? "+" : "";
+        const cls = stock.change > 0 ? "positive" : stock.change < 0 ? "negative" : "neutral";
+        const row = document.createElement("div");
+        row.className = "sector-stock-row";
+        row.innerHTML = `
+          <span class="sector-stock-rank">${stock.rank}</span>
+          <span class="sector-stock-symbol">
+            <span>
+              <span>${stock.symbol}${stock.is_fno ? ' <span class="fno-tag">F&O</span>' : ""}</span>
+              ${stock.name ? `<span class="sector-stock-name">${stock.name}</span>` : ""}
+            </span>
+          </span>
+          <span class="sector-stock-price">${stock.price}</span>
+          <span class="sector-stock-change ${cls}">${sign}${stock.change}%</span>
+          <a class="tv-link" href="${tradingViewUrl(stock.symbol)}" target="_blank" rel="noopener noreferrer">TradingView</a>
+        `;
+        sectorModalBody.appendChild(row);
+      });
+    };
+
+    const loadSectorBreakdown = async (sector) => {
+      if (!sectorModalBody || !sectorModalTitle || !sectorModalMeta) return;
+      sectorModalTitle.textContent = sector;
+      sectorModalMeta.textContent = "Loading ranked stocks...";
+      sectorModalBody.innerHTML = '<div class="sector-stock-empty">Loading ranked constituent stocks...</div>';
+      openSectorModal();
+      try {
+        const res = await fetch(`/api/sector-breakdown?sector=${encodeURIComponent(sector)}`);
+        if (!res.ok) throw new Error("Failed to load sector data");
+        const payload = await res.json();
+        renderSectorBreakdown(payload);
+      } catch (err) {
+        sectorModalMeta.textContent = "Unable to load sector stocks right now.";
+        sectorModalBody.innerHTML = '<div class="sector-stock-empty">Sector data could not be loaded.</div>';
+      }
+    };
+
+    const bindSectorClicks = (container) => {
+      container.addEventListener("click", (event) => {
+        const row = event.target.closest(".sector-row[data-sector]");
+        if (!row) return;
+        loadSectorBreakdown(row.dataset.sector);
+      });
+      container.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        const row = event.target.closest(".sector-row[data-sector]");
+        if (!row) return;
+        event.preventDefault();
+        loadSectorBreakdown(row.dataset.sector);
+      });
     };
 
     const updateSectors = (container, rows, label) => {
@@ -1322,18 +1768,36 @@ body {
       ordered.forEach((el) => container.appendChild(el));
     };
 
+    bindSectorClicks(sectorGainers);
+    bindSectorClicks(sectorLosers);
+    if (sectorModalClose) {
+      sectorModalClose.addEventListener("click", closeSectorModal);
+    }
+    if (sectorModal) {
+      sectorModal.addEventListener("click", (event) => {
+        if (event.target.closest("[data-close-sector-modal='1']")) {
+          closeSectorModal();
+        }
+      });
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && !sectorModal.hidden) {
+          closeSectorModal();
+        }
+      });
+    }
+
     // render cached snapshot immediately to avoid flicker on refresh
-  const cached = localStorage.getItem("snapshot_cache");
-  if (cached) {
-    try {
-      const data = JSON.parse(cached);
-      updateTable(gainersBody, data.gainers || [], true);
-      updateTable(losersBody, data.losers || [], false);
-      updateSectors(sectorGainers, data.sector_gainers || [], "Top Gainers");
-      updateSectors(sectorLosers, data.sector_losers || [], "Top Losers");
-    } catch (e) {}
-  }
-  const updateSnapshot = async () => {
+    const cached = localStorage.getItem("snapshot_cache");
+    if (cached) {
+      try {
+        const data = JSON.parse(cached);
+        updateTable(gainersBody, data.gainers || [], true);
+        updateTable(losersBody, data.losers || [], false);
+        updateSectors(sectorGainers, data.sector_gainers || [], "Top Gainers");
+        updateSectors(sectorLosers, data.sector_losers || [], "Top Losers");
+      } catch (e) {}
+    }
+    const updateSnapshot = async () => {
       try {
         const res = await fetch("/api/market-snapshot");
         if (!res.ok) return;
@@ -1343,7 +1807,12 @@ body {
         updateSectors(sectorGainers, data.sector_gainers || [], "Top Gainers");
         updateSectors(sectorLosers, data.sector_losers || [], "Top Losers");
         try { localStorage.setItem("snapshot_cache", JSON.stringify(data)); } catch (e) {}
-        if (data.market_open === false && intervalId) {
+        const hasClosedMarketData =
+          (data.gainers && data.gainers.length) ||
+          (data.losers && data.losers.length) ||
+          (data.sector_gainers && data.sector_gainers.length) ||
+          (data.sector_losers && data.sector_losers.length);
+        if (data.market_open === false && hasClosedMarketData && intervalId) {
           clearInterval(intervalId);
           intervalId = null;
         }
@@ -1353,6 +1822,7 @@ body {
     };
 
     let intervalId = setInterval(updateSnapshot, 5000);
+    updateSnapshot();
   }
 
   const isPublic = document.body.dataset.public === "1";

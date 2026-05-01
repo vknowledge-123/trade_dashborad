@@ -1,14 +1,30 @@
+import json
 import sqlite3
-from pathlib import Path
+import time
 from datetime import datetime
+from pathlib import Path
 
 DB_PATH = Path(__file__).resolve().parent / "trade_dashboard.db"
 
 
 def get_conn():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout = 30000")
+    conn.execute("PRAGMA synchronous = NORMAL")
     return conn
+
+
+def _commit_with_retry(conn, attempts=3, delay=0.2):
+    for attempt in range(attempts):
+        try:
+            conn.commit()
+            return
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc).lower() or attempt == attempts - 1:
+                raise
+            time.sleep(delay * (attempt + 1))
 
 
 def init_db():
@@ -71,7 +87,16 @@ def init_db():
         )
         """
     )
-    conn.commit()
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS market_cache (
+            cache_key TEXT PRIMARY KEY,
+            payload TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    _commit_with_retry(conn)
 
     # Lightweight migration helpers for older DBs
     cur.execute("PRAGMA table_info(users)")
@@ -113,7 +138,20 @@ def init_db():
             """
         )
 
-    conn.commit()
+    cur.execute("PRAGMA table_info(market_cache)")
+    market_cache_cols = {row["name"] for row in cur.fetchall()}
+    if not market_cache_cols:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS market_cache (
+                cache_key TEXT PRIMARY KEY,
+                payload TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+
+    _commit_with_retry(conn)
     conn.close()
 
 
@@ -128,7 +166,7 @@ def create_user(full_name, email, phone, password_hash, trial_days=1, is_admin=0
         """,
         (full_name, email.lower(), phone, password_hash, int(is_admin), now, trial_days, now),
     )
-    conn.commit()
+    _commit_with_retry(conn)
     user_id = cur.lastrowid
     conn.close()
     return user_id
@@ -165,7 +203,7 @@ def delete_admin_users():
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("DELETE FROM users WHERE is_admin = 1")
-    conn.commit()
+    _commit_with_retry(conn)
     conn.close()
 
 
@@ -173,7 +211,7 @@ def update_user_password_hash(user_id, password_hash):
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("UPDATE users SET password_hash = ? WHERE id = ?", (password_hash, user_id))
-    conn.commit()
+    _commit_with_retry(conn)
     conn.close()
 
 
@@ -184,7 +222,7 @@ def set_admin_totp(admin_id, secret, enabled):
         "UPDATE users SET totp_secret = ?, totp_enabled = ? WHERE id = ?",
         (secret, int(enabled), admin_id),
     )
-    conn.commit()
+    _commit_with_retry(conn)
     conn.close()
 
 
@@ -203,7 +241,7 @@ def record_user_login(user_id: int, ip: str, user_agent: str):
         """,
         (now, ip or "unknown", user_agent or "-", int(user_id)),
     )
-    conn.commit()
+    _commit_with_retry(conn)
     conn.close()
 
 
@@ -229,18 +267,25 @@ def get_recent_users(limit: int = 20):
 
 
 def log_admin_login(email, ip, user_agent, success, reason):
-    conn = get_conn()
-    cur = conn.cursor()
-    now = datetime.utcnow().isoformat(timespec="seconds")
-    cur.execute(
-        """
-        INSERT INTO admin_login_audit (email, ip, user_agent, success, reason, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-        """,
-        (email.lower(), ip, user_agent, int(success), reason, now),
-    )
-    conn.commit()
-    conn.close()
+    conn = None
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        now = datetime.utcnow().isoformat(timespec="seconds")
+        cur.execute(
+            """
+            INSERT INTO admin_login_audit (email, ip, user_agent, success, reason, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (email.lower(), ip, user_agent, int(success), reason, now),
+        )
+        _commit_with_retry(conn)
+    except sqlite3.OperationalError:
+        # Audit logging should not block the auth flow when SQLite is briefly busy.
+        pass
+    finally:
+        if conn:
+            conn.close()
 
 
 def get_admin_login_audit(limit=20):
@@ -267,7 +312,7 @@ def save_kite_credentials(api_key, api_secret):
         """,
         (api_key, api_secret, now),
     )
-    conn.commit()
+    _commit_with_retry(conn)
     conn.close()
 
 
@@ -291,7 +336,7 @@ def create_inquiry(user_id, subject, message):
         """,
         (user_id, subject, message, now),
     )
-    conn.commit()
+    _commit_with_retry(conn)
     conn.close()
 
 
@@ -311,7 +356,6 @@ def get_inquiries(limit=50):
     )
     rows = cur.fetchall()
     conn.close()
-    # Add a friendly time format for UI
     formatted = []
     for row in rows:
         row_dict = dict(row)
@@ -328,5 +372,42 @@ def update_inquiry_status(inquiry_id, status):
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("UPDATE inquiries SET status = ? WHERE id = ?", (status, int(inquiry_id)))
-    conn.commit()
+    _commit_with_retry(conn)
     conn.close()
+
+
+def save_market_cache(cache_key: str, payload):
+    conn = get_conn()
+    cur = conn.cursor()
+    now = datetime.utcnow().isoformat(timespec="seconds")
+    cur.execute(
+        """
+        INSERT INTO market_cache (cache_key, payload, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(cache_key) DO UPDATE SET
+            payload = excluded.payload,
+            updated_at = excluded.updated_at
+        """,
+        (cache_key, json.dumps(payload), now),
+    )
+    _commit_with_retry(conn)
+    conn.close()
+
+
+def load_market_cache(cache_key: str):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT payload, updated_at FROM market_cache WHERE cache_key = ?",
+        (cache_key,),
+    )
+    row = cur.fetchone()
+    conn.close()
+    if not row:
+        return None
+    try:
+        payload = json.loads(row["payload"])
+    except Exception:
+        return None
+    payload["_cached_at"] = row["updated_at"]
+    return payload
