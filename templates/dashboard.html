@@ -40,13 +40,16 @@
         </div>
       {% endif %}
       <div class="status-line">
-        <span class="status-dot {{ 'positive' if snapshot.connected else 'negative' }}"></span>
-        <span class="{{ 'positive' if snapshot.connected else 'negative' }}">
+        <span id="snapshot-status-dot" class="status-dot {{ 'positive' if snapshot.connected else 'negative' }}"></span>
+        <span id="snapshot-status-text" class="{{ 'positive' if snapshot.connected else 'negative' }}">
           {% if snapshot.market_open %}
             {{ 'Live feed connected' if snapshot.connected else 'Live feed unavailable, using API snapshot' }}
           {% else %}
             Market closed · showing latest dashboard snapshot
           {% endif %}
+        </span>
+        <span class="snapshot-updated-at" id="snapshot-updated-at">
+          {% if snapshot.updated_at %}Updated {{ snapshot.updated_at }}{% else %}Waiting for live ticks{% endif %}
         </span>
       </div>
     </div>
@@ -248,6 +251,12 @@
   align-items: center;
   gap: 7px;
   font-size: 12px !important;
+  flex-wrap: wrap;
+}
+
+.snapshot-updated-at {
+  color: #8ca5c8;
+  font-size: 11px;
 }
 
 .promo-strip {

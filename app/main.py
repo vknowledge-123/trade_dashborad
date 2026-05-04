@@ -488,12 +488,26 @@ def dashboard(request: Request):
 
 @app.get("/api/market-snapshot")
 def market_snapshot(request: Request):
-    return JSONResponse(engine.get_snapshot())
+    return JSONResponse(
+        engine.get_snapshot(),
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
 
 
 @app.get("/api/sector-breakdown")
 def sector_breakdown(request: Request, sector: str):
-    return JSONResponse(engine.get_sector_breakdown(sector))
+    return JSONResponse(
+        engine.get_sector_breakdown(sector),
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
 
 @app.get("/inquiry", response_class=HTMLResponse)
 def inquiry_get(request: Request):

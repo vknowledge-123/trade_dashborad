@@ -1510,6 +1510,9 @@ body.modal-open {
   const sectorModalMeta = document.getElementById("sector-modal-meta");
   const sectorModalBody = document.getElementById("sector-modal-body");
   const sectorModalClose = document.getElementById("sector-modal-close");
+  const snapshotStatusDot = document.getElementById("snapshot-status-dot");
+  const snapshotStatusText = document.getElementById("snapshot-status-text");
+  const snapshotUpdatedAt = document.getElementById("snapshot-updated-at");
   const tradingViewUrl = (symbol) => `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(`NSE:${symbol}`)}`;
   const calcTrigger = document.getElementById("quantity-calculator-trigger");
   const calcModal = document.getElementById("quantity-calculator-modal");
@@ -1678,6 +1681,37 @@ body.modal-open {
       return el;
     };
 
+    const formatSnapshotUpdatedAt = (value) => {
+      if (!value) return "Updated just now";
+      const parsed = new Date(value);
+      if (Number.isNaN(parsed.getTime())) {
+        return `Updated ${value}`;
+      }
+      return `Updated ${parsed.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      })}`;
+    };
+
+    const updateStatusLine = (data) => {
+      if (!snapshotStatusDot || !snapshotStatusText) return;
+      const isConnected = Boolean(data.connected);
+      const tone = isConnected ? "positive" : "negative";
+      snapshotStatusDot.className = `status-dot ${tone}`;
+      snapshotStatusText.className = tone;
+      if (data.market_open === false) {
+        snapshotStatusText.textContent = "Market closed · showing latest dashboard snapshot";
+      } else if (isConnected) {
+        snapshotStatusText.textContent = "Live feed connected";
+      } else {
+        snapshotStatusText.textContent = "Live feed unavailable, using API snapshot";
+      }
+      if (snapshotUpdatedAt) {
+        snapshotUpdatedAt.textContent = formatSnapshotUpdatedAt(data.updated_at);
+      }
+    };
+
     const closeSectorModal = () => {
       if (!sectorModal) return;
       sectorModal.hidden = true;
@@ -1734,7 +1768,12 @@ body.modal-open {
       sectorModalBody.innerHTML = '<div class="sector-stock-empty">Loading ranked constituent stocks...</div>';
       openSectorModal();
       try {
-        const res = await fetch(`/api/sector-breakdown?sector=${encodeURIComponent(sector)}`);
+        const res = await fetch(`/api/sector-breakdown?sector=${encodeURIComponent(sector)}&ts=${Date.now()}`, {
+          cache: "no-store",
+          headers: {
+            "Cache-Control": "no-cache",
+          },
+        });
         if (!res.ok) throw new Error("Failed to load sector data");
         const payload = await res.json();
         renderSectorBreakdown(payload);
@@ -1812,17 +1851,27 @@ body.modal-open {
         updateTable(losersBody, data.losers || [], false);
         updateSectors(sectorGainers, data.sector_gainers || [], "Top Gainers");
         updateSectors(sectorLosers, data.sector_losers || [], "Top Losers");
+        updateStatusLine(data);
       } catch (e) {}
     }
+    let isSnapshotRequestInFlight = false;
     const updateSnapshot = async () => {
+      if (isSnapshotRequestInFlight) return;
+      isSnapshotRequestInFlight = true;
       try {
-        const res = await fetch("/api/market-snapshot");
+        const res = await fetch(`/api/market-snapshot?ts=${Date.now()}`, {
+          cache: "no-store",
+          headers: {
+            "Cache-Control": "no-cache",
+          },
+        });
         if (!res.ok) return;
         const data = await res.json();
         updateTable(gainersBody, data.gainers || [], true);
         updateTable(losersBody, data.losers || [], false);
         updateSectors(sectorGainers, data.sector_gainers || [], "Top Gainers");
         updateSectors(sectorLosers, data.sector_losers || [], "Top Losers");
+        updateStatusLine(data);
         try { localStorage.setItem("snapshot_cache", JSON.stringify(data)); } catch (e) {}
         const hasClosedMarketData =
           (data.gainers && data.gainers.length) ||
@@ -1835,10 +1884,12 @@ body.modal-open {
         }
       } catch (err) {
         // silent fail
+      } finally {
+        isSnapshotRequestInFlight = false;
       }
     };
 
-    let intervalId = setInterval(updateSnapshot, 5000);
+    let intervalId = setInterval(updateSnapshot, 1000);
     updateSnapshot();
   }
 })();
