@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import io
 import math
 import threading
@@ -222,6 +222,10 @@ GUEST_REGISTER_PROMPT_HOURS = 24
 GUEST_PREMIUM_PROMPT_DAYS = 7
 USER_PREMIUM_PROMPT_DAYS = 7
 
+
+def utcnow():
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
 @app.on_event("startup")
 def on_startup():
     init_db()
@@ -338,7 +342,7 @@ def trial_status(user_row):
     if not user_row["is_admin"]:
         days = max(days, USER_PREMIUM_PROMPT_DAYS)
     end = start + timedelta(days=days)
-    now = datetime.utcnow()
+    now = utcnow()
     remaining_seconds = max(0, int((end - now).total_seconds()))
     remaining_days = math.ceil(remaining_seconds / 86400) if remaining_seconds else 0
     return {
@@ -350,7 +354,7 @@ def trial_status(user_row):
 
 
 def guest_dashboard_status(request: Request):
-    now = datetime.utcnow()
+    now = utcnow()
     raw_started = request.session.get("guest_dashboard_started_at")
     started_at = None
     if raw_started:

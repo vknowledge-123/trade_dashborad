@@ -3,7 +3,7 @@ import os
 import secrets
 import sqlite3
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 DB_PATH = Path(
@@ -18,6 +18,10 @@ DEFAULT_COURSE_SETTINGS = {
     "one_year_price": 10000,
     "support_text": "Priority support, live Q&A sessions, and direct mentorship guidance with Mentor Amol Charpe.",
 }
+
+
+def utcnow():
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def get_conn():
@@ -260,7 +264,7 @@ def init_db():
             """
         )
 
-    now = datetime.utcnow().isoformat(timespec="seconds")
+    now = utcnow().isoformat(timespec="seconds")
     cur.execute(
         """
         INSERT INTO course_settings (id, four_month_price, one_year_price, support_text, updated_at)
@@ -282,7 +286,7 @@ def init_db():
 def create_user(full_name, email, phone, password_hash, trial_days=1, is_admin=0):
     conn = get_conn()
     cur = conn.cursor()
-    now = datetime.utcnow().isoformat(timespec="seconds")
+    now = utcnow().isoformat(timespec="seconds")
     cur.execute(
         """
         INSERT INTO users (full_name, email, phone, password_hash, is_admin, trial_start, trial_days, created_at)
@@ -353,7 +357,7 @@ def set_admin_totp(admin_id, secret, enabled):
 def record_user_login(user_id: int, ip: str, user_agent: str):
     conn = get_conn()
     cur = conn.cursor()
-    now = datetime.utcnow().isoformat(timespec="seconds")
+    now = utcnow().isoformat(timespec="seconds")
     cur.execute(
         """
         UPDATE users
@@ -395,7 +399,7 @@ def log_admin_login(email, ip, user_agent, success, reason):
     try:
         conn = get_conn()
         cur = conn.cursor()
-        now = datetime.utcnow().isoformat(timespec="seconds")
+        now = utcnow().isoformat(timespec="seconds")
         cur.execute(
             """
             INSERT INTO admin_login_audit (email, ip, user_agent, success, reason, created_at)
@@ -427,7 +431,7 @@ def get_admin_login_audit(limit=20):
 def save_kite_credentials(api_key, api_secret):
     conn = get_conn()
     cur = conn.cursor()
-    now = datetime.utcnow().isoformat(timespec="seconds")
+    now = utcnow().isoformat(timespec="seconds")
     cur.execute("DELETE FROM kite_credentials")
     cur.execute(
         """
@@ -452,7 +456,7 @@ def get_kite_credentials():
 def create_inquiry(user_id, subject, message):
     conn = get_conn()
     cur = conn.cursor()
-    now = datetime.utcnow().isoformat(timespec="seconds")
+    now = utcnow().isoformat(timespec="seconds")
     cur.execute(
         """
         INSERT INTO inquiries (user_id, subject, message, status, created_at)
@@ -503,7 +507,7 @@ def update_inquiry_status(inquiry_id, status):
 def save_market_cache(cache_key: str, payload):
     conn = get_conn()
     cur = conn.cursor()
-    now = datetime.utcnow().isoformat(timespec="seconds")
+    now = utcnow().isoformat(timespec="seconds")
     cur.execute(
         """
         INSERT INTO market_cache (cache_key, payload, updated_at)
@@ -556,7 +560,7 @@ def get_course_settings():
 def update_course_settings(four_month_price, one_year_price, support_text):
     conn = get_conn()
     cur = conn.cursor()
-    now = datetime.utcnow().isoformat(timespec="seconds")
+    now = utcnow().isoformat(timespec="seconds")
     cur.execute(
         """
         INSERT INTO course_settings (id, four_month_price, one_year_price, support_text, updated_at)
@@ -576,7 +580,7 @@ def update_course_settings(four_month_price, one_year_price, support_text):
 def add_academy_video(title, youtube_url, sort_order=0, is_published=1):
     conn = get_conn()
     cur = conn.cursor()
-    now = datetime.utcnow().isoformat(timespec="seconds")
+    now = utcnow().isoformat(timespec="seconds")
     cur.execute(
         """
         INSERT INTO academy_videos (title, youtube_url, sort_order, is_published, created_at)
@@ -634,7 +638,7 @@ def _generate_license_key():
 def create_academy_license(assigned_email, plan_name, duration_days, notes=""):
     conn = get_conn()
     cur = conn.cursor()
-    now = datetime.utcnow().isoformat(timespec="seconds")
+    now = utcnow().isoformat(timespec="seconds")
     license_key = _generate_license_key()
     while cur.execute(
         "SELECT 1 FROM academy_licenses WHERE license_key = ?",
@@ -677,7 +681,7 @@ def get_recent_academy_licenses(limit=50):
 def get_active_license_for_user(user_id):
     conn = get_conn()
     cur = conn.cursor()
-    now = datetime.utcnow().isoformat(timespec="seconds")
+    now = utcnow().isoformat(timespec="seconds")
     cur.execute(
         """
         SELECT *
@@ -715,7 +719,7 @@ def activate_academy_license(user_id, user_email, license_key):
         conn.close()
         return {"ok": False, "error": "This license key is assigned to a different email."}
 
-    now = datetime.utcnow()
+    now = utcnow()
     expires_at = row["expires_at"]
     if row["activated_by_user_id"]:
         if int(row["activated_by_user_id"]) != int(user_id):

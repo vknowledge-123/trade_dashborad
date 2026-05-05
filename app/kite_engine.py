@@ -19,6 +19,7 @@ CLOSED_SNAPSHOT_CACHE_KEY = "latest_closed_snapshot"
 IST = ZoneInfo("Asia/Kolkata")
 LIVE_FEED_STALE_AFTER_SECONDS = 15
 LIVE_FEED_RECONNECT_COOLDOWN_SECONDS = 20
+SECTOR_SNAPSHOT_REFRESH_SECONDS = 5
 HTTP_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                   "(KHTML, like Gecko) Chrome/135.0 Safari/537.36",
@@ -551,18 +552,21 @@ class MarketEngine:
 
     def _refresh_sector_snapshot(self, force=False):
         if not self.kite or not self.sector_tokens:
-            return
-        refresh_interval = 10 if self._is_market_open() else 120
+            return False
+        refresh_interval = SECTOR_SNAPSHOT_REFRESH_SECONDS if self._is_market_open() else 120
         now = time.time()
         if not force and now - self.last_sector_quote_ts < refresh_interval:
-            return
+            return False
         prev, latest = self._fetch_sector_quote(self.kite, list(self.sector_tokens.keys()))
         with self.lock:
             if prev:
                 self.sector_prev_close.update(prev)
             if latest:
                 self.sector_latest.update(latest)
+                self.last_update = self._utc_now()
+                self.last_snapshot_source = "api_sector"
         self.last_sector_quote_ts = now
+        return bool(latest)
 
     def _refresh_closed_market_snapshot(self, force=False):
         if not self.kite or not self.symbol_to_token:
@@ -744,6 +748,7 @@ class MarketEngine:
                     self.last_error = "Live feed stalled, refreshing from API"
                 self._ensure_background_refresh(market_open=True, reason="stale")
             if market_open:
+                self._refresh_sector_snapshot(force=not bool(self.sector_latest))
                 if not self.latest:
                     self._ensure_background_refresh(market_open=True, reason="initial")
                 elif not self.connected:
