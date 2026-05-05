@@ -48,7 +48,7 @@
             Market closed · showing latest dashboard snapshot
           {% endif %}
         </span>
-        <span class="snapshot-updated-at" id="snapshot-updated-at">
+        <span class="snapshot-updated-at" id="snapshot-updated-at" data-updated-at="{{ snapshot.updated_at or '' }}">
           {% if snapshot.updated_at %}Updated {{ snapshot.updated_at }}{% else %}Waiting for live ticks{% endif %}
         </span>
       </div>

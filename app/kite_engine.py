@@ -16,6 +16,9 @@ from app.db import load_market_cache, save_market_cache
 
 SNAPSHOT_CACHE_KEY = "latest_snapshot"
 CLOSED_SNAPSHOT_CACHE_KEY = "latest_closed_snapshot"
+IST = ZoneInfo("Asia/Kolkata")
+LIVE_FEED_STALE_AFTER_SECONDS = 15
+LIVE_FEED_RECONNECT_COOLDOWN_SECONDS = 20
 HTTP_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                   "(KHTML, like Gecko) Chrome/135.0 Safari/537.36",
@@ -66,6 +69,9 @@ NSE_TRADING_HOLIDAYS = {
 class MarketEngine:
     def __init__(self, redis_client):
         self.redis = redis_client
+        self.api_key = None
+        self.access_token = None
+        self.sector_names = []
         self.ticker = None
         self.thread = None
         self.kite = None
@@ -88,6 +94,9 @@ class MarketEngine:
         self.connected = False
         self.last_error = None
         self.last_update = None
+        self.last_tick_ts = 0.0
+        self.last_connect_ts = 0.0
+        self.last_reconnect_attempt_ts = 0.0
         self.demo_mode = False
         self.demo_snapshot = None
         self.last_sector_quote_ts = 0
@@ -110,7 +119,69 @@ class MarketEngine:
             yield items[idx:idx + size]
 
     def _utc_now(self):
-        return datetime.utcnow().isoformat(timespec="seconds")
+        return datetime.now(IST).isoformat(timespec="seconds")
+
+    def _tracked_feed_activity_ts(self):
+        return max(self.last_tick_ts, self.last_connect_ts)
+
+    def _is_live_feed_stale(self):
+        if not self.kite or not self._is_market_open():
+            return False
+        activity_ts = self._tracked_feed_activity_ts()
+        if not activity_ts:
+            return bool(self.ticker)
+        return (time.time() - activity_ts) > LIVE_FEED_STALE_AFTER_SECONDS
+
+    def _close_ticker(self):
+        if not self.ticker:
+            return
+        try:
+            self.ticker.close()
+        except Exception:
+            pass
+        self.ticker = None
+
+    def _subscribed_tokens(self):
+        tokens = list(self.equity_tokens)
+        sector_token_list = list(self.sector_tokens.values())
+        all_tokens = tokens + sector_token_list
+        if len(all_tokens) > 3000:
+            max_eq = max(0, 3000 - len(sector_token_list))
+            all_tokens = tokens[:max_eq] + sector_token_list
+        return all_tokens, sector_token_list
+
+    def _create_ticker(self):
+        if not self.api_key or not self.access_token:
+            return False
+        all_tokens, sector_token_list = self._subscribed_tokens()
+        print(f"[engine] equity_tokens={len(self.equity_tokens)} sector_tokens={len(sector_token_list)} subscribed={len(all_tokens)}")
+        if sector_token_list:
+            print(f"[engine] sector tokens: {sorted(self.sector_tokens.keys())}")
+        else:
+            print("[engine] WARNING: no sector tokens found for provided sector list")
+
+        self.connected = False
+        self.last_connect_ts = 0.0
+        self.last_tick_ts = 0.0
+        self.ticker = KiteTicker(self.api_key, self.access_token)
+        self.ticker.on_connect = lambda ws, resp: self._on_connect(ws, resp, all_tokens)
+        self.ticker.on_ticks = self._on_ticks
+        self.ticker.on_close = self._on_close
+        self.ticker.on_error = self._on_error
+        self.ticker.connect(threaded=True)
+        return True
+
+    def _restart_live_feed(self, reason="stale"):
+        if not self.api_key or not self.access_token:
+            return False
+        now_ts = time.time()
+        if now_ts - self.last_reconnect_attempt_ts < LIVE_FEED_RECONNECT_COOLDOWN_SECONDS:
+            return False
+        self.last_reconnect_attempt_ts = now_ts
+        self.last_error = f"Live feed stalled, reconnecting ({reason})"
+        self.connected = False
+        self._close_ticker()
+        return self._create_ticker()
 
     def _is_tracked_symbol(self, symbol):
         return not self.nifty500_set or symbol.upper() in self.nifty500_set
@@ -183,7 +254,9 @@ class MarketEngine:
     def _run_refresh_job(self, reason, market_open):
         try:
             if market_open:
-                self._refresh_rest_snapshot(force=reason == "initial")
+                if reason in {"reconnect", "stale", "initial"}:
+                    self._restart_live_feed(reason=reason)
+                self._refresh_rest_snapshot(force=reason in {"initial", "reconnect", "stale"})
                 self._refresh_sector_snapshot(force=True)
             else:
                 rest_ok = self._refresh_rest_snapshot(force=True)
@@ -245,7 +318,7 @@ class MarketEngine:
             return []
 
     def _refresh_sector_memberships(self, force=False):
-        today = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
+        today = datetime.now(IST).date().isoformat()
         if not force and self.last_membership_refresh_date == today and self.sector_members:
             return
 
@@ -354,7 +427,7 @@ class MarketEngine:
         if not token:
             return None
         try:
-            now = datetime.now(ZoneInfo("Asia/Kolkata"))
+            now = datetime.now(IST)
             candles = kite.historical_data(
                 token,
                 now - timedelta(days=10),
@@ -495,7 +568,7 @@ class MarketEngine:
         if not self.kite or not self.symbol_to_token:
             return False
 
-        now = datetime.now(ZoneInfo("Asia/Kolkata"))
+        now = datetime.now(IST)
         now_ts = time.time()
         if not force and now_ts - self.last_closed_refresh_ts < 3600 and self.latest and self.sector_latest:
             return True
@@ -552,12 +625,10 @@ class MarketEngine:
 
     def start(self, api_key, access_token, sector_names):
         try:
-            if self.ticker:
-                try:
-                    self.ticker.close()
-                except Exception:
-                    pass
-                self.ticker = None
+            self.api_key = api_key
+            self.access_token = access_token
+            self.sector_names = list(sector_names or [])
+            self._close_ticker()
             kite = KiteConnect(api_key=api_key)
             kite.set_access_token(access_token)
             self.kite = kite
@@ -566,27 +637,7 @@ class MarketEngine:
                 self._refresh_rest_snapshot(force=True)
             else:
                 self._refresh_closed_market_snapshot(force=True)
-
-            tokens = list(self.equity_tokens)
-            sector_token_list = list(self.sector_tokens.values())
-            all_tokens = tokens + sector_token_list
-            if len(all_tokens) > 3000:
-                max_eq = max(0, 3000 - len(sector_token_list))
-                all_tokens = tokens[:max_eq] + sector_token_list
-            print(f"[engine] equity_tokens={len(tokens)} sector_tokens={len(sector_token_list)} subscribed={len(all_tokens)}")
-            if sector_token_list:
-                print(f"[engine] sector tokens: {sorted(self.sector_tokens.keys())}")
-            else:
-                print("[engine] WARNING: no sector tokens found for provided sector list")
-
-            self.ticker = KiteTicker(api_key, access_token)
-            self.ticker.on_connect = lambda ws, resp: self._on_connect(ws, resp, all_tokens)
-            self.ticker.on_ticks = self._on_ticks
-            self.ticker.on_close = self._on_close
-            self.ticker.on_error = self._on_error
-
-            self.ticker.connect(threaded=True)
-            self.connected = True
+            self._create_ticker()
             self.last_error = None
         except Exception as exc:
             self.last_error = str(exc)
@@ -596,8 +647,12 @@ class MarketEngine:
         try:
             ws.subscribe(tokens)
             ws.set_mode(ws.MODE_FULL, tokens)
+            self.connected = True
+            self.last_connect_ts = time.time()
+            self.last_error = None
         except Exception as exc:
             self.last_error = str(exc)
+            self.connected = False
 
     def _on_close(self, ws, code, reason):
         self.connected = False
@@ -640,6 +695,8 @@ class MarketEngine:
                         "change": round(change, 2),
                     }
             self.last_update = self._utc_now()
+            self.last_tick_ts = time.time()
+            self.connected = True
         self.last_snapshot_source = "websocket"
 
     def _build_snapshot(self, market_open):
@@ -681,6 +738,11 @@ class MarketEngine:
             return self._with_runtime_fields(closed_cached, False, "closed_cache")
 
         if self.kite:
+            if self._is_live_feed_stale():
+                self.connected = False
+                if not self.last_error or "stalled" not in self.last_error.lower():
+                    self.last_error = "Live feed stalled, refreshing from API"
+                self._ensure_background_refresh(market_open=True, reason="stale")
             if market_open:
                 if not self.latest:
                     self._ensure_background_refresh(market_open=True, reason="initial")
@@ -805,7 +867,7 @@ class MarketEngine:
 
     def _is_market_open(self):
         try:
-            now = datetime.now(ZoneInfo("Asia/Kolkata"))
+            now = datetime.now(IST)
             if now.weekday() >= 5:
                 return False
             if now.date().isoformat() in NSE_TRADING_HOLIDAYS:

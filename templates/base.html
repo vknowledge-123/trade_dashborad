@@ -1687,10 +1687,11 @@ body.modal-open {
       if (Number.isNaN(parsed.getTime())) {
         return `Updated ${value}`;
       }
-      return `Updated ${parsed.toLocaleTimeString([], {
+      return `Updated ${parsed.toLocaleTimeString("en-IN", {
         hour: "2-digit",
         minute: "2-digit",
         second: "2-digit",
+        timeZone: "Asia/Kolkata",
       })}`;
     };
 
@@ -1853,6 +1854,9 @@ body.modal-open {
         updateSectors(sectorLosers, data.sector_losers || [], "Top Losers");
         updateStatusLine(data);
       } catch (e) {}
+    }
+    if (snapshotUpdatedAt && snapshotUpdatedAt.dataset.updatedAt) {
+      snapshotUpdatedAt.textContent = formatSnapshotUpdatedAt(snapshotUpdatedAt.dataset.updatedAt);
     }
     let isSnapshotRequestInFlight = false;
     const updateSnapshot = async () => {
