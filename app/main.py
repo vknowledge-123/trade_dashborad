@@ -226,6 +226,25 @@ USER_PREMIUM_PROMPT_DAYS = 7
 def utcnow():
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
+
+def format_compact_volume(value):
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return "-"
+
+    abs_number = abs(number)
+    if abs_number >= 1_000_000_000:
+        return f"{number / 1_000_000_000:.2f}B"
+    if abs_number >= 1_000_000:
+        return f"{number / 1_000_000:.2f}M"
+    if abs_number >= 1_000:
+        return f"{number / 1_000:.1f}K"
+    return str(int(number))
+
+
+templates.env.globals["format_compact_volume"] = format_compact_volume
+
 @app.on_event("startup")
 def on_startup():
     init_db()

@@ -1605,8 +1605,13 @@ body.modal-open {
 
   if (gainersBody && losersBody && sectorGainers && sectorLosers) {
     const formatVolume = (value) => {
-      if (!Number.isFinite(Number(value))) return "-";
-      return Number(value).toLocaleString("en-IN");
+      const number = Number(value);
+      if (!Number.isFinite(number)) return "-";
+      const absNumber = Math.abs(number);
+      if (absNumber >= 1_000_000_000) return `${(number / 1_000_000_000).toFixed(2)}B`;
+      if (absNumber >= 1_000_000) return `${(number / 1_000_000).toFixed(2)}M`;
+      if (absNumber >= 1_000) return `${(number / 1_000).toFixed(1)}K`;
+      return Math.trunc(number).toString();
     };
 
     const ensureHead = (container) => {
