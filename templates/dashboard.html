@@ -88,7 +88,7 @@
           <div class="table-row" style="--row-delay: {{ loop.index0 * 0.18 }}s">
             <span>{{ g.symbol }}{% if g.is_fno %} <span class="fno-tag">F&amp;O</span>{% endif %}</span>
             <span class="mono">{{ g.price }}</span>
-            <span class="mono">{{ "{:,}".format(g.volume) if g.volume is not none else "-" }}</span>
+            <span class="mono">{{ "{:,}".format(g.volume) if g.volume is defined and g.volume is not none else "-" }}</span>
             <span class="positive mono">+{{ g.change }}%</span>
             <a class="tv-link" href="https://www.tradingview.com/chart/?symbol=NSE%3A{{ g.symbol | urlencode }}" target="_blank" rel="noopener noreferrer">TradingView</a>
           </div>
@@ -119,7 +119,7 @@
           <div class="table-row" style="--row-delay: {{ loop.index0 * 0.22 }}s">
             <span>{{ l.symbol }}{% if l.is_fno %} <span class="fno-tag">F&amp;O</span>{% endif %}</span>
             <span class="mono">{{ l.price }}</span>
-            <span class="mono">{{ "{:,}".format(l.volume) if l.volume is not none else "-" }}</span>
+            <span class="mono">{{ "{:,}".format(l.volume) if l.volume is defined and l.volume is not none else "-" }}</span>
             <span class="negative mono">{{ l.change }}%</span>
             <a class="tv-link" href="https://www.tradingview.com/chart/?symbol=NSE%3A{{ l.symbol | urlencode }}" target="_blank" rel="noopener noreferrer">TradingView</a>
           </div>
