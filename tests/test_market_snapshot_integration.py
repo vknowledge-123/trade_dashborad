@@ -71,6 +71,22 @@ def make_snapshot(sector_price):
 
 
 class MarketEngineSectorRefreshTests(unittest.TestCase):
+    def test_stock_row_from_candles_includes_day_volume(self):
+        engine = MarketEngine(redis_client=None)
+        row, latest_dt = engine._build_stock_row_from_candles(
+            "INFY",
+            [
+                {"close": 1480.0, "volume": 123456, "date": "2026-05-08"},
+                {"close": 1500.0, "volume": 234567, "date": "2026-05-09"},
+            ],
+        )
+
+        self.assertEqual(row["symbol"], "INFY")
+        self.assertEqual(row["volume"], 234567)
+        self.assertEqual(row["price"], 1500.0)
+        self.assertEqual(row["change"], 1.35)
+        self.assertEqual(latest_dt, "2026-05-09")
+
     def test_sector_snapshot_refreshes_on_repeated_live_snapshot_requests(self):
         fake_kite = FakeKite(
             [

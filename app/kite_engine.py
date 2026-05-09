@@ -191,7 +191,7 @@ class MarketEngine:
     def _is_tracked_symbol(self, symbol):
         return not self.nifty500_set or symbol.upper() in self.nifty500_set
 
-    def _build_stock_row(self, symbol, last_price, close):
+    def _build_stock_row(self, symbol, last_price, close, volume=None):
         if last_price in (None, 0) or close in (None, 0):
             return None
         change = (last_price - close) / close * 100
@@ -200,6 +200,7 @@ class MarketEngine:
             "name": self.symbol_to_name.get(symbol, symbol),
             "price": round(last_price, 2),
             "change": round(change, 2),
+            "volume": int(volume) if volume not in (None, "") else None,
             "is_fno": symbol.upper() in self.fno_symbols or self.symbol_to_name.get(symbol, "").upper() in self.fno_symbols,
             "sectors": self.symbol_to_sectors.get(symbol, []),
         }
@@ -592,7 +593,8 @@ class MarketEngine:
             return None, None
         prev_close = candles[-2].get("close")
         latest_close = candles[-1].get("close")
-        row = self._build_stock_row(symbol, latest_close, prev_close)
+        latest_volume = candles[-1].get("volume")
+        row = self._build_stock_row(symbol, latest_close, prev_close, volume=latest_volume)
         latest_dt = candles[-1].get("date")
         return row, latest_dt
 
@@ -644,23 +646,24 @@ class MarketEngine:
         for key, payload in quoted.items():
             symbol = key.split(":", 1)[-1]
             last_price = payload.get("last_price")
+            volume = payload.get("volume_traded")
             ohlc = payload.get("ohlc") or {}
             close = ohlc.get("close")
             if close not in (None, 0):
                 self.rest_prev_close[symbol] = close
             base_close = close if close not in (None, 0) else self.rest_prev_close.get(symbol)
-            row = self._build_stock_row(symbol, last_price, base_close)
+            row = self._build_stock_row(symbol, last_price, base_close, volume=volume)
             if row:
                 updated[symbol] = row
             elif last_price not in (None, 0):
-                missing_history.append((symbol, last_price))
+                missing_history.append((symbol, last_price, volume))
 
-        for symbol, last_price in missing_history:
+        for symbol, last_price, volume in missing_history:
             close = self._fetch_prev_close_from_history(self.kite, symbol)
             if close in (None, 0):
                 continue
             self.rest_prev_close[symbol] = close
-            row = self._build_stock_row(symbol, last_price, close)
+            row = self._build_stock_row(symbol, last_price, close, volume=volume)
             if row:
                 updated[symbol] = row
 
@@ -800,6 +803,7 @@ class MarketEngine:
             for tick in ticks:
                 token = tick.get("instrument_token")
                 last_price = tick.get("last_price")
+                volume = tick.get("volume_traded")
                 ohlc = tick.get("ohlc", {})
                 close = ohlc.get("close")
                 if not token or last_price is None:
@@ -808,7 +812,7 @@ class MarketEngine:
                 if token in self.token_to_symbol:
                     symbol = self.token_to_symbol[token]
                     base_close = close if close not in (None, 0) else self.rest_prev_close.get(symbol)
-                    row = self._build_stock_row(symbol, last_price, base_close)
+                    row = self._build_stock_row(symbol, last_price, base_close, volume=volume)
                     if row:
                         self.latest[symbol] = row
                 else:
@@ -950,23 +954,24 @@ class MarketEngine:
         for key, payload in quoted.items():
             symbol = key.split(":", 1)[-1]
             last_price = payload.get("last_price")
+            volume = payload.get("volume_traded")
             ohlc = payload.get("ohlc") or {}
             close = ohlc.get("close")
             if close not in (None, 0):
                 self.rest_prev_close[symbol] = close
             base_close = close if close not in (None, 0) else self.rest_prev_close.get(symbol)
-            row = self._build_stock_row(symbol, last_price, base_close)
+            row = self._build_stock_row(symbol, last_price, base_close, volume=volume)
             if row:
                 rows.append(row)
             elif last_price not in (None, 0):
-                missing_history.append((symbol, last_price))
+                missing_history.append((symbol, last_price, volume))
 
-        for symbol, last_price in missing_history:
+        for symbol, last_price, volume in missing_history:
             close = self._fetch_prev_close_from_history(self.kite, symbol)
             if close in (None, 0):
                 continue
             self.rest_prev_close[symbol] = close
-            row = self._build_stock_row(symbol, last_price, close)
+            row = self._build_stock_row(symbol, last_price, close, volume=volume)
             if row:
                 rows.append(row)
 

@@ -1604,12 +1604,17 @@ body.modal-open {
   }
 
   if (gainersBody && losersBody && sectorGainers && sectorLosers) {
+    const formatVolume = (value) => {
+      if (!Number.isFinite(Number(value))) return "-";
+      return Number(value).toLocaleString("en-IN");
+    };
+
     const ensureHead = (container) => {
       let head = container.querySelector(".table-head");
       if (!head) {
         head = document.createElement("div");
         head.className = "table-row table-head";
-        head.innerHTML = "<span>Symbol</span><span>Price</span><span>Change %</span><span>Chart</span>";
+        head.innerHTML = "<span>Symbol</span><span>Price</span><span>Volume</span><span>Change %</span><span>Chart</span>";
       }
       return head;
     };
@@ -1625,6 +1630,7 @@ body.modal-open {
       el.innerHTML = `
         <span class="cell-symbol">${row.symbol} ${fno}</span>
         <span class="cell-price">${row.price}</span>
+        <span class="cell-volume">${formatVolume(row.volume)}</span>
         <span class="cell-change ${positive ? "positive" : "negative"}">${sign}${row.change}%</span>
         <a class="tv-link" href="${tradingViewUrl(row.symbol)}" target="_blank" rel="noopener noreferrer">TradingView</a>
       `;
@@ -1648,10 +1654,12 @@ body.modal-open {
           el.style.setProperty("--row-delay", `${delay}s`);
           const symbolCell = el.querySelector('.cell-symbol');
           const priceCell = el.querySelector('.cell-price');
+          const volumeCell = el.querySelector('.cell-volume');
           const changeCell = el.querySelector('.cell-change');
           const chartLink = el.querySelector('.tv-link');
           if (symbolCell) symbolCell.innerHTML = `${row.symbol} ${fno}`;
           if (priceCell) priceCell.textContent = row.price;
+          if (volumeCell) volumeCell.textContent = formatVolume(row.volume);
           if (changeCell) {
             changeCell.className = `cell-change ${positive ? "positive" : "negative"}`;
             changeCell.textContent = `${sign}${row.change}%`;
@@ -1755,6 +1763,7 @@ body.modal-open {
             </span>
           </span>
           <span class="sector-stock-price">${stock.price}</span>
+          <span class="sector-stock-volume">${formatVolume(stock.volume)}</span>
           <span class="sector-stock-change ${cls}">${sign}${stock.change}%</span>
           <a class="tv-link" href="${tradingViewUrl(stock.symbol)}" target="_blank" rel="noopener noreferrer">TradingView</a>
         `;

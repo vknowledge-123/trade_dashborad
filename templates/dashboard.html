@@ -80,6 +80,7 @@
         <div class="table-row table-head">
           <span>Symbol</span>
           <span>Price</span>
+          <span>Volume</span>
           <span>Change %</span>
           <span>Chart</span>
         </div>
@@ -87,6 +88,7 @@
           <div class="table-row" style="--row-delay: {{ loop.index0 * 0.18 }}s">
             <span>{{ g.symbol }}{% if g.is_fno %} <span class="fno-tag">F&amp;O</span>{% endif %}</span>
             <span class="mono">{{ g.price }}</span>
+            <span class="mono">{{ "{:,}".format(g.volume) if g.volume is not none else "-" }}</span>
             <span class="positive mono">+{{ g.change }}%</span>
             <a class="tv-link" href="https://www.tradingview.com/chart/?symbol=NSE%3A{{ g.symbol | urlencode }}" target="_blank" rel="noopener noreferrer">TradingView</a>
           </div>
@@ -109,6 +111,7 @@
         <div class="table-row table-head">
           <span>Symbol</span>
           <span>Price</span>
+          <span>Volume</span>
           <span>Change %</span>
           <span>Chart</span>
         </div>
@@ -116,6 +119,7 @@
           <div class="table-row" style="--row-delay: {{ loop.index0 * 0.22 }}s">
             <span>{{ l.symbol }}{% if l.is_fno %} <span class="fno-tag">F&amp;O</span>{% endif %}</span>
             <span class="mono">{{ l.price }}</span>
+            <span class="mono">{{ "{:,}".format(l.volume) if l.volume is not none else "-" }}</span>
             <span class="negative mono">{{ l.change }}%</span>
             <a class="tv-link" href="https://www.tradingview.com/chart/?symbol=NSE%3A{{ l.symbol | urlencode }}" target="_blank" rel="noopener noreferrer">TradingView</a>
           </div>
@@ -183,6 +187,7 @@
           <span>Rank</span>
           <span>Symbol</span>
           <span>Price</span>
+          <span>Volume</span>
           <span>Change %</span>
           <span>Chart</span>
         </div>
@@ -386,7 +391,7 @@
 }
 .sector-stock-row {
   display: grid;
-  grid-template-columns: 0.5fr 1.2fr 0.8fr 0.8fr auto;
+  grid-template-columns: 0.45fr 1.2fr 0.75fr 0.95fr 0.75fr auto;
   gap: 12px;
   align-items: center;
   padding: 11px 12px;
@@ -401,6 +406,7 @@
 }
 .sector-stock-rank,
 .sector-stock-price,
+.sector-stock-volume,
 .sector-stock-change {
   font-family: "JetBrains Mono", monospace;
 }
@@ -433,7 +439,7 @@
     margin: 8px auto;
   }
   .sector-stock-row {
-    grid-template-columns: 0.5fr 1.2fr 0.75fr 0.85fr auto;
+    grid-template-columns: 0.45fr 1.1fr 0.7fr 0.9fr 0.8fr auto;
     gap: 8px;
     padding: 10px 8px;
   }
