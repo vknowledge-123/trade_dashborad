@@ -117,6 +117,30 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertEqual(second_snapshot["sector_losers"][0]["price"], 8434.2)
         self.assertEqual(second_snapshot["snapshot_source"], "api_sector")
 
+    def test_live_snapshot_schedules_background_refresh_when_cache_is_empty(self):
+        engine = MarketEngine(redis_client=None)
+        engine.kite = object()
+        engine.connected = False
+        engine.latest = {}
+        engine.sector_latest = {}
+        engine._is_market_open = lambda: True
+        engine._is_live_feed_stale = lambda: False
+        engine._cached_snapshot = lambda: None
+        engine._cached_closed_snapshot = lambda: None
+        engine._save_snapshot = lambda snapshot: None
+        engine._save_closed_snapshot = lambda snapshot: None
+
+        scheduled = []
+        engine._ensure_background_refresh = lambda market_open, reason="initial": scheduled.append((market_open, reason)) or True
+        engine._refresh_sector_snapshot = lambda *args, **kwargs: self.fail("get_snapshot should not block on sector refresh")
+        engine._refresh_rest_snapshot = lambda *args, **kwargs: self.fail("get_snapshot should not block on rest refresh")
+
+        snapshot = engine.get_snapshot()
+
+        self.assertEqual(scheduled, [(True, "initial")])
+        self.assertEqual(snapshot["gainers"], [])
+        self.assertEqual(snapshot["sector_gainers"], [])
+
 
 class MarketSnapshotApiIntegrationTests(unittest.TestCase):
     def test_market_snapshot_endpoint_returns_updated_sector_payloads_between_polls(self):

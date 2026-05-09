@@ -108,6 +108,7 @@ class MarketEngine:
         self.refresh_lock = threading.Lock()
         self.refresh_thread = None
         self.refresh_reason = None
+        self.start_lock = threading.Lock()
         self.http = requests.Session()
         self.http.headers.update(HTTP_HEADERS)
 
@@ -628,24 +629,25 @@ class MarketEngine:
         return False
 
     def start(self, api_key, access_token, sector_names):
-        try:
-            self.api_key = api_key
-            self.access_token = access_token
-            self.sector_names = list(sector_names or [])
-            self._close_ticker()
-            kite = KiteConnect(api_key=api_key)
-            kite.set_access_token(access_token)
-            self.kite = kite
-            self.build_universe(kite, sector_names)
-            if self._is_market_open():
-                self._refresh_rest_snapshot(force=True)
-            else:
-                self._refresh_closed_market_snapshot(force=True)
-            self._create_ticker()
-            self.last_error = None
-        except Exception as exc:
-            self.last_error = str(exc)
-            self.connected = False
+        with self.start_lock:
+            try:
+                self.api_key = api_key
+                self.access_token = access_token
+                self.sector_names = list(sector_names or [])
+                self._close_ticker()
+                kite = KiteConnect(api_key=api_key)
+                kite.set_access_token(access_token)
+                self.kite = kite
+                self.build_universe(kite, sector_names)
+                if self._is_market_open():
+                    self._refresh_rest_snapshot(force=True)
+                else:
+                    self._refresh_closed_market_snapshot(force=True)
+                self._create_ticker()
+                self.last_error = None
+            except Exception as exc:
+                self.last_error = str(exc)
+                self.connected = False
 
     def _on_connect(self, ws, response, tokens):
         try:
@@ -748,7 +750,6 @@ class MarketEngine:
                     self.last_error = "Live feed stalled, refreshing from API"
                 self._ensure_background_refresh(market_open=True, reason="stale")
             if market_open:
-                self._refresh_sector_snapshot(force=not bool(self.sector_latest))
                 if not self.latest:
                     self._ensure_background_refresh(market_open=True, reason="initial")
                 elif not self.connected:
@@ -756,12 +757,7 @@ class MarketEngine:
                 elif not self.sector_latest:
                     self._ensure_background_refresh(market_open=True, reason="sector_bootstrap")
             else:
-                rest_ok = True
-                if not self.latest:
-                    rest_ok = self._refresh_rest_snapshot(force=True)
-                if not self.sector_latest:
-                    self._refresh_sector_snapshot(force=True)
-                if (not rest_ok or not self.latest or not self.sector_latest):
+                if not self.latest or not self.sector_latest:
                     self._ensure_background_refresh(market_open=False, reason="closed_market_bootstrap")
 
         snapshot = self._build_snapshot(market_open)

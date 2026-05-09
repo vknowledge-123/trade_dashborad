@@ -16,6 +16,10 @@ services:
       - redis
     ports:
       - "127.0.0.1:8000:8000"
+    ulimits:
+      nofile:
+        soft: 8192
+        hard: 8192
     volumes:
       - app_data:/data
 
@@ -30,4 +34,3 @@ services:
 volumes:
   app_data:
   redis_data:
-
