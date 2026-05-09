@@ -141,6 +141,48 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertEqual(snapshot["gainers"], [])
         self.assertEqual(snapshot["sector_gainers"], [])
 
+    def test_closed_market_sector_breakdown_uses_cached_rows_and_memberships(self):
+        engine = MarketEngine(redis_client=None)
+        engine.kite = None
+        engine.latest = {}
+        engine._is_market_open = lambda: False
+        engine._cached_sector_memberships = lambda: {
+            "sector_members": {"NIFTY IT": ["INFY", "TCS"]},
+            "symbol_to_sectors": {
+                "INFY": ["NIFTY IT"],
+                "TCS": ["NIFTY IT"],
+            },
+        }
+        engine._cached_latest_rows = lambda: {
+            "rows": {
+                "INFY": {
+                    "symbol": "INFY",
+                    "name": "Infosys",
+                    "price": 1500.0,
+                    "change": 1.25,
+                    "is_fno": True,
+                    "sectors": ["NIFTY IT"],
+                },
+                "TCS": {
+                    "symbol": "TCS",
+                    "name": "TCS",
+                    "price": 4200.0,
+                    "change": -0.5,
+                    "is_fno": True,
+                    "sectors": ["NIFTY IT"],
+                },
+            },
+            "updated_at": "2026-05-08T15:30:00+05:30",
+            "snapshot_source": "historical_eod",
+        }
+
+        payload = engine.get_sector_breakdown("NIFTY IT")
+
+        self.assertEqual(payload["sector"], "NIFTY IT")
+        self.assertEqual(payload["constituent_count"], 2)
+        self.assertEqual(payload["stocks"][0]["symbol"], "INFY")
+        self.assertEqual(payload["stocks"][1]["symbol"], "TCS")
+
 
 class MarketSnapshotApiIntegrationTests(unittest.TestCase):
     def test_market_snapshot_endpoint_returns_updated_sector_payloads_between_polls(self):

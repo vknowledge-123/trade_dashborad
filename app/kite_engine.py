@@ -16,6 +16,8 @@ from app.db import load_market_cache, save_market_cache
 
 SNAPSHOT_CACHE_KEY = "latest_snapshot"
 CLOSED_SNAPSHOT_CACHE_KEY = "latest_closed_snapshot"
+LATEST_ROWS_CACHE_KEY = "latest_rows"
+SECTOR_MEMBERS_CACHE_KEY = "sector_memberships"
 IST = ZoneInfo("Asia/Kolkata")
 LIVE_FEED_STALE_AFTER_SECONDS = 15
 LIVE_FEED_RECONNECT_COOLDOWN_SECONDS = 20
@@ -219,6 +221,85 @@ class MarketEngine:
         except Exception:
             return
 
+    def _save_latest_rows_cache(self):
+        try:
+            save_market_cache(
+                LATEST_ROWS_CACHE_KEY,
+                {
+                    "rows": self.latest,
+                    "updated_at": self.last_update,
+                    "snapshot_source": self.last_snapshot_source,
+                },
+            )
+        except Exception:
+            return
+
+    def _cached_latest_rows(self):
+        return load_market_cache(LATEST_ROWS_CACHE_KEY)
+
+    def _save_sector_memberships_cache(self):
+        try:
+            save_market_cache(
+                SECTOR_MEMBERS_CACHE_KEY,
+                {
+                    "sector_members": self.sector_members,
+                    "symbol_to_sectors": self.symbol_to_sectors,
+                },
+            )
+        except Exception:
+            return
+
+    def _cached_sector_memberships(self):
+        return load_market_cache(SECTOR_MEMBERS_CACHE_KEY)
+
+    def _restore_cached_sector_memberships(self):
+        cached = self._cached_sector_memberships()
+        if not cached:
+            return False
+        sector_members = cached.get("sector_members") or {}
+        symbol_to_sectors = cached.get("symbol_to_sectors") or {}
+        if not sector_members:
+            return False
+        self.sector_members = {
+            str(sector): [str(symbol).upper() for symbol in members or []]
+            for sector, members in sector_members.items()
+            if members
+        }
+        self.symbol_to_sectors = {
+            str(symbol).upper(): [str(sector) for sector in sectors or []]
+            for symbol, sectors in symbol_to_sectors.items()
+            if sectors
+        }
+        return bool(self.sector_members)
+
+    def _rows_for_symbols_from_cache(self, symbols):
+        requested = [symbol for symbol in symbols if symbol]
+        if not requested:
+            return []
+
+        with self.lock:
+            if self.latest:
+                in_memory_rows = [dict(self.latest[symbol]) for symbol in requested if symbol in self.latest]
+                if in_memory_rows:
+                    return in_memory_rows
+
+        cached = self._cached_latest_rows()
+        rows = (cached or {}).get("rows") or {}
+        if not rows:
+            return []
+
+        with self.lock:
+            for symbol, row in rows.items():
+                if isinstance(row, dict):
+                    self.latest.setdefault(symbol, row)
+
+        if cached.get("updated_at") and not self.last_update:
+            self.last_update = cached["updated_at"]
+        if cached.get("snapshot_source") and self.last_snapshot_source == "empty":
+            self.last_snapshot_source = cached["snapshot_source"]
+
+        return [dict(rows[symbol]) for symbol in requested if symbol in rows]
+
     def _stock_row_count(self, snapshot):
         return len(snapshot.get("gainers") or []) + len(snapshot.get("losers") or [])
 
@@ -320,6 +401,9 @@ class MarketEngine:
             return []
 
     def _refresh_sector_memberships(self, force=False):
+        if not self.sector_members:
+            self._restore_cached_sector_memberships()
+
         today = datetime.now(IST).date().isoformat()
         if not force and self.last_membership_refresh_date == today and self.sector_members:
             return
@@ -340,6 +424,9 @@ class MarketEngine:
                 symbol: sorted(sectors)
                 for symbol, sectors in symbol_to_sectors.items()
             }
+            self.last_membership_refresh_date = today
+            self._save_sector_memberships_cache()
+        elif self.sector_members:
             self.last_membership_refresh_date = today
 
     def build_universe(self, kite: KiteConnect, sector_names):
@@ -547,6 +634,7 @@ class MarketEngine:
                 self.latest.update(updated)
                 self.last_update = self._utc_now()
             self.last_snapshot_source = "api"
+            self._save_latest_rows_cache()
 
         self.last_rest_refresh_ts = now_ts
         return bool(updated)
@@ -621,6 +709,8 @@ class MarketEngine:
                     self.sector_latest = sector_rows
             self.last_snapshot_source = "historical_eod"
             self.last_closed_refresh_ts = now_ts
+            if stock_rows:
+                self._save_latest_rows_cache()
             snapshot = self._build_snapshot(False)
             if self._stock_row_count(snapshot):
                 self._save_snapshot(snapshot)
@@ -787,9 +877,13 @@ class MarketEngine:
 
     def _get_latest_rows_for_symbols(self, symbols):
         if not self.kite:
-            return []
+            return self._rows_for_symbols_from_cache(symbols)
 
         if not self._is_market_open():
+            cached_rows = self._rows_for_symbols_from_cache(symbols)
+            if cached_rows:
+                self.last_snapshot_source = "closed_cache_rows"
+                return cached_rows
             now = datetime.now(ZoneInfo("Asia/Kolkata"))
             from_date = now - timedelta(days=15)
             rows = []
@@ -806,6 +900,7 @@ class MarketEngine:
                     for row in rows:
                         self.latest[row["symbol"]] = row
                 self.last_snapshot_source = "historical_eod"
+                self._save_latest_rows_cache()
             return rows
 
         requested = [symbol for symbol in symbols if symbol in self.symbol_to_token]
@@ -844,6 +939,7 @@ class MarketEngine:
                     self.latest[row["symbol"]] = row
                 self.last_update = self._utc_now()
             self.last_snapshot_source = "api"
+            self._save_latest_rows_cache()
         return rows
 
     def get_sector_breakdown(self, sector_name):
