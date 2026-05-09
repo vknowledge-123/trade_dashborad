@@ -183,6 +183,36 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertEqual(payload["stocks"][0]["symbol"], "INFY")
         self.assertEqual(payload["stocks"][1]["symbol"], "TCS")
 
+    def test_closed_market_sector_breakdown_prefers_cached_sector_payload(self):
+        engine = MarketEngine(redis_client=None)
+        engine._is_market_open = lambda: False
+        engine._cached_sector_breakdowns = lambda: {
+            "NIFTY IT": {
+                "sector": "NIFTY IT",
+                "stocks": [
+                    {
+                        "rank": 1,
+                        "symbol": "INFY",
+                        "name": "Infosys",
+                        "price": 1500.0,
+                        "change": 1.25,
+                        "is_fno": True,
+                        "sectors": ["NIFTY IT"],
+                    }
+                ],
+                "updated_at": "2026-05-12T15:30:00+05:30",
+                "market_open": False,
+                "snapshot_source": "historical_eod",
+                "constituent_count": 1,
+            }
+        }
+        engine._refresh_sector_memberships = lambda *args, **kwargs: self.fail("closed cache should avoid membership refresh")
+
+        payload = engine.get_sector_breakdown("NIFTY IT")
+
+        self.assertEqual(payload["constituent_count"], 1)
+        self.assertEqual(payload["stocks"][0]["symbol"], "INFY")
+
 
 class MarketSnapshotApiIntegrationTests(unittest.TestCase):
     def test_market_snapshot_endpoint_returns_updated_sector_payloads_between_polls(self):

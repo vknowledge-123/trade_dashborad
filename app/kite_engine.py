@@ -18,6 +18,7 @@ SNAPSHOT_CACHE_KEY = "latest_snapshot"
 CLOSED_SNAPSHOT_CACHE_KEY = "latest_closed_snapshot"
 LATEST_ROWS_CACHE_KEY = "latest_rows"
 SECTOR_MEMBERS_CACHE_KEY = "sector_memberships"
+SECTOR_BREAKDOWNS_CACHE_KEY = "sector_breakdowns"
 IST = ZoneInfo("Asia/Kolkata")
 LIVE_FEED_STALE_AFTER_SECONDS = 15
 LIVE_FEED_RECONNECT_COOLDOWN_SECONDS = 20
@@ -251,6 +252,40 @@ class MarketEngine:
 
     def _cached_sector_memberships(self):
         return load_market_cache(SECTOR_MEMBERS_CACHE_KEY)
+
+    def _save_sector_breakdowns_cache(self, rows_by_symbol, market_open):
+        if not rows_by_symbol or not self.symbol_to_sectors:
+            return
+        grouped = defaultdict(list)
+        for symbol, row in rows_by_symbol.items():
+            if not isinstance(row, dict):
+                continue
+            for sector in row.get("sectors") or self.symbol_to_sectors.get(symbol, []):
+                grouped[sector].append(dict(row))
+
+        payload = {}
+        for sector, rows in grouped.items():
+            ranked = sorted(rows, key=lambda item: item["change"], reverse=True)
+            for index, row in enumerate(ranked, start=1):
+                row["rank"] = index
+            payload[sector] = {
+                "sector": sector,
+                "stocks": ranked,
+                "updated_at": self.last_update,
+                "market_open": market_open,
+                "snapshot_source": self.last_snapshot_source,
+                "constituent_count": len(ranked),
+            }
+
+        if not payload:
+            return
+        try:
+            save_market_cache(SECTOR_BREAKDOWNS_CACHE_KEY, payload)
+        except Exception:
+            return
+
+    def _cached_sector_breakdowns(self):
+        return load_market_cache(SECTOR_BREAKDOWNS_CACHE_KEY)
 
     def _restore_cached_sector_memberships(self):
         cached = self._cached_sector_memberships()
@@ -635,6 +670,7 @@ class MarketEngine:
                 self.last_update = self._utc_now()
             self.last_snapshot_source = "api"
             self._save_latest_rows_cache()
+            self._save_sector_breakdowns_cache(updated, market_open)
 
         self.last_rest_refresh_ts = now_ts
         return bool(updated)
@@ -711,6 +747,7 @@ class MarketEngine:
             self.last_closed_refresh_ts = now_ts
             if stock_rows:
                 self._save_latest_rows_cache()
+                self._save_sector_breakdowns_cache(stock_rows, False)
             snapshot = self._build_snapshot(False)
             if self._stock_row_count(snapshot):
                 self._save_snapshot(snapshot)
@@ -947,6 +984,13 @@ class MarketEngine:
         if not sector:
             return {"sector": "", "stocks": [], "updated_at": self.last_update, "market_open": self._is_market_open()}
 
+        market_open = self._is_market_open()
+        if not market_open:
+            cached_breakdowns = self._cached_sector_breakdowns() or {}
+            cached_payload = cached_breakdowns.get(sector)
+            if cached_payload and cached_payload.get("stocks"):
+                return cached_payload
+
         self._refresh_sector_memberships(force=not bool(self.sector_members))
         symbols = self.sector_members.get(sector, [])
         rows = self._get_latest_rows_for_symbols(symbols)
@@ -957,7 +1001,7 @@ class MarketEngine:
             "sector": sector,
             "stocks": ranked,
             "updated_at": self.last_update,
-            "market_open": self._is_market_open(),
+            "market_open": market_open,
             "snapshot_source": self.last_snapshot_source,
             "constituent_count": len(ranked),
         }
