@@ -19,6 +19,14 @@
       {% endif %}
       <a class="btn btn-ghost" href="/dashboard">Back To Dashboard</a>
     </div>
+    <div class="premium-contact-card">
+      <div class="premium-contact-title">Call/WhatsApp For Premium, License Key, And Payment Help</div>
+      <div class="premium-contact-number">7747966806</div>
+      <div class="premium-contact-actions">
+        <a class="btn btn-primary" href="tel:+917747966806">Call Now</a>
+        <a class="btn btn-ghost" href="https://wa.me/917747966806" target="_blank" rel="noopener noreferrer">WhatsApp</a>
+      </div>
+    </div>
     {% if guest_expired %}
       <div class="premium-alert">
         Your free guest dashboard week is complete. Register now to continue with premium and academy access.
@@ -80,6 +88,7 @@
       <div class="support-point">Designed for users who want strategy, execution, and mentorship together.</div>
       <div class="support-point">Ideal path after your free dashboard exploration period ends.</div>
       <div class="support-point">Learn with Mentors Amol Charpe and Ravinder Jadhav through practical guidance and live support.</div>
+      <div class="support-point">Call/WhatsApp 7747966806 for premium plan details, payment confirmation, and license key support.</div>
       <div class="support-point">Upgrade further with one-to-one live mentorship for ₹15,000 and learn directly from the mentor.</div>
     </div>
     <div class="academy-meta">
@@ -132,6 +141,32 @@
   border: 1px solid rgba(255, 184, 48, 0.18);
   background: rgba(255, 184, 48, 0.08);
   color: #ffe6ad;
+}
+.premium-contact-card {
+  margin-top: 18px;
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(0, 229, 160, 0.24);
+  background: linear-gradient(135deg, rgba(0, 229, 160, 0.10), rgba(0, 212, 255, 0.10));
+}
+.premium-contact-title {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #d8fff0;
+}
+.premium-contact-number {
+  margin-top: 8px;
+  font-size: clamp(24px, 3vw, 30px);
+  font-weight: 900;
+  color: #ffffff;
+}
+.premium-contact-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 14px;
 }
 .premium-pricing {
   display: grid;
