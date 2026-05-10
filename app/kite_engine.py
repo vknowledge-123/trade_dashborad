@@ -136,6 +136,9 @@ class MarketEngine:
             "message": "No market history cache job has been started yet.",
             "error": None,
         }
+        self.badge_warm_lock = threading.Lock()
+        self.badge_warm_thread = None
+        self.pending_badge_symbols = set()
         self.http = requests.Session()
         self.http.headers.update(HTTP_HEADERS)
 
@@ -189,6 +192,13 @@ class MarketEngine:
 
     def _completed_session_cache_marker(self):
         return self._latest_completed_session_date().isoformat()
+
+    def _historical_date_arg(self, value):
+        if hasattr(value, "date"):
+            value = value.date()
+        if hasattr(value, "isoformat"):
+            return value.isoformat()
+        return value
 
     def _tracked_feed_activity_ts(self):
         return max(self.last_tick_ts, self.last_connect_ts)
@@ -374,6 +384,23 @@ class MarketEngine:
         except Exception:
             return
 
+    def _empty_rrg_payload(self, benchmark_symbol, cache_marker, market_open, message=None):
+        return {
+            "benchmark": benchmark_symbol,
+            "cache_marker": cache_marker,
+            "market_open": market_open,
+            "updated_at": self.last_update or self._utc_now(),
+            "latest_session": None,
+            "normalization_window": RRG_NORMALIZATION_WINDOW,
+            "trail_points": RRG_TRAIL_POINTS,
+            "items": [],
+            "x_domain": [90, 110],
+            "y_domain": [90, 110],
+            "cache_pending": True,
+            "cache_stale": False,
+            "error": message or "Relative rotation cache is warming in the background.",
+        }
+
     def _history_cache_status_payload(self):
         status = dict(self.history_cache_status)
         status["is_running"] = bool(self.history_cache_thread and self.history_cache_thread.is_alive())
@@ -399,7 +426,12 @@ class MarketEngine:
             if elapsed < HISTORICAL_DAY_REQUEST_DELAY_SECONDS:
                 time.sleep(HISTORICAL_DAY_REQUEST_DELAY_SECONDS - elapsed)
             try:
-                candles = self.kite.historical_data(token, from_date, to_date, "day")
+                candles = self.kite.historical_data(
+                    token,
+                    self._historical_date_arg(from_date),
+                    self._historical_date_arg(to_date),
+                    "day",
+                )
             except Exception as exc:
                 self.last_error = str(exc)
                 self.last_historical_fetch_ts = time.monotonic()
@@ -538,25 +570,98 @@ class MarketEngine:
             "Improving": "#00d4ff",
         }.get(quadrant, "#8ca5c8")
 
-    def _decorate_rows_with_previous_day_badges(self, rows):
+    def _warm_previous_day_badge_for_symbol(self, symbol, cache_marker):
+        symbol = (symbol or "").upper()
+        if not symbol:
+            return None
+        token = self.symbol_to_token.get(symbol)
+        if not token or not self.kite:
+            return None
+        completed_session = self._latest_completed_session_date()
+        session_window = self._trading_session_window(completed_session, 2)
+        if len(session_window) < 2:
+            return None
+        candles = self._fetch_recent_day_candles(
+            token,
+            self._session_start_dt(session_window[0]),
+            self._session_end_dt(session_window[-1]),
+            limit=2,
+        )
+        if len(candles) < 2:
+            return None
+        current_close = candles[-1].get("close")
+        prior_close = candles[-2].get("close")
+        if current_close in (None, 0) or prior_close in (None, 0):
+            return None
+        change = round(((current_close - prior_close) / prior_close) * 100, 2)
+        self.previous_day_badges_cache[symbol] = {
+            "cache_marker": cache_marker,
+            "change": change,
+        }
+        return change
+
+    def _run_badge_warm_job(self):
+        cache_marker = self._completed_session_cache_marker()
+        while True:
+            with self.badge_warm_lock:
+                symbols = sorted(self.pending_badge_symbols)
+                self.pending_badge_symbols.clear()
+            if not symbols:
+                break
+            self._restore_previous_day_badges_cache()
+            updated = False
+            for symbol in symbols:
+                cached = self.previous_day_badges_cache.get(symbol)
+                if cached and cached.get("cache_marker") == cache_marker:
+                    continue
+                if self._warm_previous_day_badge_for_symbol(symbol, cache_marker) is not None:
+                    updated = True
+            if updated:
+                self._save_previous_day_badges_cache()
+        with self.badge_warm_lock:
+            self.badge_warm_thread = None
+
+    def _ensure_previous_day_badges_background(self, symbols):
+        filtered = {
+            str(symbol).upper()
+            for symbol in (symbols or [])
+            if symbol and self.symbol_to_token.get(str(symbol).upper())
+        }
+        if not filtered or not self.kite:
+            return False
+        with self.badge_warm_lock:
+            self.pending_badge_symbols.update(filtered)
+            if self.badge_warm_thread and self.badge_warm_thread.is_alive():
+                return False
+            thread = threading.Thread(target=self._run_badge_warm_job, daemon=True)
+            self.badge_warm_thread = thread
+            thread.start()
+            return True
+
+    def _decorate_rows_with_previous_day_badges(self, rows, fetch_missing=False):
         if not rows:
             return rows
+        missing_symbols = []
         for row in rows:
             if not isinstance(row, dict):
                 continue
-            change = self._get_previous_day_change(row.get("symbol"))
+            change = self._get_previous_day_change(row.get("symbol"), allow_fetch=fetch_missing)
             row["previous_day_change"] = round(change, 2) if change is not None else None
             row["previous_day_positive"] = bool(change is not None and change > 0)
+            if change is None and row.get("symbol"):
+                missing_symbols.append(row.get("symbol"))
+        if missing_symbols and not fetch_missing:
+            self._ensure_previous_day_badges_background(missing_symbols)
         return rows
 
     def _decorate_snapshot_rows(self, snapshot):
         if not snapshot:
             return snapshot
-        self._decorate_rows_with_previous_day_badges(snapshot.get("gainers") or [])
-        self._decorate_rows_with_previous_day_badges(snapshot.get("losers") or [])
+        self._decorate_rows_with_previous_day_badges(snapshot.get("gainers") or [], fetch_missing=False)
+        self._decorate_rows_with_previous_day_badges(snapshot.get("losers") or [], fetch_missing=False)
         return snapshot
 
-    def _get_previous_day_change(self, symbol):
+    def _get_previous_day_change(self, symbol, allow_fetch=True):
         symbol = (symbol or "").upper()
         if not symbol:
             return None
@@ -566,36 +671,14 @@ class MarketEngine:
         if cached and cached.get("cache_marker") == cache_marker:
             return cached.get("change")
 
-        token = self.symbol_to_token.get(symbol)
-        if not token or not self.kite:
+        if not allow_fetch:
             return cached.get("change") if cached else None
 
-        completed_session = self._latest_completed_session_date()
-        session_window = self._trading_session_window(completed_session, 2)
-        if len(session_window) < 2:
+        change = self._warm_previous_day_badge_for_symbol(symbol, cache_marker)
+        if change is None:
             return cached.get("change") if cached else None
-        candles = self._fetch_recent_day_candles(
-            token,
-            self._session_start_dt(session_window[0]),
-            self._session_end_dt(session_window[-1]),
-            limit=2,
-        )
-        if len(candles) < 2:
-            return cached.get("change") if cached else None
-
-        current_close = candles[-1].get("close")
-        prior_close = candles[-2].get("close")
-
-        if current_close in (None, 0) or prior_close in (None, 0):
-            return cached.get("change") if cached else None
-
-        change = (current_close - prior_close) / prior_close * 100
-        self.previous_day_badges_cache[symbol] = {
-            "cache_marker": cache_marker,
-            "change": round(change, 2),
-        }
         self._save_previous_day_badges_cache()
-        return round(change, 2)
+        return change
 
     def _run_refresh_job(self, reason, market_open):
         try:
@@ -1108,57 +1191,42 @@ class MarketEngine:
             series.append((candle_date, float(close)))
         return series
 
+    def _symbols_for_badge_warmup(self):
+        symbols = set()
+        snapshot_sources = [self._cached_snapshot(), self._cached_closed_snapshot()]
+        for snapshot in snapshot_sources:
+            if not snapshot:
+                continue
+            for row in (snapshot.get("gainers") or []) + (snapshot.get("losers") or []):
+                symbol = (row.get("symbol") or "").upper()
+                if symbol:
+                    symbols.add(symbol)
+        return sorted(symbols)
+
     def _warm_previous_day_badges_cache(self, cache_marker, force=False):
         self._restore_previous_day_badges_cache()
-        symbols = sorted(
-            symbol for symbol, token in self.symbol_to_token.items()
-            if token and self._is_tracked_symbol(symbol)
-        )
+        symbols = self._symbols_for_badge_warmup()
         total = len(symbols)
         if not total:
             return {"processed": 0, "total": 0, "updated": 0}
 
-        completed_session = self._latest_completed_session_date()
-        session_window = self._trading_session_window(completed_session, 2)
-        if len(session_window) < 2:
-            return {"processed": 0, "total": total, "updated": 0}
-
-        from_date = self._session_start_dt(session_window[0])
-        to_date = self._session_end_dt(session_window[-1])
         processed = 0
         updated = 0
-
         for symbol in symbols:
             processed += 1
             self._update_history_cache_status(
                 processed=processed,
                 total=total + len(self.sector_tokens) + 1,
-                message=f"Caching previous-day badge history ({processed}/{total})",
+                message=f"Caching dashboard badge history ({processed}/{total})",
             )
-            if not force:
-                cached = self.previous_day_badges_cache.get(symbol)
-                if cached and cached.get("cache_marker") == cache_marker:
-                    continue
-
-            candles = self._fetch_recent_day_candles(
-                self.symbol_to_token.get(symbol),
-                from_date,
-                to_date,
-                limit=2,
-            )
-            if len(candles) < 2:
+            cached = self.previous_day_badges_cache.get(symbol)
+            if not force and cached and cached.get("cache_marker") == cache_marker:
                 continue
-            current_close = candles[-1].get("close")
-            prior_close = candles[-2].get("close")
-            if current_close in (None, 0) or prior_close in (None, 0):
-                continue
-            self.previous_day_badges_cache[symbol] = {
-                "cache_marker": cache_marker,
-                "change": round(((current_close - prior_close) / prior_close) * 100, 2),
-            }
-            updated += 1
+            if self._warm_previous_day_badge_for_symbol(symbol, cache_marker) is not None:
+                updated += 1
 
-        self._save_previous_day_badges_cache()
+        if updated:
+            self._save_previous_day_badges_cache()
         return {"processed": processed, "total": total, "updated": updated}
 
     def _build_rrg_series_map(self, benchmark_symbol, cache_marker):
@@ -1175,6 +1243,11 @@ class MarketEngine:
         from_date = self._session_start_dt(session_window[0])
         to_date = self._session_end_dt(session_window[-1])
         benchmark_series = self._fetch_rrg_price_series(benchmark_token, from_date, to_date)
+        if len(benchmark_series) < RRG_LOOKBACK_SESSIONS:
+            return None, {}, (
+                f"{benchmark_symbol} returned only {len(benchmark_series)} daily candles for "
+                f"{session_window[0].isoformat()} to {session_window[-1].isoformat()}."
+            )
         component_series = {}
         sector_names = list(self.sector_tokens.keys()) or list(self.sector_names)
 
@@ -1195,9 +1268,14 @@ class MarketEngine:
             if not token:
                 continue
             series = self._fetch_rrg_price_series(token, from_date, to_date)
-            if series:
+            if len(series) >= RRG_LOOKBACK_SESSIONS:
                 component_series[sector_name] = series
 
+        if not component_series:
+            return None, {}, (
+                f"No sector index returned at least {RRG_LOOKBACK_SESSIONS} daily candles for "
+                f"{session_window[0].isoformat()} to {session_window[-1].isoformat()}."
+            )
         return benchmark_series, component_series, None
 
     def _warm_relative_rotation_graph_cache(self, cache_marker, force=False):
@@ -1226,7 +1304,10 @@ class MarketEngine:
         payload["market_open"] = self._is_market_open()
         payload["updated_at"] = self.last_update or self._utc_now()
         if not payload.get("items"):
-            payload["error"] = "Historical index data could not be aligned across benchmark and sectors."
+            payload["error"] = (
+                f"Historical index data was fetched, but 0 sectors aligned into a full "
+                f"{RRG_LOOKBACK_SESSIONS}-session RRG window."
+            )
         self._save_relative_rotation_graph(payload)
         return payload
 
@@ -1378,17 +1459,53 @@ class MarketEngine:
             "y_domain": [round(min(all_y) - padding, 2), round(max(all_y) + padding, 2)],
         }
 
-    def get_relative_rotation_graph(self, benchmark_symbol=RRG_BENCHMARK_SYMBOL):
+    def get_relative_rotation_graph(self, benchmark_symbol=RRG_BENCHMARK_SYMBOL, cached_only=False):
         market_open = self._is_market_open()
         cache_marker = self._completed_session_cache_marker()
         cached = self._cached_relative_rotation_graph()
         if self._cache_payload_matches_marker(cached, cache_marker) and cached.get("items"):
             cached["market_open"] = market_open
+            cached["cache_pending"] = False
+            cached["cache_stale"] = False
             return cached
 
-        payload = self._warm_relative_rotation_graph_cache(cache_marker, force=False)
-        payload["market_open"] = market_open
-        return payload
+        if cached_only:
+            if cached and cached.get("items"):
+                cached["market_open"] = market_open
+                cached["cache_pending"] = True
+                cached["cache_stale"] = True
+                cached["error"] = (
+                    f"Showing cached rotation data from {cached.get('cache_marker') or 'the prior session'} "
+                    "while the latest session cache warms in the background."
+                )
+                self.start_daily_market_history_cache(force=False)
+                return cached
+            self.start_daily_market_history_cache(force=False)
+            return self._empty_rrg_payload(
+                benchmark_symbol,
+                cache_marker,
+                market_open,
+                message="Relative rotation cache is warming in the background. Please wait a moment.",
+            )
+
+        if cached and cached.get("items"):
+            cached["market_open"] = market_open
+            cached["cache_pending"] = True
+            cached["cache_stale"] = True
+            cached["error"] = (
+                f"Showing cached rotation data from {cached.get('cache_marker') or 'the prior session'} "
+                "while the latest session cache warms in the background."
+            )
+            self.start_daily_market_history_cache(force=False)
+            return cached
+
+        status = self.start_daily_market_history_cache(force=False)
+        return self._empty_rrg_payload(
+            benchmark_symbol,
+            cache_marker,
+            market_open,
+            message=status.get("message") or "Relative rotation cache is warming in the background.",
+        )
 
     def get_snapshot(self):
         if self.demo_mode and self.demo_snapshot:

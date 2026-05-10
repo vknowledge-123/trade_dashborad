@@ -417,6 +417,7 @@
   let currentPayload = {};
   let currentCacheStatus = {};
   let cachePollTimer = null;
+  let rrgPendingTimer = null;
   try {
     currentPayload = JSON.parse(initialScript.textContent || "{}");
   } catch (error) {
@@ -578,6 +579,15 @@
     renderList(payload);
   };
 
+  const schedulePendingRefresh = (payload) => {
+    if (rrgPendingTimer) {
+      window.clearTimeout(rrgPendingTimer);
+      rrgPendingTimer = null;
+    }
+    if (!payload || !payload.cache_pending) return;
+    rrgPendingTimer = window.setTimeout(fetchRrg, 3500);
+  };
+
   const fetchRrg = async () => {
     if (!refreshButton) return;
     refreshButton.disabled = true;
@@ -590,6 +600,7 @@
       if (!response.ok) throw new Error("Unable to load relative rotation data");
       currentPayload = await response.json();
       renderChart(currentPayload);
+      schedulePendingRefresh(currentPayload);
     } catch (error) {
       emptyState.hidden = false;
       emptyState.textContent = "Relative rotation data could not be refreshed right now.";
@@ -655,6 +666,7 @@
 
   renderChart(currentPayload);
   renderCacheStatus(currentCacheStatus);
+  schedulePendingRefresh(currentPayload);
   if (refreshButton) {
     refreshButton.addEventListener("click", fetchRrg);
   }
