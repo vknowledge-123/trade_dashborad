@@ -76,14 +76,25 @@
         </form>
       {% endif %}
       <div class="academy-help">
-        <div class="academy-help-title">Need a license?</div>
+        <div class="academy-help-title">License Key And Payment Help</div>
         <p>
           Choose a premium plan, then the admin can generate a duration-based license key for your email.
           After activation, all academy class links stay unlocked for your account until expiry.
         </p>
+        <div class="academy-support-card">
+          <div class="academy-support-title">For license key, payment, and activation help</div>
+          <p>
+            Call or WhatsApp <strong>7747966806</strong> for more information, payment confirmation,
+            and license key support.
+          </p>
+          <div class="academy-support-actions">
+            <a class="btn btn-primary" href="tel:+917747966806">Call 7747966806</a>
+            <a class="btn btn-ghost" href="https://wa.me/917747966806" target="_blank" rel="noopener noreferrer">WhatsApp</a>
+          </div>
+        </div>
         <div class="academy-mentor-card">
           <div class="academy-mentor-title">One To One Live Mentorship</div>
-          <div class="academy-mentor-price">₹15,000</div>
+          <div class="academy-mentor-price">Rs 15,000</div>
           <p>Learn directly from Mentors Amol Charpe and Ravinder Jadhav with focused one-to-one live mentorship and direct support.</p>
         </div>
         <a class="btn btn-ghost" href="/premium">View Premium Plans</a>
@@ -213,6 +224,27 @@
   color: #bfd0ea;
   line-height: 1.6;
   margin-bottom: 14px;
+}
+.academy-support-card {
+  margin-bottom: 14px;
+  padding: 15px;
+  border-radius: 16px;
+  border: 1px solid rgba(0, 212, 255, 0.22);
+  background: linear-gradient(135deg, rgba(0, 212, 255, 0.10), rgba(99, 102, 241, 0.10));
+}
+.academy-support-title {
+  margin-bottom: 8px;
+  font-weight: 800;
+  color: #f7fbff;
+}
+.academy-support-card p {
+  margin-bottom: 12px;
+  color: #d7e6fb;
+}
+.academy-support-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 .academy-mentor-card {
   margin-bottom: 14px;
