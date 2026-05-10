@@ -13,6 +13,8 @@ os.environ["TRADE_DASHBOARD_DB_PATH"] = os.path.join(_TMP_DIR.name, "test_trade_
 from app.kite_engine import MarketEngine
 import app.main as main_module
 
+main_module.init_db()
+
 
 class FakeKite:
     def __init__(self, snapshots):
@@ -113,6 +115,50 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertEqual(row["change"], 1.35)
         self.assertEqual(latest_dt, "2026-05-09")
 
+    def test_rest_snapshot_uses_quote_volume_field(self):
+        engine = MarketEngine(redis_client=None)
+        engine.kite = object()
+        engine.symbol_to_token = {"INFY": 123}
+        engine._is_market_open = lambda: True
+        engine._quote_symbols = lambda kite, symbols: {
+            "NSE:INFY": {
+                "last_price": 1501.0,
+                "volume": 987654,
+                "ohlc": {"close": 1490.0},
+            }
+        }
+        engine._save_latest_rows_cache = lambda: None
+        engine._save_sector_breakdowns_cache = lambda *args, **kwargs: None
+
+        refreshed = engine._refresh_rest_snapshot(force=True)
+
+        self.assertTrue(refreshed)
+        self.assertEqual(engine.latest["INFY"]["volume"], 987654)
+
+    def test_websocket_tick_preserves_existing_volume_when_tick_has_no_volume(self):
+        engine = MarketEngine(redis_client=None)
+        engine.token_to_symbol = {123: "INFY"}
+        engine.rest_prev_close = {"INFY": 1490.0}
+        engine.latest = {
+            "INFY": {
+                "symbol": "INFY",
+                "name": "Infosys",
+                "price": 1498.0,
+                "change": 0.54,
+                "volume": 543210,
+                "is_fno": True,
+                "sectors": [],
+            }
+        }
+
+        engine._on_ticks(
+            None,
+            [{"instrument_token": 123, "last_price": 1500.0, "ohlc": {"close": 1490.0}}],
+        )
+
+        self.assertEqual(engine.latest["INFY"]["volume"], 543210)
+        self.assertTrue(engine.connected)
+
     def test_sector_snapshot_refreshes_on_repeated_live_snapshot_requests(self):
         fake_kite = FakeKite(
             [
@@ -152,6 +198,7 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         first_snapshot = engine.get_snapshot()
 
         engine.last_sector_quote_ts = time.time() - 6
+        engine._refresh_sector_snapshot(force=True)
         second_snapshot = engine.get_snapshot()
 
         self.assertEqual(first_snapshot["sector_gainers"][0]["price"], 8633.4)
@@ -167,7 +214,7 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         }
 
         changes = {"INFY": 2.15, "TCS": -1.25}
-        engine._get_previous_day_change = lambda symbol: changes.get(symbol)
+        engine._get_previous_day_change = lambda symbol, allow_fetch=True: changes.get(symbol)
 
         engine._decorate_snapshot_rows(snapshot)
 
@@ -271,6 +318,28 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
 
         self.assertEqual(payload["constituent_count"], 1)
         self.assertEqual(payload["stocks"][0]["symbol"], "INFY")
+
+    def test_live_sector_breakdown_uses_quote_volume_field(self):
+        engine = MarketEngine(redis_client=None)
+        engine.kite = object()
+        engine._is_market_open = lambda: True
+        engine.symbol_to_token = {"INFY": 123}
+        engine.sector_members = {"NIFTY IT": ["INFY"]}
+        engine._refresh_sector_memberships = lambda *args, **kwargs: None
+        engine._decorate_rows_with_previous_day_badges = lambda rows, fetch_missing=True: rows
+        engine._quote_symbols = lambda kite, symbols: {
+            "NSE:INFY": {
+                "last_price": 1502.0,
+                "volume": 321000,
+                "ohlc": {"close": 1490.0},
+            }
+        }
+        engine._save_latest_rows_cache = lambda: None
+
+        payload = engine.get_sector_breakdown("NIFTY IT")
+
+        self.assertEqual(payload["stocks"][0]["symbol"], "INFY")
+        self.assertEqual(payload["stocks"][0]["volume"], 321000)
 
     def test_build_rrg_payload_from_series_returns_quadrant_coordinates(self):
         engine = MarketEngine(redis_client=None)

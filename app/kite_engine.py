@@ -242,11 +242,20 @@ class MarketEngine:
         self.connected = False
         self.last_connect_ts = 0.0
         self.last_tick_ts = 0.0
-        self.ticker = KiteTicker(self.api_key, self.access_token)
+        self.ticker = KiteTicker(
+            self.api_key,
+            self.access_token,
+            reconnect=True,
+            reconnect_max_tries=50,
+            reconnect_max_delay=60,
+            connect_timeout=30,
+        )
         self.ticker.on_connect = lambda ws, resp: self._on_connect(ws, resp, all_tokens)
         self.ticker.on_ticks = self._on_ticks
         self.ticker.on_close = self._on_close
         self.ticker.on_error = self._on_error
+        self.ticker.on_reconnect = self._on_reconnect
+        self.ticker.on_noreconnect = self._on_noreconnect
         self.ticker.connect(threaded=True)
         return True
 
@@ -264,6 +273,25 @@ class MarketEngine:
 
     def _is_tracked_symbol(self, symbol):
         return not self.nifty500_set or symbol.upper() in self.nifty500_set
+
+    def _coerce_volume(self, value):
+        if value in (None, ""):
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _extract_volume(self, payload, fallback=None):
+        fallback_volume = self._coerce_volume(fallback)
+        for key in ("volume_traded", "volume"):
+            volume = self._coerce_volume((payload or {}).get(key))
+            if volume is None:
+                continue
+            if volume == 0 and fallback_volume not in (None, 0):
+                return fallback_volume
+            return volume
+        return fallback_volume
 
     def _build_stock_row(self, symbol, last_price, close, volume=None):
         if last_price in (None, 0) or close in (None, 0):
@@ -952,7 +980,7 @@ class MarketEngine:
         for key, payload in quoted.items():
             symbol = key.split(":", 1)[-1]
             last_price = payload.get("last_price")
-            volume = payload.get("volume_traded")
+            volume = self._extract_volume(payload, fallback=(self.latest.get(symbol) or {}).get("volume"))
             ohlc = payload.get("ohlc") or {}
             close = ohlc.get("close")
             if close not in (None, 0):
@@ -1077,6 +1105,7 @@ class MarketEngine:
                 self._close_ticker()
                 kite = KiteConnect(api_key=api_key)
                 kite.set_access_token(access_token)
+                kite.set_session_expiry_hook(self._on_session_expiry)
                 self.kite = kite
                 self.build_universe(kite, sector_names)
                 if self._is_market_open():
@@ -1108,12 +1137,25 @@ class MarketEngine:
         self.connected = False
         self.last_error = f"WebSocket error: {code} {reason}"
 
+    def _on_reconnect(self, ws, attempts_count):
+        self.connected = False
+        self.last_reconnect_attempt_ts = time.time()
+        self.last_error = f"WebSocket reconnecting (attempt {attempts_count})"
+
+    def _on_noreconnect(self, ws):
+        self.connected = False
+        self.last_error = "WebSocket stopped reconnecting. Refresh the Kite session from the admin panel."
+
+    def _on_session_expiry(self):
+        self.connected = False
+        self.last_error = "Kite access token expired. Refresh the Kite session from the admin panel."
+        self._close_ticker()
+
     def _on_ticks(self, ws, ticks):
         with self.lock:
             for tick in ticks:
                 token = tick.get("instrument_token")
                 last_price = tick.get("last_price")
-                volume = tick.get("volume_traded")
                 ohlc = tick.get("ohlc", {})
                 close = ohlc.get("close")
                 if not token or last_price is None:
@@ -1121,6 +1163,7 @@ class MarketEngine:
 
                 if token in self.token_to_symbol:
                     symbol = self.token_to_symbol[token]
+                    volume = self._extract_volume(tick, fallback=(self.latest.get(symbol) or {}).get("volume"))
                     base_close = close if close not in (None, 0) else self.rest_prev_close.get(symbol)
                     row = self._build_stock_row(symbol, last_price, base_close, volume=volume)
                     if row:
@@ -1596,7 +1639,7 @@ class MarketEngine:
         for key, payload in quoted.items():
             symbol = key.split(":", 1)[-1]
             last_price = payload.get("last_price")
-            volume = payload.get("volume_traded")
+            volume = self._extract_volume(payload, fallback=(self.latest.get(symbol) or {}).get("volume"))
             ohlc = payload.get("ohlc") or {}
             close = ohlc.get("close")
             if close not in (None, 0):
