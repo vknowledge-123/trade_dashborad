@@ -513,6 +513,7 @@ def dashboard(request: Request):
 def relative_rotation(request: Request):
     user = current_user(request)
     admin = current_admin(request)
+    history_cache_status = engine.get_history_cache_status() if admin else None
     return templates.TemplateResponse(
         request,
         "relative_rotation.html",
@@ -522,6 +523,7 @@ def relative_rotation(request: Request):
             "admin": admin,
             "public_mode": True if not user and not admin else False,
             "rrg_payload": engine.get_relative_rotation_graph(),
+            "history_cache_status": history_cache_status,
         },
     )
 
@@ -542,6 +544,42 @@ def market_snapshot(request: Request):
 def relative_rotation_data(request: Request):
     return JSONResponse(
         engine.get_relative_rotation_graph(),
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
+
+
+@app.post("/api/admin/market-history/cache")
+def admin_market_history_cache(request: Request):
+    admin = require_admin(request)
+    if not admin:
+        return JSONResponse({"ok": False, "error": "Admin authentication required."}, status_code=403)
+    return JSONResponse(
+        {
+            "ok": True,
+            "status": engine.start_daily_market_history_cache(force=True),
+        },
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
+
+
+@app.get("/api/admin/market-history/status")
+def admin_market_history_status(request: Request):
+    admin = require_admin(request)
+    if not admin:
+        return JSONResponse({"ok": False, "error": "Admin authentication required."}, status_code=403)
+    return JSONResponse(
+        {
+            "ok": True,
+            "status": engine.get_history_cache_status(),
+        },
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",

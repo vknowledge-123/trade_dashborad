@@ -2,6 +2,7 @@ import os
 import tempfile
 import time
 import unittest
+from datetime import datetime
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -71,6 +72,31 @@ def make_snapshot(sector_price):
 
 
 class MarketEngineSectorRefreshTests(unittest.TestCase):
+    def test_latest_completed_session_date_uses_previous_trading_day_on_weekend(self):
+        engine = MarketEngine(redis_client=None)
+
+        completed = engine._latest_completed_session_date(datetime(2026, 5, 10, 16, 0, tzinfo=None))
+
+        self.assertEqual(completed.isoformat(), "2026-05-08")
+
+    def test_previous_day_badges_use_last_completed_session_candles(self):
+        engine = MarketEngine(redis_client=None)
+        engine.kite = object()
+        engine.symbol_to_token = {"INFY": 123}
+        engine._latest_completed_session_date = lambda now=None: datetime(2026, 5, 8).date()
+        engine._fetch_recent_day_candles = lambda token, _from_date, _to_date, limit=None: [
+            {"date": "2026-05-07", "close": 1500.0, "volume": 100},
+            {"date": "2026-05-08", "close": 1530.0, "volume": 120},
+        ][-limit:] if limit else [
+            {"date": "2026-05-07", "close": 1500.0, "volume": 100},
+            {"date": "2026-05-08", "close": 1530.0, "volume": 120},
+        ]
+
+        change = engine._get_previous_day_change("INFY")
+
+        self.assertEqual(change, 2.0)
+        self.assertEqual(engine.previous_day_badges_cache["INFY"]["cache_marker"], "2026-05-08")
+
     def test_stock_row_from_candles_includes_day_volume(self):
         engine = MarketEngine(redis_client=None)
         row, latest_dt = engine._build_stock_row_from_candles(
@@ -262,6 +288,38 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertIn("quadrant", payload["items"][0])
         self.assertTrue(all("x" in point and "y" in point for point in payload["items"][0]["trail"]))
 
+    def test_relative_rotation_uses_cached_same_session_payload(self):
+        engine = MarketEngine(redis_client=None)
+        engine.kite = object()
+        engine._is_market_open = lambda: False
+        engine._completed_session_cache_marker = lambda: "2026-05-09"
+        engine._cached_relative_rotation_graph = lambda: {
+            "benchmark": "NIFTY 50",
+            "cache_marker": "2026-05-09",
+            "market_open": False,
+            "items": [{"sector": "NIFTY IT", "trail": [{"x": 101, "y": 102}]}],
+        }
+
+        payload = engine.get_relative_rotation_graph()
+
+        self.assertEqual(payload["benchmark"], "NIFTY 50")
+        self.assertEqual(len(payload["items"]), 1)
+        self.assertEqual(payload["cache_marker"], "2026-05-09")
+
+    def test_start_daily_market_history_cache_marks_already_cached_session(self):
+        engine = MarketEngine(redis_client=None)
+        engine._completed_session_cache_marker = lambda: "2026-05-09"
+        engine._cached_relative_rotation_graph = lambda: {
+            "cache_marker": "2026-05-09",
+            "items": [{"sector": "NIFTY IT"}],
+        }
+
+        status = engine.start_daily_market_history_cache(force=False)
+
+        self.assertEqual(status["status"], "completed")
+        self.assertEqual(status["session_marker"], "2026-05-09")
+        self.assertIn("already ready", status["message"])
+
 
 class MarketSnapshotApiIntegrationTests(unittest.TestCase):
     def test_market_snapshot_endpoint_returns_updated_sector_payloads_between_polls(self):
@@ -319,6 +377,39 @@ class MarketSnapshotApiIntegrationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["benchmark"], "NIFTY 50")
         self.assertEqual(response.json()["items"][0]["sector"], "NIFTY IT")
+
+    def test_admin_market_history_cache_endpoint_requires_admin(self):
+        with TestClient(main_module.app) as client:
+            response = client.post("/api/admin/market-history/cache")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(response.json()["ok"])
+
+    def test_admin_market_history_cache_endpoint_returns_status_for_admin(self):
+        with patch.object(main_module, "require_admin", return_value={"id": 1}), patch.object(
+            main_module.engine,
+            "start_daily_market_history_cache",
+            return_value={"status": "running", "session_marker": "2026-05-09"},
+        ):
+            with TestClient(main_module.app) as client:
+                response = client.post("/api/admin/market-history/cache")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ok"])
+        self.assertEqual(response.json()["status"]["status"], "running")
+
+    def test_admin_market_history_status_endpoint_returns_status_for_admin(self):
+        with patch.object(main_module, "require_admin", return_value={"id": 1}), patch.object(
+            main_module.engine,
+            "get_history_cache_status",
+            return_value={"status": "completed", "session_marker": "2026-05-09"},
+        ):
+            with TestClient(main_module.app) as client:
+                response = client.get("/api/admin/market-history/status")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ok"])
+        self.assertEqual(response.json()["status"]["status"], "completed")
 
 
 if __name__ == "__main__":

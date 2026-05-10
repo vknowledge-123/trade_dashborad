@@ -34,10 +34,27 @@
           <div class="panel-sub" id="rrg-updated-at">Updated {{ rrg_payload.updated_at if rrg_payload.updated_at else "just now" }}</div>
         </div>
         <div class="rrg-actions">
-          <span class="pill neutral" id="rrg-trail-pill">{{ rrg_payload.trail_points if rrg_payload.trail_points else 12 }} session trail</span>
+          <span class="pill neutral" id="rrg-trail-pill">{{ rrg_payload.trail_points if rrg_payload.trail_points else 14 }} session trail</span>
+          {% if admin %}
+            <button class="btn rrg-cache" id="rrg-cache" type="button">Cache Data</button>
+          {% endif %}
           <button class="btn btn-ghost rrg-refresh" id="rrg-refresh" type="button">Refresh</button>
         </div>
       </div>
+      {% if admin %}
+        <div class="rrg-admin-status" id="rrg-admin-status">
+          {% set cache_status = history_cache_status or {} %}
+          <strong>Daily cache</strong>
+          <span id="rrg-cache-message">{{ cache_status.message if cache_status.message else "No market history cache job has been started yet." }}</span>
+          <span class="muted" id="rrg-cache-meta">
+            {% if cache_status.session_marker %}
+              Session {{ cache_status.session_marker }} / {{ cache_status.status|default("idle") }}
+            {% else %}
+              Idle
+            {% endif %}
+          </span>
+        </div>
+      {% endif %}
       <div class="rrg-chart-wrap">
         <svg id="rrg-chart" viewBox="0 0 920 620" role="img" aria-label="Relative Rotation Graph"></svg>
         <div class="rrg-empty" id="rrg-empty" hidden></div>
@@ -82,6 +99,9 @@
 </section>
 
 <script id="rrg-initial-data" type="application/json">{{ rrg_payload|tojson }}</script>
+{% if admin %}
+  <script id="rrg-cache-initial-status" type="application/json">{{ (history_cache_status or {})|tojson }}</script>
+{% endif %}
 
 <style>
 .rrg-shell {
@@ -170,6 +190,27 @@
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.rrg-admin-status {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.rrg-admin-status strong {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #eef6ff;
+}
+
+.rrg-admin-status span {
+  font-size: 12px;
 }
 
 .rrg-refresh {
@@ -366,14 +407,25 @@
   const marketState = document.getElementById("rrg-market-state");
   const trailPill = document.getElementById("rrg-trail-pill");
   const itemCount = document.getElementById("rrg-item-count");
+  const cacheButton = document.getElementById("rrg-cache");
+  const cacheStatusScript = document.getElementById("rrg-cache-initial-status");
+  const cacheMessage = document.getElementById("rrg-cache-message");
+  const cacheMeta = document.getElementById("rrg-cache-meta");
 
   if (!initialScript || !chart || !list) return;
 
   let currentPayload = {};
+  let currentCacheStatus = {};
+  let cachePollTimer = null;
   try {
     currentPayload = JSON.parse(initialScript.textContent || "{}");
   } catch (error) {
     currentPayload = {};
+  }
+  try {
+    currentCacheStatus = cacheStatusScript ? JSON.parse(cacheStatusScript.textContent || "{}") : {};
+  } catch (error) {
+    currentCacheStatus = {};
   }
 
   const formatValue = (value) => {
@@ -383,6 +435,20 @@
   };
 
   const quadrantClass = (quadrant) => (quadrant || "").toLowerCase();
+
+  const renderCacheStatus = (status) => {
+    if (!cacheMessage || !cacheMeta) return;
+    const metaParts = [];
+    if (status.session_marker) metaParts.push(`Session ${status.session_marker}`);
+    metaParts.push(status.status || "idle");
+    if (status.processed || status.total) metaParts.push(`${status.processed || 0}/${status.total || 0}`);
+    cacheMessage.textContent = status.message || "No market history cache job has been started yet.";
+    cacheMeta.textContent = metaParts.join(" / ");
+    if (cacheButton) {
+      cacheButton.disabled = Boolean(status.is_running);
+      cacheButton.textContent = status.is_running ? "Caching..." : "Cache Data";
+    }
+  };
 
   const buildTicks = (min, max, count = 5) => {
     const span = max - min;
@@ -432,7 +498,7 @@
     latestSession.textContent = payload.latest_session || "Waiting";
     marketState.textContent = payload.market_open ? "Live market" : "Closed market snapshot";
     updatedAt.textContent = `Updated ${payload.updated_at || "just now"}`;
-    trailPill.textContent = `${payload.trail_points || 12} session trail`;
+    trailPill.textContent = `${payload.trail_points || 14} session trail`;
 
     if (!items.length) {
       chart.innerHTML = "";
@@ -533,9 +599,70 @@
     }
   };
 
+  const pollCacheStatus = async () => {
+    if (!cacheButton) return;
+    try {
+      const response = await fetch(`/api/admin/market-history/status?ts=${Date.now()}`, {
+        cache: "no-store",
+        headers: { "Cache-Control": "no-cache" },
+      });
+      if (!response.ok) throw new Error("Unable to read cache status");
+      const payload = await response.json();
+      currentCacheStatus = payload.status || {};
+      renderCacheStatus(currentCacheStatus);
+      if (currentCacheStatus.is_running) {
+        cachePollTimer = window.setTimeout(pollCacheStatus, 2500);
+      } else {
+        cachePollTimer = null;
+        if (currentCacheStatus.status === "completed" || currentCacheStatus.status === "warning") {
+          fetchRrg();
+        }
+      }
+    } catch (error) {
+      renderCacheStatus({
+        status: "failed",
+        message: "Unable to read cache status right now.",
+        is_running: false,
+      });
+      cachePollTimer = null;
+    }
+  };
+
+  const startCacheJob = async () => {
+    if (!cacheButton) return;
+    cacheButton.disabled = true;
+    cacheButton.textContent = "Caching...";
+    try {
+      const response = await fetch("/api/admin/market-history/cache", {
+        method: "POST",
+        cache: "no-store",
+        headers: { "Cache-Control": "no-cache" },
+      });
+      if (!response.ok) throw new Error("Unable to start cache job");
+      const payload = await response.json();
+      currentCacheStatus = payload.status || {};
+      renderCacheStatus(currentCacheStatus);
+      if (cachePollTimer) window.clearTimeout(cachePollTimer);
+      cachePollTimer = window.setTimeout(pollCacheStatus, 1500);
+    } catch (error) {
+      renderCacheStatus({
+        status: "failed",
+        message: "Historical cache job could not be started.",
+        is_running: false,
+      });
+    }
+  };
+
   renderChart(currentPayload);
+  renderCacheStatus(currentCacheStatus);
   if (refreshButton) {
     refreshButton.addEventListener("click", fetchRrg);
+  }
+  if (cacheButton) {
+    cacheButton.addEventListener("click", startCacheJob);
+    if (currentCacheStatus.is_running) {
+      cachePollTimer = window.setTimeout(pollCacheStatus, 1500);
+    }
   }
   if (currentPayload.market_open) {
     setInterval(fetchRrg, 60000);
