@@ -73,7 +73,7 @@
       <div class="panel rrg-list-panel">
         <div class="panel-header">
           <h3>Sector Scores</h3>
-          <span class="pill neutral" id="rrg-item-count">{{ (rrg_payload.items or [])|length }} sectors</span>
+          <span class="pill neutral" id="rrg-item-count">{{ (rrg_payload.get("items") or [])|length }} sectors</span>
         </div>
         <div class="rrg-list" id="rrg-list"></div>
       </div>
