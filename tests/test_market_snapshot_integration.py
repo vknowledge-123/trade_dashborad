@@ -133,6 +133,23 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertEqual(second_snapshot["sector_losers"][0]["price"], 8434.2)
         self.assertEqual(second_snapshot["snapshot_source"], "api_sector")
 
+    def test_decorate_snapshot_rows_adds_previous_day_badge_flags(self):
+        engine = MarketEngine(redis_client=None)
+        snapshot = {
+            "gainers": [{"symbol": "INFY", "change": 1.2}],
+            "losers": [{"symbol": "TCS", "change": -0.8}],
+        }
+
+        changes = {"INFY": 2.15, "TCS": -1.25}
+        engine._get_previous_day_change = lambda symbol: changes.get(symbol)
+
+        engine._decorate_snapshot_rows(snapshot)
+
+        self.assertTrue(snapshot["gainers"][0]["previous_day_positive"])
+        self.assertEqual(snapshot["gainers"][0]["previous_day_change"], 2.15)
+        self.assertFalse(snapshot["losers"][0]["previous_day_positive"])
+        self.assertEqual(snapshot["losers"][0]["previous_day_change"], -1.25)
+
     def test_live_snapshot_schedules_background_refresh_when_cache_is_empty(self):
         engine = MarketEngine(redis_client=None)
         engine.kite = object()
@@ -229,6 +246,22 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertEqual(payload["constituent_count"], 1)
         self.assertEqual(payload["stocks"][0]["symbol"], "INFY")
 
+    def test_build_rrg_payload_from_series_returns_quadrant_coordinates(self):
+        engine = MarketEngine(redis_client=None)
+        benchmark_series = [(f"2026-05-{day:02d}", 100 + day) for day in range(1, 25)]
+        component_series = {
+            "NIFTY IT": [(f"2026-05-{day:02d}", 100 + day * 1.4) for day in range(1, 25)],
+            "NIFTY FMCG": [(f"2026-05-{day:02d}", 124 - day * 0.6) for day in range(1, 25)],
+        }
+
+        payload = engine._build_rrg_payload_from_series("NIFTY 50", benchmark_series, component_series)
+
+        self.assertEqual(payload["benchmark"], "NIFTY 50")
+        self.assertEqual(len(payload["items"]), 2)
+        self.assertIn("trail", payload["items"][0])
+        self.assertIn("quadrant", payload["items"][0])
+        self.assertTrue(all("x" in point and "y" in point for point in payload["items"][0]["trail"]))
+
 
 class MarketSnapshotApiIntegrationTests(unittest.TestCase):
     def test_market_snapshot_endpoint_returns_updated_sector_payloads_between_polls(self):
@@ -255,6 +288,37 @@ class MarketSnapshotApiIntegrationTests(unittest.TestCase):
             first_response.json()["sector_gainers"][0]["price"],
             second_response.json()["sector_gainers"][0]["price"],
         )
+
+    def test_relative_rotation_endpoint_returns_payload(self):
+        with patch.object(
+            main_module.engine,
+            "get_relative_rotation_graph",
+            return_value={
+                "benchmark": "NIFTY 50",
+                "market_open": False,
+                "updated_at": "2026-05-10T10:00:00+05:30",
+                "items": [
+                    {
+                        "sector": "NIFTY IT",
+                        "quadrant": "Leading",
+                        "color": "#00e5a0",
+                        "rs_ratio": 103.2,
+                        "rs_momentum": 101.4,
+                        "trail": [{"date": "2026-05-09", "x": 101.4, "y": 103.2}],
+                        "relative_strength": 108.4,
+                        "latest_price": 25433.5,
+                    }
+                ],
+                "x_domain": [95, 105],
+                "y_domain": [95, 105],
+            },
+        ):
+            with TestClient(main_module.app) as client:
+                response = client.get("/api/relative-rotation")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["benchmark"], "NIFTY 50")
+        self.assertEqual(response.json()["items"][0]["sector"], "NIFTY IT")
 
 
 if __name__ == "__main__":

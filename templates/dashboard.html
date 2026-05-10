@@ -86,7 +86,14 @@
         </div>
         {% for g in snapshot.gainers %}
           <div class="table-row" style="--row-delay: {{ loop.index0 * 0.18 }}s">
-            <span>{{ g.symbol }}{% if g.is_fno %} <span class="fno-tag">F&amp;O</span>{% endif %}</span>
+            <span class="cell-symbol">
+              <span class="cell-symbol-main">{{ g.symbol }}{% if g.is_fno %} <span class="fno-tag">F&amp;O</span>{% endif %}</span>
+              {% if g.previous_day_positive %}
+                <span class="cell-symbol-badges">
+                  <span class="prev-rise-badge">Prev +{{ "%.2f"|format(g.previous_day_change) }}%</span>
+                </span>
+              {% endif %}
+            </span>
             <span class="mono">{{ g.price }}</span>
             <span class="mono">{{ format_compact_volume(g.volume if g.volume is defined else none) }}</span>
             <span class="positive mono">+{{ g.change }}%</span>
@@ -117,7 +124,14 @@
         </div>
         {% for l in snapshot.losers %}
           <div class="table-row" style="--row-delay: {{ loop.index0 * 0.22 }}s">
-            <span>{{ l.symbol }}{% if l.is_fno %} <span class="fno-tag">F&amp;O</span>{% endif %}</span>
+            <span class="cell-symbol">
+              <span class="cell-symbol-main">{{ l.symbol }}{% if l.is_fno %} <span class="fno-tag">F&amp;O</span>{% endif %}</span>
+              {% if l.previous_day_positive %}
+                <span class="cell-symbol-badges">
+                  <span class="prev-rise-badge">Prev +{{ "%.2f"|format(l.previous_day_change) }}%</span>
+                </span>
+              {% endif %}
+            </span>
             <span class="mono">{{ l.price }}</span>
             <span class="mono">{{ format_compact_volume(l.volume if l.volume is defined else none) }}</span>
             <span class="negative mono">{{ l.change }}%</span>
@@ -234,6 +248,11 @@
 .dash-hero { margin: 0 !important; padding: 0 !important; }
 .promo-strip { margin: 6px 8px !important; border-radius: 12px !important; }
 .dash-grid { padding: 0 !important; gap: 12px; }
+
+#gainers-body .table-row,
+#losers-body .table-row {
+  grid-template-columns: 1.45fr 0.85fr 0.95fr 0.85fr auto;
+}
 
 .hero-badge {
   display: flex;
@@ -442,6 +461,11 @@
     grid-template-columns: 0.45fr 1.1fr 0.7fr 0.9fr 0.8fr auto;
     gap: 8px;
     padding: 10px 8px;
+  }
+
+  #gainers-body .table-row,
+  #losers-body .table-row {
+    grid-template-columns: 1.2fr 0.75fr 0.9fr 0.8fr auto;
   }
 }
 </style>

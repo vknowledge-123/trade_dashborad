@@ -1,10 +1,11 @@
 import csv
 import io
+import math
 import re
 import threading
 import time
 from collections import defaultdict
-from datetime import datetime, timedelta, time as dtime
+from datetime import datetime, timedelta, time as dtime, timezone
 from urllib.parse import urljoin
 from zoneinfo import ZoneInfo
 
@@ -19,10 +20,19 @@ CLOSED_SNAPSHOT_CACHE_KEY = "latest_closed_snapshot"
 LATEST_ROWS_CACHE_KEY = "latest_rows"
 SECTOR_MEMBERS_CACHE_KEY = "sector_memberships"
 SECTOR_BREAKDOWNS_CACHE_KEY = "sector_breakdowns"
+PREVIOUS_DAY_BADGES_CACHE_KEY = "previous_day_badges"
+RRG_CACHE_KEY = "relative_rotation_graph"
 IST = ZoneInfo("Asia/Kolkata")
 LIVE_FEED_STALE_AFTER_SECONDS = 15
 LIVE_FEED_RECONNECT_COOLDOWN_SECONDS = 20
 SECTOR_SNAPSHOT_REFRESH_SECONDS = 5
+RRG_BENCHMARK_SYMBOL = "NIFTY 50"
+RRG_CACHE_TTL_OPEN_SECONDS = 15 * 60
+RRG_CACHE_TTL_CLOSED_SECONDS = 6 * 60 * 60
+RRG_LOOKBACK_CALENDAR_DAYS = 180
+RRG_MAX_POINTS = 36
+RRG_TRAIL_POINTS = 12
+RRG_NORMALIZATION_WINDOW = 10
 HTTP_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                   "(KHTML, like Gecko) Chrome/135.0 Safari/537.36",
@@ -88,6 +98,7 @@ class MarketEngine:
         self.fno_override = set()
         self.nifty500_set = set()
         self.equity_tokens = []
+        self.index_tokens = {}
         self.sector_tokens = {}
         self.sector_token_to_name = {}
         self.sector_members = {}
@@ -112,6 +123,7 @@ class MarketEngine:
         self.refresh_thread = None
         self.refresh_reason = None
         self.start_lock = threading.Lock()
+        self.previous_day_badges_cache = {}
         self.http = requests.Session()
         self.http.headers.update(HTTP_HEADERS)
 
@@ -288,6 +300,28 @@ class MarketEngine:
     def _cached_sector_breakdowns(self):
         return load_market_cache(SECTOR_BREAKDOWNS_CACHE_KEY)
 
+    def _save_previous_day_badges_cache(self):
+        try:
+            save_market_cache(PREVIOUS_DAY_BADGES_CACHE_KEY, self.previous_day_badges_cache)
+        except Exception:
+            return
+
+    def _restore_previous_day_badges_cache(self):
+        if self.previous_day_badges_cache:
+            return
+        cached = load_market_cache(PREVIOUS_DAY_BADGES_CACHE_KEY)
+        if isinstance(cached, dict):
+            self.previous_day_badges_cache = cached
+
+    def _cached_relative_rotation_graph(self):
+        return load_market_cache(RRG_CACHE_KEY)
+
+    def _save_relative_rotation_graph(self, payload):
+        try:
+            save_market_cache(RRG_CACHE_KEY, payload)
+        except Exception:
+            return
+
     def _restore_cached_sector_memberships(self):
         cached = self._cached_sector_memberships()
         if not cached:
@@ -369,6 +403,119 @@ class MarketEngine:
         merged["snapshot_source"] = snapshot.get("snapshot_source")
         merged["updated_at"] = snapshot.get("updated_at") or cached.get("updated_at")
         return merged
+
+    def _candle_date(self, candle):
+        candle_dt = candle.get("date")
+        if hasattr(candle_dt, "date"):
+            return candle_dt.date()
+        return candle_dt
+
+    def _format_candle_date(self, candle):
+        candle_date = self._candle_date(candle)
+        return candle_date.isoformat() if hasattr(candle_date, "isoformat") else str(candle_date)
+
+    def _series_mean(self, values):
+        return sum(values) / len(values) if values else 0.0
+
+    def _series_std(self, values):
+        if len(values) < 2:
+            return 0.0
+        avg = self._series_mean(values)
+        variance = sum((value - avg) ** 2 for value in values) / len(values)
+        return math.sqrt(variance)
+
+    def _normalize_rrg_series(self, values, window=RRG_NORMALIZATION_WINDOW, scale=10.0):
+        normalized = []
+        for index, value in enumerate(values):
+            subset = values[max(0, index - window + 1):index + 1]
+            std = self._series_std(subset)
+            if std == 0:
+                normalized.append(100.0)
+                continue
+            avg = self._series_mean(subset)
+            normalized.append(100.0 + ((value - avg) / std) * scale)
+        return normalized
+
+    def _rrg_quadrant(self, momentum, ratio):
+        if ratio >= 100 and momentum >= 100:
+            return "Leading"
+        if ratio >= 100 and momentum < 100:
+            return "Weakening"
+        if ratio < 100 and momentum < 100:
+            return "Lagging"
+        return "Improving"
+
+    def _rrg_color(self, quadrant):
+        return {
+            "Leading": "#00e5a0",
+            "Weakening": "#ffb830",
+            "Lagging": "#ff4d6d",
+            "Improving": "#00d4ff",
+        }.get(quadrant, "#8ca5c8")
+
+    def _decorate_rows_with_previous_day_badges(self, rows):
+        if not rows:
+            return rows
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            change = self._get_previous_day_change(row.get("symbol"))
+            row["previous_day_change"] = round(change, 2) if change is not None else None
+            row["previous_day_positive"] = bool(change is not None and change > 0)
+        return rows
+
+    def _decorate_snapshot_rows(self, snapshot):
+        if not snapshot:
+            return snapshot
+        self._decorate_rows_with_previous_day_badges(snapshot.get("gainers") or [])
+        self._decorate_rows_with_previous_day_badges(snapshot.get("losers") or [])
+        return snapshot
+
+    def _get_previous_day_change(self, symbol):
+        symbol = (symbol or "").upper()
+        if not symbol:
+            return None
+        self._restore_previous_day_badges_cache()
+        market_open = self._is_market_open()
+        cache_marker = f"{datetime.now(IST).date().isoformat()}:{1 if market_open else 0}"
+        cached = self.previous_day_badges_cache.get(symbol)
+        if cached and cached.get("cache_marker") == cache_marker:
+            return cached.get("change")
+
+        token = self.symbol_to_token.get(symbol)
+        if not token or not self.kite:
+            return cached.get("change") if cached else None
+
+        now = datetime.now(IST)
+        candles = self._fetch_recent_day_candles(
+            token,
+            now - timedelta(days=45),
+            now,
+        )
+        if market_open and candles and self._candle_date(candles[-1]) == now.date():
+            candles = candles[:-1]
+
+        if market_open:
+            if len(candles) < 2:
+                return cached.get("change") if cached else None
+            current_close = candles[-1].get("close")
+            prior_close = candles[-2].get("close")
+        else:
+            if len(candles) < 3:
+                return cached.get("change") if cached else None
+            current_close = candles[-2].get("close")
+            prior_close = candles[-3].get("close")
+
+        if current_close in (None, 0) or prior_close in (None, 0):
+            return cached.get("change") if cached else None
+
+        change = (current_close - prior_close) / prior_close * 100
+        self.previous_day_badges_cache[symbol] = {
+            "cache_marker": cache_marker,
+            "change": round(change, 2),
+        }
+        self._save_previous_day_badges_cache()
+        return round(change, 2)
 
     def _run_refresh_job(self, reason, market_open):
         try:
@@ -495,18 +642,24 @@ class MarketEngine:
                 if self._is_tracked_symbol(symbol):
                     equity_tokens.append(token)
 
+        all_index_tokens = {}
         index_tokens = {}
         for inst in instruments:
             if inst.get("segment") != "INDICES":
                 continue
             ts = inst.get("tradingsymbol")
+            token = inst.get("instrument_token")
+            if not ts or not token:
+                continue
+            all_index_tokens[ts] = int(token)
             if ts in sector_names:
-                index_tokens[ts] = int(inst.get("instrument_token"))
+                index_tokens[ts] = int(token)
 
         self.token_to_symbol = token_to_symbol
         self.symbol_to_token = symbol_to_token
         self.symbol_to_name = symbol_to_name
         self.fno_symbols = fno_set | {s.upper() for s in self.fno_override}
+        self.index_tokens = all_index_tokens
         self.sector_tokens = index_tokens
         self.sector_token_to_name = {token: name for name, token in index_tokens.items()}
         self.equity_tokens = equity_tokens
@@ -572,7 +725,7 @@ class MarketEngine:
         except Exception:
             return None
 
-    def _fetch_last_two_day_candles(self, token, from_date, to_date):
+    def _fetch_recent_day_candles(self, token, from_date, to_date, limit=None):
         if not self.kite or not token:
             return []
         try:
@@ -586,7 +739,12 @@ class MarketEngine:
             if close in (None, 0):
                 continue
             valid.append(candle)
-        return valid[-2:] if len(valid) >= 2 else valid
+        if limit:
+            return valid[-limit:]
+        return valid
+
+    def _fetch_last_two_day_candles(self, token, from_date, to_date):
+        return self._fetch_recent_day_candles(token, from_date, to_date, limit=2)
 
     def _build_stock_row_from_candles(self, symbol, candles):
         if len(candles) < 2:
@@ -841,12 +999,12 @@ class MarketEngine:
             movers = list(self.latest.values())
             if self.nifty500_set:
                 movers = [m for m in movers if m["symbol"].upper() in self.nifty500_set]
-            gainers = sorted([m for m in movers if m["change"] > 0], key=lambda x: x["change"], reverse=True)[:20]
-            losers = sorted([m for m in movers if m["change"] < 0], key=lambda x: x["change"])[:20]
+            gainers = [dict(m) for m in sorted([m for m in movers if m["change"] > 0], key=lambda x: x["change"], reverse=True)[:20]]
+            losers = [dict(m) for m in sorted([m for m in movers if m["change"] < 0], key=lambda x: x["change"])[:20]]
             sectors = list(self.sector_latest.values())
             sector_gainers = sorted([s for s in sectors if s["change"] > 0], key=lambda x: x["change"], reverse=True)[:10]
             sector_losers = sorted([s for s in sectors if s["change"] < 0], key=lambda x: x["change"])[:10]
-            return {
+            snapshot = {
                 "gainers": gainers,
                 "losers": losers,
                 "sectors": sectors,
@@ -858,6 +1016,146 @@ class MarketEngine:
                 "market_open": market_open,
                 "snapshot_source": self.last_snapshot_source,
             }
+        self._decorate_snapshot_rows(snapshot)
+        return snapshot
+
+    def _cache_is_fresh(self, cached_payload, max_age_seconds):
+        if not cached_payload or not cached_payload.get("_cached_at"):
+            return False
+        try:
+            cached_at = datetime.fromisoformat(cached_payload["_cached_at"])
+        except Exception:
+            return False
+        return (datetime.now(timezone.utc).replace(tzinfo=None) - cached_at).total_seconds() <= max_age_seconds
+
+    def _fetch_rrg_price_series(self, token, from_date, to_date):
+        candles = self._fetch_recent_day_candles(token, from_date, to_date)
+        series = []
+        for candle in candles:
+            candle_date = self._format_candle_date(candle)
+            close = candle.get("close")
+            if close in (None, 0):
+                continue
+            series.append((candle_date, float(close)))
+        return series
+
+    def _build_rrg_payload_from_series(self, benchmark_symbol, benchmark_series, component_series):
+        benchmark_map = {date: close for date, close in benchmark_series if close not in (None, 0)}
+        items = []
+        all_x = [100.0]
+        all_y = [100.0]
+        latest_session = None
+
+        for sector_name, sector_series in component_series.items():
+            sector_map = {date: close for date, close in sector_series if close not in (None, 0)}
+            common_dates = sorted(set(benchmark_map).intersection(sector_map))
+            if len(common_dates) < max(RRG_NORMALIZATION_WINDOW + 3, RRG_TRAIL_POINTS):
+                continue
+            common_dates = common_dates[-RRG_MAX_POINTS:]
+            rs_values = [
+                (sector_map[date] / benchmark_map[date]) * 100.0
+                for date in common_dates
+                if benchmark_map[date] not in (None, 0)
+            ]
+            if len(rs_values) != len(common_dates):
+                continue
+            rs_ratio = self._normalize_rrg_series(rs_values)
+            rs_delta = [0.0]
+            rs_delta.extend(rs_ratio[idx] - rs_ratio[idx - 1] for idx in range(1, len(rs_ratio)))
+            rs_momentum = self._normalize_rrg_series(rs_delta)
+            trail_start = max(0, len(common_dates) - RRG_TRAIL_POINTS)
+            trail = []
+            for index in range(trail_start, len(common_dates)):
+                point = {
+                    "date": common_dates[index],
+                    "x": round(rs_momentum[index], 2),
+                    "y": round(rs_ratio[index], 2),
+                }
+                trail.append(point)
+                all_x.append(point["x"])
+                all_y.append(point["y"])
+            if not trail:
+                continue
+            current = trail[-1]
+            quadrant = self._rrg_quadrant(current["x"], current["y"])
+            latest_session = max(latest_session or common_dates[-1], common_dates[-1])
+            items.append(
+                {
+                    "sector": sector_name,
+                    "quadrant": quadrant,
+                    "color": self._rrg_color(quadrant),
+                    "rs_ratio": current["y"],
+                    "rs_momentum": current["x"],
+                    "trail": trail,
+                    "relative_strength": round(rs_values[-1], 2),
+                    "latest_price": round(sector_map[common_dates[-1]], 2),
+                }
+            )
+
+        items.sort(key=lambda item: (-item["rs_ratio"], -item["rs_momentum"], item["sector"]))
+        padding = 3.0
+        return {
+            "benchmark": benchmark_symbol,
+            "market_open": self._is_market_open(),
+            "updated_at": self.last_update or self._utc_now(),
+            "latest_session": latest_session,
+            "normalization_window": RRG_NORMALIZATION_WINDOW,
+            "trail_points": RRG_TRAIL_POINTS,
+            "items": items,
+            "x_domain": [round(min(all_x) - padding, 2), round(max(all_x) + padding, 2)],
+            "y_domain": [round(min(all_y) - padding, 2), round(max(all_y) + padding, 2)],
+        }
+
+    def get_relative_rotation_graph(self, benchmark_symbol=RRG_BENCHMARK_SYMBOL):
+        market_open = self._is_market_open()
+        cached = self._cached_relative_rotation_graph()
+        max_age = RRG_CACHE_TTL_OPEN_SECONDS if market_open else RRG_CACHE_TTL_CLOSED_SECONDS
+        if cached and cached.get("items") and self._cache_is_fresh(cached, max_age):
+            cached["market_open"] = market_open
+            return cached
+
+        if not self.kite or not self.index_tokens:
+            if cached and cached.get("items"):
+                cached["market_open"] = market_open
+                return cached
+            return {
+                "benchmark": benchmark_symbol,
+                "market_open": market_open,
+                "updated_at": self.last_update or self._utc_now(),
+                "items": [],
+                "error": "Relative rotation data is unavailable until Kite historical data is connected.",
+                "x_domain": [90, 110],
+                "y_domain": [90, 110],
+            }
+
+        benchmark_token = self.index_tokens.get(benchmark_symbol)
+        if not benchmark_token:
+            return {
+                "benchmark": benchmark_symbol,
+                "market_open": market_open,
+                "updated_at": self.last_update or self._utc_now(),
+                "items": [],
+                "error": f"Benchmark {benchmark_symbol} is not available in the loaded index universe.",
+                "x_domain": [90, 110],
+                "y_domain": [90, 110],
+            }
+
+        now = datetime.now(IST)
+        from_date = now - timedelta(days=RRG_LOOKBACK_CALENDAR_DAYS)
+        benchmark_series = self._fetch_rrg_price_series(benchmark_token, from_date, now)
+        component_series = {}
+        for sector_name, token in self.sector_tokens.items():
+            series = self._fetch_rrg_price_series(token, from_date, now)
+            if series:
+                component_series[sector_name] = series
+
+        payload = self._build_rrg_payload_from_series(benchmark_symbol, benchmark_series, component_series)
+        payload["market_open"] = market_open
+        payload["updated_at"] = self.last_update or self._utc_now()
+        if not payload.get("items"):
+            payload["error"] = "Not enough historical index data is available yet to calculate the relative rotation graph."
+        self._save_relative_rotation_graph(payload)
+        return payload
 
     def get_snapshot(self):
         if self.demo_mode and self.demo_snapshot:
@@ -872,7 +1170,7 @@ class MarketEngine:
         if not market_open and closed_cached and self._stock_row_count(closed_cached):
             if self.kite and (not self.latest or not self.sector_latest):
                 self._ensure_background_refresh(market_open=False, reason="closed_market_bootstrap")
-            return self._with_runtime_fields(closed_cached, False, "closed_cache")
+            return self._decorate_snapshot_rows(self._with_runtime_fields(closed_cached, False, "closed_cache"))
 
         if self.kite:
             if self._is_live_feed_stale():
@@ -897,14 +1195,14 @@ class MarketEngine:
         has_sector_data = any(snapshot.get(key) for key in ("sector_gainers", "sector_losers"))
         if not market_open and closed_cached:
             if self._stock_row_count(closed_cached) > self._stock_row_count(snapshot):
-                return self._with_runtime_fields(closed_cached, False, "closed_cache")
+                return self._decorate_snapshot_rows(self._with_runtime_fields(closed_cached, False, "closed_cache"))
         if has_stock_data:
             self._save_snapshot(snapshot)
             if not market_open:
                 self._save_closed_snapshot(snapshot)
             return snapshot
         if has_sector_data and cached and any(cached.get(key) for key in ("gainers", "losers")):
-            return self._merge_with_cached_snapshot(snapshot, cached)
+            return self._decorate_snapshot_rows(self._merge_with_cached_snapshot(snapshot, cached))
         if has_sector_data and not cached:
             self._save_snapshot(snapshot)
             return snapshot
@@ -913,7 +1211,7 @@ class MarketEngine:
             cached["error"] = self.last_error
             cached["market_open"] = market_open
             cached["snapshot_source"] = "cache"
-            return cached
+            return self._decorate_snapshot_rows(cached)
         return snapshot
 
     def _get_latest_rows_for_symbols(self, symbols):
@@ -994,12 +1292,14 @@ class MarketEngine:
             cached_breakdowns = self._cached_sector_breakdowns() or {}
             cached_payload = cached_breakdowns.get(sector)
             if cached_payload and cached_payload.get("stocks"):
+                self._decorate_rows_with_previous_day_badges(cached_payload["stocks"])
                 return cached_payload
 
         self._refresh_sector_memberships(force=not bool(self.sector_members))
         symbols = self.sector_members.get(sector, [])
         rows = self._get_latest_rows_for_symbols(symbols)
         ranked = sorted(rows, key=lambda row: row["change"], reverse=True)
+        self._decorate_rows_with_previous_day_badges(ranked)
         for index, row in enumerate(ranked, start=1):
             row["rank"] = index
         return {

@@ -509,10 +509,39 @@ def dashboard(request: Request):
     )
 
 
+@app.get("/relative-rotation", response_class=HTMLResponse)
+def relative_rotation(request: Request):
+    user = current_user(request)
+    admin = current_admin(request)
+    return templates.TemplateResponse(
+        request,
+        "relative_rotation.html",
+        {
+            "title": "Relative Rotation Graph",
+            "user": user,
+            "admin": admin,
+            "public_mode": True if not user and not admin else False,
+            "rrg_payload": engine.get_relative_rotation_graph(),
+        },
+    )
+
+
 @app.get("/api/market-snapshot")
 def market_snapshot(request: Request):
     return JSONResponse(
         engine.get_snapshot(),
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
+
+
+@app.get("/api/relative-rotation")
+def relative_rotation_data(request: Request):
+    return JSONResponse(
+        engine.get_relative_rotation_graph(),
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",

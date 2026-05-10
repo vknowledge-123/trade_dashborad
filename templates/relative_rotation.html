@@ -1,0 +1,545 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="rrg-shell">
+  <div class="panel rrg-hero">
+    <div>
+      <span class="rrg-kicker">Relative Rotation Graph</span>
+      <h1>Sector leadership vs {{ rrg_payload.benchmark if rrg_payload.benchmark else "NIFTY 50" }}</h1>
+      <p>
+        This view maps sector relative strength and relative momentum into the four classic RRG quadrants.
+        Trails show how each sector has rotated over recent sessions using historical daily data.
+      </p>
+    </div>
+    <div class="rrg-hero-meta">
+      <div class="rrg-hero-stat">
+        <span class="rrg-hero-label">Benchmark</span>
+        <strong id="rrg-benchmark">{{ rrg_payload.benchmark if rrg_payload.benchmark else "NIFTY 50" }}</strong>
+      </div>
+      <div class="rrg-hero-stat">
+        <span class="rrg-hero-label">Latest Session</span>
+        <strong id="rrg-latest-session">{{ rrg_payload.latest_session if rrg_payload.latest_session else "Waiting" }}</strong>
+      </div>
+      <div class="rrg-hero-stat">
+        <span class="rrg-hero-label">Status</span>
+        <strong id="rrg-market-state">{{ "Live market" if rrg_payload.market_open else "Closed market snapshot" }}</strong>
+      </div>
+    </div>
+  </div>
+
+  <div class="rrg-grid">
+    <div class="panel rrg-chart-panel">
+      <div class="panel-header">
+        <div>
+          <h3>Rotation Map</h3>
+          <div class="panel-sub" id="rrg-updated-at">Updated {{ rrg_payload.updated_at if rrg_payload.updated_at else "just now" }}</div>
+        </div>
+        <div class="rrg-actions">
+          <span class="pill neutral" id="rrg-trail-pill">{{ rrg_payload.trail_points if rrg_payload.trail_points else 12 }} session trail</span>
+          <button class="btn btn-ghost rrg-refresh" id="rrg-refresh" type="button">Refresh</button>
+        </div>
+      </div>
+      <div class="rrg-chart-wrap">
+        <svg id="rrg-chart" viewBox="0 0 920 620" role="img" aria-label="Relative Rotation Graph"></svg>
+        <div class="rrg-empty" id="rrg-empty" hidden></div>
+      </div>
+    </div>
+
+    <div class="rrg-side">
+      <div class="panel rrg-quadrants">
+        <div class="panel-header">
+          <h3>Quadrants</h3>
+          <span class="pill neutral">JDK style layout</span>
+        </div>
+        <div class="rrg-quadrant-grid">
+          <div class="rrg-quadrant-card leading">
+            <strong>Leading</strong>
+            <span>RS-Ratio &gt; 100 and RS-Momentum &gt; 100</span>
+          </div>
+          <div class="rrg-quadrant-card weakening">
+            <strong>Weakening</strong>
+            <span>Still strong, but momentum is cooling</span>
+          </div>
+          <div class="rrg-quadrant-card lagging">
+            <strong>Lagging</strong>
+            <span>Relative weakness with negative momentum</span>
+          </div>
+          <div class="rrg-quadrant-card improving">
+            <strong>Improving</strong>
+            <span>Underperforming, but relative momentum is improving</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel rrg-list-panel">
+        <div class="panel-header">
+          <h3>Sector Scores</h3>
+          <span class="pill neutral" id="rrg-item-count">{{ (rrg_payload.items or [])|length }} sectors</span>
+        </div>
+        <div class="rrg-list" id="rrg-list"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script id="rrg-initial-data" type="application/json">{{ rrg_payload|tojson }}</script>
+
+<style>
+.rrg-shell {
+  display: grid;
+  gap: 16px;
+}
+
+.rrg-hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: flex-start;
+}
+
+.rrg-kicker {
+  display: inline-block;
+  margin-bottom: 8px;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #8ecfff;
+}
+
+.rrg-hero h1 {
+  margin: 0;
+  font-family: "Syne", sans-serif;
+  font-size: clamp(24px, 3vw, 34px);
+}
+
+.rrg-hero p {
+  max-width: 760px;
+  margin-top: 10px;
+  color: #9bb3d1;
+  line-height: 1.65;
+}
+
+.rrg-hero-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  min-width: min(340px, 100%);
+}
+
+.rrg-hero-stat {
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.rrg-hero-label {
+  display: block;
+  font-size: 10px;
+  color: #8ca5c8;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.rrg-hero-stat strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 14px;
+}
+
+.rrg-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(320px, 0.9fr);
+  gap: 16px;
+}
+
+.rrg-chart-wrap {
+  position: relative;
+  min-height: 560px;
+}
+
+#rrg-chart {
+  width: 100%;
+  min-height: 560px;
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01)),
+    radial-gradient(circle at top left, rgba(0, 212, 255, 0.08), transparent 42%);
+}
+
+.rrg-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rrg-refresh {
+  padding: 9px 14px;
+}
+
+.rrg-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  color: #8ca5c8;
+  text-align: center;
+}
+
+.rrg-side {
+  display: grid;
+  gap: 16px;
+}
+
+.rrg-quadrant-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.rrg-quadrant-card {
+  display: grid;
+  gap: 5px;
+  padding: 13px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.rrg-quadrant-card strong {
+  font-size: 13px;
+}
+
+.rrg-quadrant-card span {
+  font-size: 12px;
+  color: #8ca5c8;
+  line-height: 1.5;
+}
+
+.rrg-quadrant-card.leading {
+  border-color: rgba(0, 229, 160, 0.24);
+  background: rgba(0, 229, 160, 0.08);
+}
+
+.rrg-quadrant-card.weakening {
+  border-color: rgba(255, 184, 48, 0.24);
+  background: rgba(255, 184, 48, 0.08);
+}
+
+.rrg-quadrant-card.lagging {
+  border-color: rgba(255, 77, 109, 0.24);
+  background: rgba(255, 77, 109, 0.08);
+}
+
+.rrg-quadrant-card.improving {
+  border-color: rgba(0, 212, 255, 0.24);
+  background: rgba(0, 212, 255, 0.08);
+}
+
+.rrg-list {
+  display: grid;
+  gap: 8px;
+  max-height: 620px;
+  overflow: auto;
+}
+
+.rrg-item {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.rrg-item-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.rrg-item-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.rrg-item-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  box-shadow: 0 0 18px currentColor;
+}
+
+.rrg-item-quadrant {
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+
+.rrg-item-quadrant.leading {
+  color: #00e5a0;
+  background: rgba(0, 229, 160, 0.12);
+}
+
+.rrg-item-quadrant.weakening {
+  color: #ffcf78;
+  background: rgba(255, 184, 48, 0.12);
+}
+
+.rrg-item-quadrant.lagging {
+  color: #ff91a5;
+  background: rgba(255, 77, 109, 0.12);
+}
+
+.rrg-item-quadrant.improving {
+  color: #82e8ff;
+  background: rgba(0, 212, 255, 0.12);
+}
+
+.rrg-item-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.rrg-item-stat {
+  display: grid;
+  gap: 4px;
+}
+
+.rrg-item-stat span {
+  font-size: 10px;
+  color: #8ca5c8;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.rrg-item-stat strong {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+}
+
+@media (max-width: 1024px) {
+  .rrg-hero {
+    grid-template-columns: 1fr;
+    display: grid;
+  }
+
+  .rrg-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .rrg-hero-meta,
+  .rrg-item-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .rrg-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  #rrg-chart {
+    min-height: 460px;
+  }
+}
+</style>
+
+<script>
+(() => {
+  const initialScript = document.getElementById("rrg-initial-data");
+  const chart = document.getElementById("rrg-chart");
+  const emptyState = document.getElementById("rrg-empty");
+  const list = document.getElementById("rrg-list");
+  const refreshButton = document.getElementById("rrg-refresh");
+  const updatedAt = document.getElementById("rrg-updated-at");
+  const benchmark = document.getElementById("rrg-benchmark");
+  const latestSession = document.getElementById("rrg-latest-session");
+  const marketState = document.getElementById("rrg-market-state");
+  const trailPill = document.getElementById("rrg-trail-pill");
+  const itemCount = document.getElementById("rrg-item-count");
+
+  if (!initialScript || !chart || !list) return;
+
+  let currentPayload = {};
+  try {
+    currentPayload = JSON.parse(initialScript.textContent || "{}");
+  } catch (error) {
+    currentPayload = {};
+  }
+
+  const formatValue = (value) => {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return "-";
+    return number.toFixed(2);
+  };
+
+  const quadrantClass = (quadrant) => (quadrant || "").toLowerCase();
+
+  const buildTicks = (min, max, count = 5) => {
+    const span = max - min;
+    if (!Number.isFinite(span) || span <= 0) return [100];
+    const step = span / (count - 1);
+    return Array.from({ length: count }, (_, index) => Number((min + step * index).toFixed(2)));
+  };
+
+  const renderList = (payload) => {
+    const items = payload.items || [];
+    itemCount.textContent = `${items.length} sectors`;
+    if (!items.length) {
+      list.innerHTML = '<div class="muted">No relative rotation sectors are available right now.</div>';
+      return;
+    }
+
+    list.innerHTML = items.map((item) => `
+      <div class="rrg-item">
+        <div class="rrg-item-top">
+          <div class="rrg-item-name">
+            <span class="rrg-item-dot" style="color:${item.color}; background:${item.color};"></span>
+            <span>${item.sector}</span>
+          </div>
+          <span class="rrg-item-quadrant ${quadrantClass(item.quadrant)}">${item.quadrant}</span>
+        </div>
+        <div class="rrg-item-stats">
+          <div class="rrg-item-stat">
+            <span>RS-Ratio</span>
+            <strong>${formatValue(item.rs_ratio)}</strong>
+          </div>
+          <div class="rrg-item-stat">
+            <span>RS-Momentum</span>
+            <strong>${formatValue(item.rs_momentum)}</strong>
+          </div>
+          <div class="rrg-item-stat">
+            <span>Relative Strength</span>
+            <strong>${formatValue(item.relative_strength)}</strong>
+          </div>
+        </div>
+      </div>
+    `).join("");
+  };
+
+  const renderChart = (payload) => {
+    const items = payload.items || [];
+    benchmark.textContent = payload.benchmark || "NIFTY 50";
+    latestSession.textContent = payload.latest_session || "Waiting";
+    marketState.textContent = payload.market_open ? "Live market" : "Closed market snapshot";
+    updatedAt.textContent = `Updated ${payload.updated_at || "just now"}`;
+    trailPill.textContent = `${payload.trail_points || 12} session trail`;
+
+    if (!items.length) {
+      chart.innerHTML = "";
+      emptyState.hidden = false;
+      emptyState.textContent = payload.error || "Relative rotation data is not available right now.";
+      renderList(payload);
+      return;
+    }
+
+    emptyState.hidden = true;
+    const width = 920;
+    const height = 620;
+    const pad = { top: 36, right: 60, bottom: 56, left: 64 };
+    const innerWidth = width - pad.left - pad.right;
+    const innerHeight = height - pad.top - pad.bottom;
+    const xDomain = payload.x_domain || [90, 110];
+    const yDomain = payload.y_domain || [90, 110];
+    const xMin = Math.min(xDomain[0], 96);
+    const xMax = Math.max(xDomain[1], 104);
+    const yMin = Math.min(yDomain[0], 96);
+    const yMax = Math.max(yDomain[1], 104);
+    const xScale = (value) => pad.left + ((value - xMin) / (xMax - xMin || 1)) * innerWidth;
+    const yScale = (value) => pad.top + innerHeight - ((value - yMin) / (yMax - yMin || 1)) * innerHeight;
+    const x100 = xScale(100);
+    const y100 = yScale(100);
+    const xTicks = buildTicks(xMin, xMax, 5);
+    const yTicks = buildTicks(yMin, yMax, 5);
+
+    const quadrants = `
+      <rect x="${pad.left}" y="${pad.top}" width="${x100 - pad.left}" height="${y100 - pad.top}" fill="rgba(255, 184, 48, 0.10)"></rect>
+      <rect x="${x100}" y="${pad.top}" width="${pad.left + innerWidth - x100}" height="${y100 - pad.top}" fill="rgba(0, 229, 160, 0.10)"></rect>
+      <rect x="${pad.left}" y="${y100}" width="${x100 - pad.left}" height="${pad.top + innerHeight - y100}" fill="rgba(255, 77, 109, 0.10)"></rect>
+      <rect x="${x100}" y="${y100}" width="${pad.left + innerWidth - x100}" height="${pad.top + innerHeight - y100}" fill="rgba(0, 212, 255, 0.10)"></rect>
+    `;
+
+    const gridLines = [
+      ...xTicks.map((tick) => `
+        <line x1="${xScale(tick)}" y1="${pad.top}" x2="${xScale(tick)}" y2="${pad.top + innerHeight}" stroke="rgba(255,255,255,0.08)" stroke-dasharray="4 6"></line>
+        <text x="${xScale(tick)}" y="${height - 18}" fill="#8ca5c8" font-size="11" text-anchor="middle">${tick.toFixed(1)}</text>
+      `),
+      ...yTicks.map((tick) => `
+        <line x1="${pad.left}" y1="${yScale(tick)}" x2="${pad.left + innerWidth}" y2="${yScale(tick)}" stroke="rgba(255,255,255,0.08)" stroke-dasharray="4 6"></line>
+        <text x="${pad.left - 14}" y="${yScale(tick) + 4}" fill="#8ca5c8" font-size="11" text-anchor="end">${tick.toFixed(1)}</text>
+      `),
+    ].join("");
+
+    const sectorPaths = items.map((item) => {
+      const trail = item.trail || [];
+      const path = trail.map((point, index) => `${index === 0 ? "M" : "L"} ${xScale(point.x)} ${yScale(point.y)}`).join(" ");
+      const latest = trail[trail.length - 1];
+      if (!latest) return "";
+      return `
+        <path d="${path}" fill="none" stroke="${item.color}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" opacity="0.82"></path>
+        ${trail.slice(0, -1).map((point) => `
+          <circle cx="${xScale(point.x)}" cy="${yScale(point.y)}" r="2.4" fill="${item.color}" opacity="0.38"></circle>
+        `).join("")}
+        <circle cx="${xScale(latest.x)}" cy="${yScale(latest.y)}" r="6" fill="${item.color}" stroke="#08101d" stroke-width="2"></circle>
+        <text x="${xScale(latest.x) + 10}" y="${yScale(latest.y) - 10}" fill="#eef6ff" font-size="12" font-weight="700">${item.sector}</text>
+      `;
+    }).join("");
+
+    chart.innerHTML = `
+      <rect x="0" y="0" width="${width}" height="${height}" rx="18" fill="rgba(7, 12, 24, 0.62)"></rect>
+      ${quadrants}
+      ${gridLines}
+      <line x1="${x100}" y1="${pad.top}" x2="${x100}" y2="${pad.top + innerHeight}" stroke="rgba(255,255,255,0.38)" stroke-width="1.5"></line>
+      <line x1="${pad.left}" y1="${y100}" x2="${pad.left + innerWidth}" y2="${y100}" stroke="rgba(255,255,255,0.38)" stroke-width="1.5"></line>
+      <text x="${pad.left + 12}" y="${pad.top + 20}" fill="#ffcf78" font-size="13" font-weight="700">Weakening</text>
+      <text x="${pad.left + innerWidth - 86}" y="${pad.top + 20}" fill="#7cf1c7" font-size="13" font-weight="700">Leading</text>
+      <text x="${pad.left + 12}" y="${pad.top + innerHeight - 14}" fill="#ff9aae" font-size="13" font-weight="700">Lagging</text>
+      <text x="${pad.left + innerWidth - 92}" y="${pad.top + innerHeight - 14}" fill="#8de9ff" font-size="13" font-weight="700">Improving</text>
+      ${sectorPaths}
+      <text x="${pad.left + innerWidth / 2}" y="${height - 8}" fill="#8ca5c8" font-size="12" text-anchor="middle">RS-Momentum</text>
+      <text x="16" y="${pad.top + innerHeight / 2}" fill="#8ca5c8" font-size="12" transform="rotate(-90 16 ${pad.top + innerHeight / 2})" text-anchor="middle">RS-Ratio</text>
+    `;
+
+    renderList(payload);
+  };
+
+  const fetchRrg = async () => {
+    if (!refreshButton) return;
+    refreshButton.disabled = true;
+    refreshButton.textContent = "Refreshing...";
+    try {
+      const response = await fetch(`/api/relative-rotation?ts=${Date.now()}`, {
+        cache: "no-store",
+        headers: { "Cache-Control": "no-cache" },
+      });
+      if (!response.ok) throw new Error("Unable to load relative rotation data");
+      currentPayload = await response.json();
+      renderChart(currentPayload);
+    } catch (error) {
+      emptyState.hidden = false;
+      emptyState.textContent = "Relative rotation data could not be refreshed right now.";
+    } finally {
+      refreshButton.disabled = false;
+      refreshButton.textContent = "Refresh";
+    }
+  };
+
+  renderChart(currentPayload);
+  if (refreshButton) {
+    refreshButton.addEventListener("click", fetchRrg);
+  }
+  if (currentPayload.market_open) {
+    setInterval(fetchRrg, 60000);
+  }
+})();
+</script>
+{% endblock %}
