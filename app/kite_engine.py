@@ -1192,16 +1192,10 @@ class MarketEngine:
         return series
 
     def _symbols_for_badge_warmup(self):
-        symbols = set()
-        snapshot_sources = [self._cached_snapshot(), self._cached_closed_snapshot()]
-        for snapshot in snapshot_sources:
-            if not snapshot:
-                continue
-            for row in (snapshot.get("gainers") or []) + (snapshot.get("losers") or []):
-                symbol = (row.get("symbol") or "").upper()
-                if symbol:
-                    symbols.add(symbol)
-        return sorted(symbols)
+        return sorted(
+            symbol for symbol, token in self.symbol_to_token.items()
+            if token and self._is_tracked_symbol(symbol)
+        )
 
     def _warm_previous_day_badges_cache(self, cache_marker, force=False):
         self._restore_previous_day_badges_cache()
@@ -1217,7 +1211,7 @@ class MarketEngine:
             self._update_history_cache_status(
                 processed=processed,
                 total=total + len(self.sector_tokens) + 1,
-                message=f"Caching dashboard badge history ({processed}/{total})",
+                message=f"Caching previous-day badge history for tracked stocks ({processed}/{total})",
             )
             cached = self.previous_day_badges_cache.get(symbol)
             if not force and cached and cached.get("cache_marker") == cache_marker:
