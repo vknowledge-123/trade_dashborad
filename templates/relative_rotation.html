@@ -552,12 +552,22 @@
       const latest = trail[trail.length - 1];
       if (!latest) return "";
       return `
-        <path d="${path}" fill="none" stroke="${item.color}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" opacity="0.82"></path>
+        <path d="${path}" fill="none" stroke="${item.color}" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round" opacity="0.42"></path>
         ${trail.slice(0, -1).map((point) => `
-          <circle cx="${xScale(point.x)}" cy="${yScale(point.y)}" r="2.4" fill="${item.color}" opacity="0.38"></circle>
+          <circle cx="${xScale(point.x)}" cy="${yScale(point.y)}" r="1.8" fill="${item.color}" opacity="0.22"></circle>
         `).join("")}
-        <circle cx="${xScale(latest.x)}" cy="${yScale(latest.y)}" r="6" fill="${item.color}" stroke="#08101d" stroke-width="2"></circle>
-        <text x="${xScale(latest.x) + 10}" y="${yScale(latest.y) - 10}" fill="#eef6ff" font-size="12" font-weight="700">${item.sector}</text>
+        <circle cx="${xScale(latest.x)}" cy="${yScale(latest.y)}" r="5.5" fill="${item.color}" stroke="#08101d" stroke-width="2"></circle>
+        <text
+          x="${xScale(latest.x) + 10}"
+          y="${yScale(latest.y) - 10}"
+          fill="#f7fbff"
+          font-size="12"
+          font-weight="700"
+          paint-order="stroke"
+          stroke="rgba(8,16,29,0.92)"
+          stroke-width="4"
+          stroke-linejoin="round"
+        >${item.sector}</text>
       `;
     }).join("");
 
