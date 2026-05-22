@@ -1,6 +1,24 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="admin-grid">
+  <div class="panel panel-accent panel-wide panel-compact">
+    <div class="panel-header">
+      <h3>Active Broker</h3>
+      <span class="pill">{{ active_broker|upper if active_broker else "KITE" }}</span>
+    </div>
+    <form class="broker-switch" method="post" action="/admin/broker">
+      <label class="broker-option">
+        <input type="radio" name="active_broker" value="kite" {% if active_broker != "dhan" %}checked{% endif %} />
+        <span>Kite Connect</span>
+      </label>
+      <label class="broker-option">
+        <input type="radio" name="active_broker" value="dhan" {% if active_broker == "dhan" %}checked{% endif %} />
+        <span>Dhan Trading API</span>
+      </label>
+      <button class="btn btn-primary btn-mini" type="submit">Use Selected Broker</button>
+    </form>
+  </div>
+
   <div class="panel panel-accent panel-compact">
     <div class="panel-header">
       <h3>Kite API Credentials</h3>
@@ -21,6 +39,25 @@
       <span class="muted">Need a fresh token?</span>
       <a class="btn btn-ghost btn-mini" href="/admin/kite/login">Generate Access Token</a>
     </div>
+  </div>
+
+  <div class="panel panel-accent panel-compact">
+    <div class="panel-header">
+      <h3>Dhan API Credentials</h3>
+      <span class="pill">Token login</span>
+    </div>
+    <form class="inquiry" method="post" action="/admin/dhan/credentials">
+      <label>
+        Dhan Client ID
+        <input type="text" name="client_id" value="{{ dhan_creds['client_id'] if dhan_creds else '' }}" required />
+      </label>
+      <label>
+        Access Token
+        <input type="password" name="access_token" value="{{ dhan_creds['access_token'] if dhan_creds else '' }}" required />
+      </label>
+      <button class="btn btn-primary" type="submit">Save & Connect Dhan</button>
+    </form>
+    <p class="muted">Dhan uses client ID and access token directly; no callback URL is required.</p>
   </div>
 
   <div class="panel panel-accent panel-2fa panel-2fa-compact panel-2fa-inline panel-2fa-audit">
@@ -413,6 +450,24 @@
   justify-content: space-between;
   gap: 10px;
   margin-top: 10px;
+}
+.broker-switch {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.broker-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.04);
+  color: #e8f0fe;
+  font-size: 13px;
+  font-weight: 700;
 }
 .panel-wide {
   grid-column: 1 / -1;

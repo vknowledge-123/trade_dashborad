@@ -1,7 +1,9 @@
 import csv
 import io
+import json
 import math
 import re
+import struct
 import threading
 import time
 from collections import defaultdict
@@ -21,6 +23,7 @@ LATEST_ROWS_CACHE_KEY = "latest_rows"
 SECTOR_MEMBERS_CACHE_KEY = "sector_memberships"
 SECTOR_BREAKDOWNS_CACHE_KEY = "sector_breakdowns"
 PREVIOUS_DAY_BADGES_CACHE_KEY = "previous_day_badges"
+PREVIOUS_DAY_LEVELS_CACHE_KEY = "previous_day_levels"
 RRG_CACHE_KEY = "relative_rotation_graph"
 IST = ZoneInfo("Asia/Kolkata")
 LIVE_FEED_STALE_AFTER_SECONDS = 15
@@ -77,12 +80,123 @@ NSE_TRADING_HOLIDAYS = {
     "2026-12-25",
 }
 
+DHAN_SCRIP_MASTER_URL = "https://images.dhan.co/api-data/api-scrip-master.csv"
+DHAN_API_BASE_URL = "https://api.dhan.co/v2"
+DHAN_FEED_URL = "wss://api-feed.dhan.co?version=2&token={token}&clientId={client_id}&authType=2"
+DHAN_EXCHANGE_SEGMENT_CODES = {
+    0: "IDX_I",
+    1: "NSE_EQ",
+    2: "NSE_FNO",
+    3: "NSE_CURRENCY",
+    4: "BSE_EQ",
+    5: "MCX_COMM",
+    7: "BSE_CURRENCY",
+    8: "BSE_FNO",
+}
+DHAN_SECTOR_SECURITY_IDS = {
+    "NIFTY 50": "13",
+    "NIFTY IT": "15",
+    "NIFTY BANK": "25",
+}
+NIFTY_50_SCANNER_STOCKS = [
+    "HDFCBANK", "ICICIBANK", "MAXHEALTH", "RELIANCE", "INFY",
+    "BHARTIARTL", "ITC", "WIPRO", "M&M", "SBIN",
+    "AXISBANK", "TCS", "ETERNAL", "LT", "SHRIRAMFIN",
+    "MARUTI", "TRENT", "APOLLOHOSP", "COALINDIA", "NTPC",
+    "ASIANPAINT", "BAJFINANCE", "TATASTEEL", "KOTAKBANK", "HINDALCO",
+    "POWERGRID", "SUNPHARMA", "ULTRACEMCO", "BEL", "JIOFIN",
+    "EICHERMOT", "ADANIENT", "GRASIM", "TITAN", "INDIGO",
+    "ADANIPORTS", "ONGC", "TMPV", "HINDUNILVR", "DRREDDY",
+    "HDFCLIFE", "HCLTECH", "BAJAJ-AUTO", "SBILIFE", "TATACONSUM",
+    "NESTLEIND", "CIPLA", "TECHM", "BAJAJFINSV", "JSWSTEEL",
+]
+
+
+class DhanClient:
+    def __init__(self, client_id, access_token, http_session=None):
+        self.client_id = client_id
+        self.access_token = access_token
+        self.http = http_session or requests.Session()
+        self.http.headers.update(
+            {
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "access-token": access_token,
+                "client-id": client_id,
+            }
+        )
+
+    def _post(self, path, payload):
+        response = self.http.post(
+            f"{DHAN_API_BASE_URL}{path}",
+            json=payload,
+            timeout=(10, 40),
+        )
+        response.raise_for_status()
+        data = response.json()
+        if isinstance(data, dict) and data.get("status") not in (None, "success"):
+            raise RuntimeError(data.get("remarks") or data.get("message") or str(data))
+        return data
+
+    def marketfeed_quote(self, securities):
+        return self._post("/marketfeed/quote", securities).get("data") or {}
+
+    def marketfeed_ohlc(self, securities):
+        return self._post("/marketfeed/ohlc", securities).get("data") or {}
+
+    def historical_data(self, security_id, from_date, to_date, interval):
+        from_value = from_date.date().isoformat() if hasattr(from_date, "date") else str(from_date)
+        if hasattr(to_date, "date"):
+            to_value = (to_date.date() + timedelta(days=1)).isoformat()
+        else:
+            to_value = str(to_date)
+        segment = "NSE_EQ"
+        instrument = "EQUITY"
+        if isinstance(security_id, tuple):
+            segment, security_id, instrument = security_id
+        payload = {
+            "securityId": str(security_id),
+            "exchangeSegment": segment,
+            "instrument": instrument,
+            "expiryCode": 0,
+            "oi": False,
+            "fromDate": from_value,
+            "toDate": to_value,
+        }
+        data = self._post("/charts/historical", payload)
+        return self._candles_from_dhan_arrays(data)
+
+    def _candles_from_dhan_arrays(self, data):
+        timestamps = data.get("timestamp") or []
+        opens = data.get("open") or []
+        highs = data.get("high") or []
+        lows = data.get("low") or []
+        closes = data.get("close") or []
+        volumes = data.get("volume") or []
+        candles = []
+        total = min(len(timestamps), len(opens), len(highs), len(lows), len(closes))
+        for idx in range(total):
+            candle_dt = datetime.fromtimestamp(int(timestamps[idx]), tz=IST)
+            candles.append(
+                {
+                    "date": candle_dt,
+                    "open": opens[idx],
+                    "high": highs[idx],
+                    "low": lows[idx],
+                    "close": closes[idx],
+                    "volume": volumes[idx] if idx < len(volumes) else None,
+                }
+            )
+        return candles
+
 
 class MarketEngine:
     def __init__(self, redis_client):
         self.redis = redis_client
         self.api_key = None
         self.access_token = None
+        self.client_id = None
+        self.broker = "kite"
         self.sector_names = []
         self.ticker = None
         self.thread = None
@@ -99,6 +213,10 @@ class MarketEngine:
         self.index_tokens = {}
         self.sector_tokens = {}
         self.sector_token_to_name = {}
+        self.dhan_security_to_symbol = {}
+        self.dhan_symbol_to_security = {}
+        self.dhan_security_to_segment = {}
+        self.dhan_security_to_instrument = {}
         self.sector_members = {}
         self.sector_prev_close = {}
         self.rest_prev_close = {}
@@ -122,6 +240,7 @@ class MarketEngine:
         self.refresh_reason = None
         self.start_lock = threading.Lock()
         self.previous_day_badges_cache = {}
+        self.previous_day_levels_cache = {}
         self.historical_fetch_lock = threading.Lock()
         self.last_historical_fetch_ts = 0.0
         self.history_cache_lock = threading.Lock()
@@ -145,6 +264,95 @@ class MarketEngine:
     def _extract_underlying(self, tradingsymbol):
         match = re.match(r"^[A-Z]+", tradingsymbol)
         return match.group(0) if match else tradingsymbol
+
+    def _normalize_symbol(self, value):
+        return (value or "").strip().upper()
+
+    def _dhan_scrip_rows(self):
+        response = self.http.get(DHAN_SCRIP_MASTER_URL, timeout=(10, 60))
+        response.raise_for_status()
+        text = response.content.decode("utf-8-sig", errors="ignore")
+        return csv.DictReader(io.StringIO(text))
+
+    def _row_value(self, row, *keys):
+        for key in keys:
+            value = row.get(key)
+            if value not in (None, ""):
+                return str(value).strip()
+        return ""
+
+    def _build_dhan_universe(self, sector_names):
+        token_to_symbol = {}
+        symbol_to_token = {}
+        symbol_to_name = {}
+        security_to_segment = {}
+        security_to_instrument = {}
+        sector_tokens = {}
+        all_index_tokens = {}
+        tracked = set(self.nifty500_set or []) | set(NIFTY_50_SCANNER_STOCKS)
+
+        for row in self._dhan_scrip_rows():
+            exch = self._row_value(row, "SEM_EXM_EXCH_ID", "EXCH_ID")
+            segment_code = self._row_value(row, "SEM_SEGMENT", "SEGMENT")
+            series = self._row_value(row, "SEM_SERIES", "SERIES")
+            instrument = self._row_value(row, "SEM_INSTRUMENT_NAME", "INSTRUMENT")
+            security_id = self._row_value(row, "SEM_SMST_SECURITY_ID", "SECURITY_ID", "SECURITY_ID")
+            symbol = self._normalize_symbol(
+                self._row_value(row, "SEM_TRADING_SYMBOL", "SYMBOL_NAME", "SM_SYMBOL_NAME")
+            )
+            display_name = self._row_value(row, "SEM_CUSTOM_SYMBOL", "DISPLAY_NAME", "SM_SYMBOL_NAME")
+            if not security_id:
+                continue
+
+            if exch == "NSE" and segment_code == "E" and instrument in {"EQUITY", "EQ"} and (not series or series == "EQ"):
+                if not symbol:
+                    continue
+                token = int(float(security_id))
+                token_to_symbol[token] = symbol
+                symbol_to_token[symbol] = token
+                symbol_to_name[symbol] = display_name or symbol
+                security_to_segment[token] = "NSE_EQ"
+                security_to_instrument[token] = "EQUITY"
+                continue
+
+            if segment_code == "I" or instrument == "INDEX":
+                name = self._normalize_symbol(display_name or symbol)
+                token = int(float(security_id))
+                all_index_tokens[name] = token
+                security_to_segment[token] = "IDX_I"
+                security_to_instrument[token] = "INDEX"
+                if name in sector_names:
+                    sector_tokens[name] = token
+
+        for name, security_id in DHAN_SECTOR_SECURITY_IDS.items():
+            if name in sector_names and name not in sector_tokens:
+                token = int(security_id)
+                sector_tokens[name] = token
+                all_index_tokens[name] = token
+                security_to_segment[token] = "IDX_I"
+                security_to_instrument[token] = "INDEX"
+
+        self.token_to_symbol = token_to_symbol
+        self.symbol_to_token = symbol_to_token
+        self.symbol_to_name = symbol_to_name
+        self.dhan_symbol_to_security = symbol_to_token
+        self.dhan_security_to_symbol = token_to_symbol
+        self.dhan_security_to_segment = security_to_segment
+        self.dhan_security_to_instrument = security_to_instrument
+        self.index_tokens = all_index_tokens
+        self.sector_tokens = sector_tokens
+        self.sector_token_to_name = {token: name for name, token in sector_tokens.items()}
+        self.fno_symbols = {s.upper() for s in self.fno_override}
+        self.equity_tokens = [
+            token for symbol, token in symbol_to_token.items()
+            if not tracked or symbol in tracked
+        ]
+        self._refresh_sector_memberships(force=True)
+
+        prev, latest = self._fetch_sector_quote(self.kite, list(sector_tokens.keys()))
+        self.sector_prev_close = prev
+        if latest:
+            self.sector_latest.update(latest)
 
     def _chunked(self, items, size):
         for idx in range(0, len(items), size):
@@ -215,7 +423,8 @@ class MarketEngine:
         if not self.ticker:
             return
         try:
-            self.ticker.close()
+            if hasattr(self.ticker, "close"):
+                self.ticker.close()
         except Exception:
             pass
         self.ticker = None
@@ -232,6 +441,8 @@ class MarketEngine:
     def _create_ticker(self):
         if not self.api_key or not self.access_token:
             return False
+        if self.broker == "dhan":
+            return self._create_dhan_ticker()
         all_tokens, sector_token_list = self._subscribed_tokens()
         print(f"[engine] equity_tokens={len(self.equity_tokens)} sector_tokens={len(sector_token_list)} subscribed={len(all_tokens)}")
         if sector_token_list:
@@ -258,6 +469,139 @@ class MarketEngine:
         self.ticker.on_noreconnect = self._on_noreconnect
         self.ticker.connect(threaded=True)
         return True
+
+    def _create_dhan_ticker(self):
+        try:
+            import websocket
+        except Exception as exc:
+            self.connected = False
+            self.last_error = f"Dhan websocket-client is not installed: {exc}"
+            return False
+
+        instruments = []
+        for token in self.equity_tokens:
+            instruments.append({"ExchangeSegment": "NSE_EQ", "SecurityId": str(token)})
+        for token in self.sector_tokens.values():
+            instruments.append({"ExchangeSegment": "IDX_I", "SecurityId": str(token)})
+        if not instruments:
+            self.connected = False
+            self.last_error = "No Dhan security IDs available for websocket subscription."
+            return False
+
+        url = DHAN_FEED_URL.format(token=self.access_token, client_id=self.client_id or self.api_key)
+
+        def on_open(ws):
+            self.connected = True
+            self.last_connect_ts = time.time()
+            self.last_error = None
+            for chunk in self._chunked(instruments, 100):
+                ws.send(
+                    json.dumps(
+                        {
+                            "RequestCode": 17,
+                            "InstrumentCount": len(chunk),
+                            "InstrumentList": chunk,
+                        }
+                    )
+                )
+
+        def on_message(ws, message):
+            if isinstance(message, str):
+                return
+            self._on_dhan_binary_message(message)
+
+        def on_error(ws, error):
+            self.connected = False
+            self.last_error = f"Dhan WebSocket error: {error}"
+
+        def on_close(ws, code, reason):
+            self.connected = False
+            self.last_error = f"Dhan WebSocket closed: {code} {reason}"
+
+        self.ticker = websocket.WebSocketApp(
+            url,
+            on_open=on_open,
+            on_message=on_message,
+            on_error=on_error,
+            on_close=on_close,
+        )
+
+        def run():
+            try:
+                self.ticker.run_forever(ping_interval=20, ping_timeout=10)
+            except Exception as exc:
+                self.connected = False
+                self.last_error = f"Dhan WebSocket stopped: {exc}"
+
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+        self.thread = thread
+        return True
+
+    def _on_dhan_binary_message(self, message):
+        if not message or len(message) < 8:
+            return
+        try:
+            packet_code, _length, exchange_code, security_id = struct.unpack_from("<B H B I", message, 0)
+            segment = DHAN_EXCHANGE_SEGMENT_CODES.get(exchange_code)
+            if not segment:
+                return
+            token = int(security_id)
+            with self.lock:
+                if packet_code == 6 and len(message) >= 16:
+                    prev_close = struct.unpack_from("<f", message, 8)[0]
+                    if segment == "IDX_I":
+                        name = self.sector_token_to_name.get(token)
+                        if name and prev_close not in (None, 0):
+                            self.sector_prev_close[name] = prev_close
+                    elif prev_close not in (None, 0):
+                        symbol = self.token_to_symbol.get(token)
+                        if symbol:
+                            self.rest_prev_close[symbol] = prev_close
+                    return
+
+                if packet_code not in {2, 4, 8} or len(message) < 12:
+                    return
+                last_price = struct.unpack_from("<f", message, 8)[0]
+                volume = None
+                day_close = None
+                if packet_code == 4 and len(message) >= 50:
+                    volume = struct.unpack_from("<I", message, 22)[0]
+                    day_close = struct.unpack_from("<f", message, 38)[0]
+                elif packet_code == 8 and len(message) >= 58:
+                    volume = struct.unpack_from("<I", message, 22)[0]
+                    day_close = struct.unpack_from("<f", message, 50)[0]
+
+                if segment == "IDX_I":
+                    name = self.sector_token_to_name.get(token)
+                    if not name:
+                        return
+                    base_close = day_close if day_close not in (None, 0) else self.sector_prev_close.get(name)
+                    change = 0.0 if base_close in (None, 0) else (last_price - base_close) / base_close * 100
+                    self.sector_latest[name] = {
+                        "sector": name,
+                        "price": round(last_price, 2),
+                        "change": round(change, 2),
+                    }
+                else:
+                    symbol = self.token_to_symbol.get(token)
+                    if not symbol:
+                        return
+                    base_close = day_close if day_close not in (None, 0) else self.rest_prev_close.get(symbol)
+                    row = self._build_stock_row(
+                        symbol,
+                        last_price,
+                        base_close,
+                        volume=volume or (self.latest.get(symbol) or {}).get("volume"),
+                    )
+                    if row:
+                        self.latest[symbol] = row
+                self.last_update = self._utc_now()
+                self.last_tick_ts = time.time()
+                self.connected = True
+                self.last_snapshot_source = "dhan_websocket"
+        except Exception as exc:
+            self.last_error = f"Dhan tick parse failed: {exc}"
 
     def _restart_live_feed(self, reason="stale"):
         if not self.api_key or not self.access_token:
@@ -396,6 +740,19 @@ class MarketEngine:
         except Exception:
             return
 
+    def _save_previous_day_levels_cache(self):
+        try:
+            save_market_cache(PREVIOUS_DAY_LEVELS_CACHE_KEY, self.previous_day_levels_cache)
+        except Exception:
+            return
+
+    def _restore_previous_day_levels_cache(self):
+        if self.previous_day_levels_cache:
+            return
+        cached = load_market_cache(PREVIOUS_DAY_LEVELS_CACHE_KEY)
+        if isinstance(cached, dict):
+            self.previous_day_levels_cache = cached
+
     def _restore_previous_day_badges_cache(self):
         if self.previous_day_badges_cache:
             return
@@ -454,8 +811,15 @@ class MarketEngine:
             if elapsed < HISTORICAL_DAY_REQUEST_DELAY_SECONDS:
                 time.sleep(HISTORICAL_DAY_REQUEST_DELAY_SECONDS - elapsed)
             try:
+                request_token = token
+                if self.broker == "dhan":
+                    request_token = (
+                        self.dhan_security_to_segment.get(int(token), "NSE_EQ"),
+                        str(token),
+                        self.dhan_security_to_instrument.get(int(token), "EQUITY"),
+                    )
                 candles = self.kite.historical_data(
-                    token,
+                    request_token,
                     self._historical_date_arg(from_date),
                     self._historical_date_arg(to_date),
                     "day",
@@ -708,6 +1072,113 @@ class MarketEngine:
         self._save_previous_day_badges_cache()
         return change
 
+    def _get_previous_day_levels(self, symbol):
+        symbol = (symbol or "").upper()
+        if not symbol:
+            return None
+        self._restore_previous_day_levels_cache()
+        cache_marker = self._completed_session_cache_marker()
+        cached = self.previous_day_levels_cache.get(symbol)
+        if cached and cached.get("cache_marker") == cache_marker:
+            return cached
+        token = self.symbol_to_token.get(symbol)
+        if not token or not self.kite:
+            return cached
+        completed_session = self._latest_completed_session_date()
+        candles = self._fetch_recent_day_candles(
+            token,
+            self._session_start_dt(completed_session),
+            self._session_end_dt(completed_session),
+            limit=1,
+        )
+        if not candles:
+            return cached
+        candle = candles[-1]
+        high = candle.get("high")
+        low = candle.get("low")
+        close = candle.get("close")
+        if high in (None, 0) or low in (None, 0):
+            return cached
+        levels = {
+            "cache_marker": cache_marker,
+            "high": round(float(high), 2),
+            "low": round(float(low), 2),
+            "close": round(float(close), 2) if close not in (None, 0) else None,
+            "date": self._format_candle_date(candle),
+        }
+        self.previous_day_levels_cache[symbol] = levels
+        self._save_previous_day_levels_cache()
+        return levels
+
+    def get_pdh_pdl_scanner(self):
+        symbols = [symbol for symbol in NIFTY_50_SCANNER_STOCKS if symbol in self.symbol_to_token]
+        market_open = self._is_market_open()
+        if not symbols:
+            return {
+                "pdh_breaks": [],
+                "pdl_breaks": [],
+                "symbols": NIFTY_50_SCANNER_STOCKS,
+                "tracked_count": 0,
+                "updated_at": self.last_update,
+                "market_open": market_open,
+                "snapshot_source": self.last_snapshot_source,
+                "error": self.last_error or "Broker universe is not ready yet.",
+            }
+
+        rows = self._get_latest_rows_for_symbols(symbols)
+        row_map = {row.get("symbol"): row for row in rows if isinstance(row, dict)}
+        pdh_breaks = []
+        pdl_breaks = []
+        missing_levels = 0
+
+        for symbol in symbols:
+            row = row_map.get(symbol)
+            if not row:
+                continue
+            levels = self._get_previous_day_levels(symbol)
+            if not levels:
+                missing_levels += 1
+                continue
+            price = row.get("price")
+            if price in (None, 0):
+                continue
+            base = {
+                "symbol": symbol,
+                "name": row.get("name") or self.symbol_to_name.get(symbol, symbol),
+                "price": price,
+                "change": row.get("change"),
+                "volume": row.get("volume"),
+                "previous_high": levels.get("high"),
+                "previous_low": levels.get("low"),
+                "previous_close": levels.get("close"),
+                "previous_date": levels.get("date"),
+                "is_fno": row.get("is_fno", False),
+            }
+            if levels.get("high") not in (None, 0) and price > levels["high"]:
+                item = dict(base)
+                item["break_points"] = round(price - levels["high"], 2)
+                item["break_percent"] = round(((price - levels["high"]) / levels["high"]) * 100, 2)
+                pdh_breaks.append(item)
+            if levels.get("low") not in (None, 0) and price < levels["low"]:
+                item = dict(base)
+                item["break_points"] = round(levels["low"] - price, 2)
+                item["break_percent"] = round(((levels["low"] - price) / levels["low"]) * 100, 2)
+                pdl_breaks.append(item)
+
+        pdh_breaks.sort(key=lambda item: item["break_percent"], reverse=True)
+        pdl_breaks.sort(key=lambda item: item["break_percent"], reverse=True)
+        return {
+            "pdh_breaks": pdh_breaks,
+            "pdl_breaks": pdl_breaks,
+            "symbols": symbols,
+            "tracked_count": len(symbols),
+            "missing_levels": missing_levels,
+            "updated_at": self.last_update or self._utc_now(),
+            "market_open": market_open,
+            "snapshot_source": self.last_snapshot_source,
+            "error": self.last_error,
+        }
+
     def _run_refresh_job(self, reason, market_open):
         try:
             if market_open:
@@ -804,6 +1275,9 @@ class MarketEngine:
             self.last_membership_refresh_date = today
 
     def build_universe(self, kite: KiteConnect, sector_names):
+        if self.broker == "dhan":
+            return self._build_dhan_universe(sector_names)
+
         instruments = kite.instruments("NSE")
         nse_eq = [i for i in instruments if i.get("instrument_type") == "EQ"]
 
@@ -865,6 +1339,38 @@ class MarketEngine:
         if not sector_symbols:
             return {}, {}
         try:
+            if self.broker == "dhan":
+                ids = [
+                    int(self.sector_tokens.get(symbol))
+                    for symbol in sector_symbols
+                    if self.sector_tokens.get(symbol)
+                ]
+                if not ids:
+                    return {}, {}
+                data = kite.marketfeed_quote({"IDX_I": ids})
+                prev = {}
+                latest = {}
+                segment_data = data.get("IDX_I") or {}
+                for security_id, payload in segment_data.items():
+                    token = int(security_id)
+                    name = self.sector_token_to_name.get(token)
+                    if not name:
+                        continue
+                    ohlc = payload.get("ohlc") or {}
+                    close = ohlc.get("close")
+                    last_price = payload.get("last_price")
+                    if close not in (None, 0):
+                        prev[name] = close
+                    if last_price not in (None, 0):
+                        base_close = close if close not in (None, 0) else self.sector_prev_close.get(name)
+                        change = 0.0 if base_close in (None, 0) else (last_price - base_close) / base_close * 100
+                        latest[name] = {
+                            "sector": name,
+                            "price": round(last_price, 2),
+                            "change": round(change, 2),
+                        }
+                return prev, latest
+
             symbols = [f"NSE:{s}" for s in sector_symbols]
             data = kite.quote(symbols)
             prev = {}
@@ -950,6 +1456,23 @@ class MarketEngine:
     def _quote_symbols(self, kite: KiteConnect, symbols):
         quoted = {}
         if not symbols:
+            return quoted
+        if self.broker == "dhan":
+            ids = [
+                int(self.symbol_to_token.get(symbol))
+                for symbol in symbols
+                if self.symbol_to_token.get(symbol)
+            ]
+            for chunk in self._chunked(ids, 1000):
+                try:
+                    data = kite.marketfeed_quote({"NSE_EQ": chunk})
+                except Exception as exc:
+                    self.last_error = str(exc)
+                    continue
+                for security_id, payload in (data.get("NSE_EQ") or {}).items():
+                    symbol = self.token_to_symbol.get(int(security_id))
+                    if symbol:
+                        quoted[f"NSE:{symbol}"] = payload
             return quoted
         formatted = [f"NSE:{symbol}" for symbol in symbols]
         for chunk in self._chunked(formatted, 200):
@@ -1099,8 +1622,10 @@ class MarketEngine:
     def start(self, api_key, access_token, sector_names):
         with self.start_lock:
             try:
+                self.broker = "kite"
                 self.api_key = api_key
                 self.access_token = access_token
+                self.client_id = None
                 self.sector_names = list(sector_names or [])
                 self._close_ticker()
                 kite = KiteConnect(api_key=api_key)
@@ -1108,6 +1633,27 @@ class MarketEngine:
                 kite.set_session_expiry_hook(self._on_session_expiry)
                 self.kite = kite
                 self.build_universe(kite, sector_names)
+                if self._is_market_open():
+                    self._refresh_rest_snapshot(force=True)
+                else:
+                    self._refresh_closed_market_snapshot(force=True)
+                self._create_ticker()
+                self.last_error = None
+            except Exception as exc:
+                self.last_error = str(exc)
+                self.connected = False
+
+    def start_dhan(self, client_id, access_token, sector_names):
+        with self.start_lock:
+            try:
+                self.broker = "dhan"
+                self.client_id = client_id
+                self.api_key = client_id
+                self.access_token = access_token
+                self.sector_names = list(sector_names or [])
+                self._close_ticker()
+                self.kite = DhanClient(client_id, access_token)
+                self.build_universe(self.kite, sector_names)
                 if self._is_market_open():
                     self._refresh_rest_snapshot(force=True)
                 else:
@@ -1588,12 +2134,12 @@ class MarketEngine:
             if not market_open:
                 self._save_closed_snapshot(snapshot)
             return snapshot
-        if has_sector_data and cached and any(cached.get(key) for key in ("gainers", "losers")):
+        if not market_open and has_sector_data and cached and any(cached.get(key) for key in ("gainers", "losers")):
             return self._decorate_snapshot_rows(self._merge_with_cached_snapshot(snapshot, cached))
         if has_sector_data and not cached:
             self._save_snapshot(snapshot)
             return snapshot
-        if cached:
+        if cached and not market_open:
             cached["connected"] = self.connected
             cached["error"] = self.last_error
             cached["market_open"] = market_open

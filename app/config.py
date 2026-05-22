@@ -7,6 +7,8 @@ REDIS_PASSWORD = os.getenv("REDIS_PASSWORD")
 
 KITE_ACCESS_TOKEN_KEY = "kite:access_token"
 KITE_TOKEN_UPDATED_KEY = "kite:access_token_updated"
+DHAN_ACCESS_TOKEN_KEY = "dhan:access_token"
+DHAN_TOKEN_UPDATED_KEY = "dhan:access_token_updated"
 
 SESSION_SECRET_KEY = os.getenv("SESSION_SECRET_KEY", "change-this-secret")
 SESSION_HTTPS_ONLY = os.getenv("SESSION_HTTPS_ONLY", "0") == "1"

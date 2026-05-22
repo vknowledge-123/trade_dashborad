@@ -80,6 +80,25 @@ def init_db():
     )
     cur.execute(
         """
+        CREATE TABLE IF NOT EXISTS dhan_credentials (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id TEXT NOT NULL,
+            access_token TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS broker_settings (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            active_broker TEXT NOT NULL DEFAULT 'kite',
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    cur.execute(
+        """
         CREATE TABLE IF NOT EXISTS inquiries (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
@@ -210,6 +229,33 @@ def init_db():
             """
         )
 
+    cur.execute("PRAGMA table_info(dhan_credentials)")
+    dhan_credential_cols = {row["name"] for row in cur.fetchall()}
+    if not dhan_credential_cols:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS dhan_credentials (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_id TEXT NOT NULL,
+                access_token TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+
+    cur.execute("PRAGMA table_info(broker_settings)")
+    broker_settings_cols = {row["name"] for row in cur.fetchall()}
+    if not broker_settings_cols:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS broker_settings (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                active_broker TEXT NOT NULL DEFAULT 'kite',
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+
     cur.execute("PRAGMA table_info(course_settings)")
     course_settings_cols = {row["name"] for row in cur.fetchall()}
     if not course_settings_cols:
@@ -265,6 +311,14 @@ def init_db():
         )
 
     now = utcnow().isoformat(timespec="seconds")
+    cur.execute(
+        """
+        INSERT INTO broker_settings (id, active_broker, updated_at)
+        VALUES (1, 'kite', ?)
+        ON CONFLICT(id) DO NOTHING
+        """,
+        (now,),
+    )
     cur.execute(
         """
         INSERT INTO course_settings (id, four_month_price, one_year_price, support_text, updated_at)
@@ -451,6 +505,64 @@ def get_kite_credentials():
     row = cur.fetchone()
     conn.close()
     return row
+
+
+def save_dhan_credentials(client_id, access_token):
+    conn = get_conn()
+    cur = conn.cursor()
+    now = utcnow().isoformat(timespec="seconds")
+    cur.execute("DELETE FROM dhan_credentials")
+    cur.execute(
+        """
+        INSERT INTO dhan_credentials (client_id, access_token, created_at)
+        VALUES (?, ?, ?)
+        """,
+        (client_id.strip(), access_token.strip(), now),
+    )
+    _commit_with_retry(conn)
+    conn.close()
+
+
+def get_dhan_credentials():
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM dhan_credentials ORDER BY id DESC LIMIT 1")
+    row = cur.fetchone()
+    conn.close()
+    return row
+
+
+def set_active_broker(active_broker):
+    broker = (active_broker or "kite").strip().lower()
+    if broker not in {"kite", "dhan"}:
+        broker = "kite"
+    conn = get_conn()
+    cur = conn.cursor()
+    now = utcnow().isoformat(timespec="seconds")
+    cur.execute(
+        """
+        INSERT INTO broker_settings (id, active_broker, updated_at)
+        VALUES (1, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            active_broker = excluded.active_broker,
+            updated_at = excluded.updated_at
+        """,
+        (broker, now),
+    )
+    _commit_with_retry(conn)
+    conn.close()
+
+
+def get_active_broker():
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT active_broker FROM broker_settings WHERE id = 1")
+    row = cur.fetchone()
+    conn.close()
+    if not row:
+        return "kite"
+    broker = (row["active_broker"] or "kite").lower()
+    return broker if broker in {"kite", "dhan"} else "kite"
 
 
 def create_inquiry(user_id, subject, message):

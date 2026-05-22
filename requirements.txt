@@ -47,6 +47,7 @@ typing-inspection==0.4.2
 typing_extensions==4.15.0
 urllib3==2.6.3
 uvicorn==0.42.0
+websocket-client==1.9.0
 zope.interface==8.2
 qrcode==7.4.2
 Pillow==10.4.0

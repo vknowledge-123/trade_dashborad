@@ -31,6 +31,10 @@ from app.db import (
     update_inquiry_status,
     save_kite_credentials,
     get_kite_credentials,
+    save_dhan_credentials,
+    get_dhan_credentials,
+    set_active_broker,
+    get_active_broker,
     create_inquiry,
     get_course_settings,
     update_course_settings,
@@ -248,6 +252,17 @@ templates.env.globals["format_compact_volume"] = format_compact_volume
 @app.on_event("startup")
 def on_startup():
     init_db()
+    active_broker = get_active_broker()
+    if active_broker == "dhan":
+        dhan_creds = get_dhan_credentials()
+        if dhan_creds:
+            threading.Thread(
+                target=engine.start_dhan,
+                args=(dhan_creds["client_id"], dhan_creds["access_token"], SECTOR_INDICES),
+                daemon=True,
+            ).start()
+        return
+
     creds = get_kite_credentials()
     token = engine.token_from_redis()
     if creds and token:
@@ -422,6 +437,15 @@ def start_engine_in_background(api_key: str, access_token: str):
     thread.start()
 
 
+def start_dhan_engine_in_background(client_id: str, access_token: str):
+    thread = threading.Thread(
+        target=engine.start_dhan,
+        args=(client_id, access_token, SECTOR_INDICES),
+        daemon=True,
+    )
+    thread.start()
+
+
 # --- Public Routes ---
 
 @app.get("/", response_class=HTMLResponse)
@@ -530,6 +554,23 @@ def relative_rotation(request: Request):
     )
 
 
+@app.get("/pdh-pdl-scanner", response_class=HTMLResponse)
+def pdh_pdl_scanner(request: Request):
+    user = current_user(request)
+    admin = current_admin(request)
+    return templates.TemplateResponse(
+        request,
+        "pdh_pdl_scanner.html",
+        {
+            "title": "PDH PDL Scanner",
+            "user": user,
+            "admin": admin,
+            "public_mode": True if not user and not admin else False,
+            "scanner": engine.get_pdh_pdl_scanner(),
+        },
+    )
+
+
 @app.get("/api/market-snapshot")
 def market_snapshot(request: Request):
     return JSONResponse(
@@ -546,6 +587,18 @@ def market_snapshot(request: Request):
 def relative_rotation_data(request: Request):
     return JSONResponse(
         engine.get_relative_rotation_graph(),
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
+
+
+@app.get("/api/pdh-pdl-scanner")
+def pdh_pdl_scanner_data(request: Request):
+    return JSONResponse(
+        engine.get_pdh_pdl_scanner(),
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",
@@ -741,6 +794,8 @@ def admin_home(request: Request):
         if not admin["totp_enabled"]:
             return RedirectResponse(url="/admin/2fa/setup", status_code=302)
         creds = get_kite_credentials()
+        dhan_creds = get_dhan_credentials()
+        active_broker = get_active_broker()
         audit_logs = get_admin_login_audit(12)
         inquiries = get_inquiries(20)
         recent_users = get_recent_users(20)
@@ -770,6 +825,8 @@ def admin_home(request: Request):
                 "admin": admin,
                 "user": None,
                 "creds": creds,
+                "dhan_creds": dhan_creds,
+                "active_broker": active_broker,
                 "audit_logs": audit_logs,
                 "inquiries": inquiries,
                 "users_activity": users_activity,
@@ -1059,6 +1116,45 @@ def admin_save_kite_credentials(
     return RedirectResponse(url="/admin", status_code=302)
 
 
+@app.post("/admin/dhan/credentials")
+def admin_save_dhan_credentials(
+    request: Request,
+    client_id: str = Form(...),
+    access_token: str = Form(...),
+):
+    admin = require_admin(request)
+    if not admin:
+        return RedirectResponse(url="/admin/login", status_code=302)
+
+    save_dhan_credentials(client_id, access_token)
+    set_active_broker("dhan")
+    start_dhan_engine_in_background(client_id, access_token)
+    return RedirectResponse(url="/admin?dhan=connected", status_code=302)
+
+
+@app.post("/admin/broker")
+def admin_select_broker(
+    request: Request,
+    active_broker: str = Form(...),
+):
+    admin = require_admin(request)
+    if not admin:
+        return RedirectResponse(url="/admin/login", status_code=302)
+
+    broker = "dhan" if active_broker == "dhan" else "kite"
+    set_active_broker(broker)
+    if broker == "dhan":
+        creds = get_dhan_credentials()
+        if creds:
+            start_dhan_engine_in_background(creds["client_id"], creds["access_token"])
+    else:
+        creds = get_kite_credentials()
+        token = engine.token_from_redis()
+        if creds and token:
+            start_engine_in_background(creds["api_key"], token)
+    return RedirectResponse(url="/admin", status_code=302)
+
+
 @app.post("/admin/inquiry/status")
 def admin_inquiry_status(
     request: Request,
@@ -1166,6 +1262,7 @@ def kite_callback(request: Request, request_token: str = None, status: str = Non
     access_token = data.get("access_token")
     if access_token:
         engine.save_token(access_token)
+        set_active_broker("kite")
         start_engine_in_background(creds["api_key"], access_token)
 
     return RedirectResponse(url="/admin?kite=connected", status_code=302)

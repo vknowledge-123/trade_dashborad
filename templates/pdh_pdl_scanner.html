@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+{% block content %}
+
+<section class="scanner-shell">
+  <div class="scanner-header">
+    <div>
+      <div class="panel-sub">Nifty 50 scanner</div>
+      <h1>PDH / PDL Breaks</h1>
+      <p class="muted">Tracks stocks trading above previous day high or below previous day low.</p>
+    </div>
+    <div class="status-line">
+      <span class="pill">{{ scanner.tracked_count }} stocks</span>
+      <span class="pill {{ 'positive' if scanner.market_open else 'neutral' }}">{{ 'Live session' if scanner.market_open else 'Latest snapshot' }}</span>
+      <span class="snapshot-updated-at" id="scanner-updated-at">{{ scanner.updated_at or '-' }}</span>
+    </div>
+  </div>
+
+  {% if scanner.error %}
+    <div class="scanner-alert">{{ scanner.error }}</div>
+  {% endif %}
+
+  <div class="scanner-grid">
+    <div class="panel panel-gainers">
+      <div class="panel-header">
+        <div>
+          <h3>Previous Day High Break</h3>
+          <div class="panel-sub">Price above prior session high</div>
+        </div>
+        <span class="pill positive" id="pdh-count">{{ scanner.pdh_breaks|length }}</span>
+      </div>
+      <div class="table scanner-table" id="pdh-body">
+        <div class="table-row table-head scanner-row">
+          <span>Symbol</span>
+          <span>Price</span>
+          <span>PDH</span>
+          <span>Break</span>
+          <span>Chart</span>
+        </div>
+        {% for row in scanner.pdh_breaks %}
+          <div class="table-row scanner-row" data-symbol="{{ row.symbol }}">
+            <span class="cell-symbol">
+              <span class="cell-symbol-main">{{ row.symbol }}{% if row.is_fno %} <span class="fno-tag">F&amp;O</span>{% endif %}</span>
+              <span class="sector-stock-name">{{ row.name }}</span>
+            </span>
+            <span class="mono">{{ row.price }}</span>
+            <span class="mono">{{ row.previous_high }}</span>
+            <span class="positive mono">+{{ row.break_percent }}%</span>
+            <a class="tv-link" href="https://www.tradingview.com/chart/?symbol=NSE%3A{{ row.symbol | urlencode }}" target="_blank" rel="noopener noreferrer">TradingView</a>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="panel panel-losers">
+      <div class="panel-header">
+        <div>
+          <h3>Previous Day Low Break</h3>
+          <div class="panel-sub">Price below prior session low</div>
+        </div>
+        <span class="pill negative" id="pdl-count">{{ scanner.pdl_breaks|length }}</span>
+      </div>
+      <div class="table scanner-table" id="pdl-body">
+        <div class="table-row table-head scanner-row">
+          <span>Symbol</span>
+          <span>Price</span>
+          <span>PDL</span>
+          <span>Break</span>
+          <span>Chart</span>
+        </div>
+        {% for row in scanner.pdl_breaks %}
+          <div class="table-row scanner-row" data-symbol="{{ row.symbol }}">
+            <span class="cell-symbol">
+              <span class="cell-symbol-main">{{ row.symbol }}{% if row.is_fno %} <span class="fno-tag">F&amp;O</span>{% endif %}</span>
+              <span class="sector-stock-name">{{ row.name }}</span>
+            </span>
+            <span class="mono">{{ row.price }}</span>
+            <span class="mono">{{ row.previous_low }}</span>
+            <span class="negative mono">-{{ row.break_percent }}%</span>
+            <a class="tv-link" href="https://www.tradingview.com/chart/?symbol=NSE%3A{{ row.symbol | urlencode }}" target="_blank" rel="noopener noreferrer">TradingView</a>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+.scanner-shell {
+  display: grid;
+  gap: 14px;
+}
+.scanner-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  border: 1px solid rgba(99, 210, 255, 0.16);
+  background: rgba(12, 18, 32, 0.55);
+  border-radius: 12px;
+}
+.scanner-header h1 {
+  margin: 0;
+  font-family: 'Syne', sans-serif;
+  font-size: 24px;
+}
+.scanner-alert {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 184, 48, 0.22);
+  background: rgba(255, 184, 48, 0.08);
+  color: #ffe9a8;
+  font-size: 13px;
+}
+.scanner-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.scanner-row {
+  grid-template-columns: 1.2fr 0.75fr 0.75fr 0.75fr auto;
+}
+@media (max-width: 900px) {
+  .scanner-grid { grid-template-columns: 1fr; }
+  .scanner-row { grid-template-columns: 1.1fr 0.7fr 0.7fr 0.7fr auto; }
+}
+</style>
+
+<script>
+(function () {
+  const pdhBody = document.getElementById("pdh-body");
+  const pdlBody = document.getElementById("pdl-body");
+  const pdhCount = document.getElementById("pdh-count");
+  const pdlCount = document.getElementById("pdl-count");
+  const updatedAt = document.getElementById("scanner-updated-at");
+  if (!pdhBody || !pdlBody) return;
+
+  const tvUrl = (symbol) => `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(`NSE:${symbol}`)}`;
+  const headHtml = "<div class=\"table-row table-head scanner-row\"><span>Symbol</span><span>Price</span><span>Level</span><span>Break</span><span>Chart</span></div>";
+  const rowHtml = (row, side) => {
+    const level = side === "pdh" ? row.previous_high : row.previous_low;
+    const cls = side === "pdh" ? "positive" : "negative";
+    const sign = side === "pdh" ? "+" : "-";
+    return `
+      <div class="table-row scanner-row" data-symbol="${row.symbol}">
+        <span class="cell-symbol">
+          <span class="cell-symbol-main">${row.symbol}${row.is_fno ? ' <span class="fno-tag">F&O</span>' : ""}</span>
+          <span class="sector-stock-name">${row.name || ""}</span>
+        </span>
+        <span class="mono">${row.price}</span>
+        <span class="mono">${level}</span>
+        <span class="${cls} mono">${sign}${row.break_percent}%</span>
+        <a class="tv-link" href="${tvUrl(row.symbol)}" target="_blank" rel="noopener noreferrer">TradingView</a>
+      </div>
+    `;
+  };
+  const render = (container, rows, side) => {
+    container.innerHTML = headHtml + (rows || []).map((row) => rowHtml(row, side)).join("");
+  };
+  const update = async () => {
+    try {
+      const res = await fetch(`/api/pdh-pdl-scanner?ts=${Date.now()}`, { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json();
+      render(pdhBody, data.pdh_breaks || [], "pdh");
+      render(pdlBody, data.pdl_breaks || [], "pdl");
+      if (pdhCount) pdhCount.textContent = (data.pdh_breaks || []).length;
+      if (pdlCount) pdlCount.textContent = (data.pdl_breaks || []).length;
+      if (updatedAt) updatedAt.textContent = data.updated_at || "-";
+    } catch (e) {}
+  };
+  setInterval(update, 10000);
+})();
+</script>
+
+{% endblock %}
