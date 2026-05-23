@@ -258,6 +258,12 @@
   overflow: auto;
 }
 
+.rrg-selection-summary {
+  width: 100%;
+  color: #8ca5c8;
+  font-size: 12px;
+}
+
 .rrg-sector-toggle {
   display: inline-flex;
   align-items: center;
@@ -476,6 +482,7 @@
   const cacheStatusScript = document.getElementById("rrg-cache-initial-status");
   const cacheMessage = document.getElementById("rrg-cache-message");
   const cacheMeta = document.getElementById("rrg-cache-meta");
+  const autoRefreshMs = 60000;
 
   if (!initialScript || !chart || !list) return;
 
@@ -484,6 +491,7 @@
   let selectedSectors = new Set();
   let cachePollTimer = null;
   let rrgPendingTimer = null;
+  let autoRefreshTimer = null;
   try {
     currentPayload = JSON.parse(initialScript.textContent || "{}");
   } catch (error) {
@@ -506,21 +514,52 @@
 
   const loadSelectedSectors = (items) => {
     const all = (items || []).map((item) => item.sector).filter(Boolean);
-    try {
-      const stored = JSON.parse(localStorage.getItem(storageKey) || "[]");
-      selectedSectors = new Set(stored.filter((sector) => all.includes(sector)));
-    } catch (error) {
-      selectedSectors = new Set();
+    const raw = localStorage.getItem(storageKey);
+    if (raw !== null) {
+      try {
+        const stored = JSON.parse(raw);
+        if (Array.isArray(stored)) {
+          selectedSectors = new Set(stored.filter((sector) => all.includes(sector)));
+          return;
+        }
+      } catch (error) {}
     }
-    if (!selectedSectors.size) {
-      selectedSectors = new Set(all);
+    selectedSectors = new Set(all);
+  };
+
+  const mergeSelectedSectors = (items) => {
+    const all = (items || []).map((item) => item.sector).filter(Boolean);
+    const valid = new Set(all);
+    selectedSectors = new Set(Array.from(selectedSectors).filter((sector) => valid.has(sector)));
+  };
+
+  const initializeSelectedSectors = (items) => {
+    const raw = localStorage.getItem(storageKey);
+    if (raw === null) {
+      loadSelectedSectors(items);
+    } else {
+      mergeSelectedSectors(items);
     }
+  };
+
+  const selectedSectorCount = () => selectedSectors.size;
+
+  const selectedSummaryText = (total) => {
+    if (selectedSectorCount() === 0) return "0 indexes selected";
+    if (selectedSectorCount() === total) return "All indexes selected";
+    return `${selectedSectorCount()} of ${total} indexes selected`;
   };
 
   const saveSelectedSectors = () => {
     try {
       localStorage.setItem(storageKey, JSON.stringify(Array.from(selectedSectors)));
     } catch (error) {}
+  };
+
+  const resetAutoRefresh = () => {
+    if (!currentPayload.market_open) return;
+    if (autoRefreshTimer) window.clearInterval(autoRefreshTimer);
+    autoRefreshTimer = window.setInterval(fetchRrg, autoRefreshMs);
   };
 
   const filteredPayload = (payload) => {
@@ -536,12 +575,15 @@
       sectorFilter.innerHTML = '<span class="muted">No indexes available.</span>';
       return;
     }
-    sectorFilter.innerHTML = items.map((item) => `
+    sectorFilter.innerHTML = `
+      <div class="rrg-selection-summary">${selectedSummaryText(items.length)}</div>
+      ${items.map((item) => `
       <label class="rrg-sector-toggle">
         <input type="checkbox" value="${item.sector}" ${selectedSectors.has(item.sector) ? "checked" : ""} />
         <span>${item.sector}</span>
       </label>
-    `).join("");
+      `).join("")}
+    `;
     sectorFilter.querySelectorAll("input[type='checkbox']").forEach((input) => {
       input.addEventListener("change", () => {
         if (input.checked) {
@@ -551,6 +593,8 @@
         }
         saveSelectedSectors();
         renderChart(filteredPayload(currentPayload));
+        renderSectorFilter(currentPayload);
+        resetAutoRefresh();
       });
     });
   };
@@ -622,7 +666,9 @@
     if (!items.length) {
       chart.innerHTML = "";
       emptyState.hidden = false;
-      emptyState.textContent = payload.error || "Relative rotation data is not available right now.";
+      emptyState.textContent = (currentPayload.items || []).length && selectedSectors.size === 0
+        ? "No indexes selected."
+        : (payload.error || "Relative rotation data is not available right now.");
       renderList(payload);
       return;
     }
@@ -727,7 +773,7 @@
       });
       if (!response.ok) throw new Error("Unable to load relative rotation data");
       currentPayload = await response.json();
-      loadSelectedSectors(currentPayload.items || []);
+      initializeSelectedSectors(currentPayload.items || []);
       renderSectorFilter(currentPayload);
       renderChart(filteredPayload(currentPayload));
       schedulePendingRefresh(currentPayload);
@@ -794,7 +840,7 @@
     }
   };
 
-  loadSelectedSectors(currentPayload.items || []);
+  initializeSelectedSectors(currentPayload.items || []);
   renderSectorFilter(currentPayload);
   renderChart(filteredPayload(currentPayload));
   renderCacheStatus(currentCacheStatus);
@@ -805,6 +851,7 @@
       saveSelectedSectors();
       renderSectorFilter(currentPayload);
       renderChart(filteredPayload(currentPayload));
+      resetAutoRefresh();
     });
   }
   if (selectNoneButton) {
@@ -813,6 +860,7 @@
       saveSelectedSectors();
       renderSectorFilter(currentPayload);
       renderChart(filteredPayload(currentPayload));
+      resetAutoRefresh();
     });
   }
   if (refreshButton) {
@@ -824,9 +872,7 @@
       cachePollTimer = window.setTimeout(pollCacheStatus, 1500);
     }
   }
-  if (currentPayload.market_open) {
-    setInterval(fetchRrg, 60000);
-  }
+  resetAutoRefresh();
 })();
 </script>
 {% endblock %}
