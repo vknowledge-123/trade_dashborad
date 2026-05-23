@@ -24,6 +24,7 @@ SECTOR_MEMBERS_CACHE_KEY = "sector_memberships"
 SECTOR_BREAKDOWNS_CACHE_KEY = "sector_breakdowns"
 PREVIOUS_DAY_BADGES_CACHE_KEY = "previous_day_badges"
 PREVIOUS_DAY_LEVELS_CACHE_KEY = "previous_day_levels"
+PDH_PDL_SCANNER_CACHE_KEY = "pdh_pdl_scanner"
 RRG_CACHE_KEY = "relative_rotation_graph"
 IST = ZoneInfo("Asia/Kolkata")
 LIVE_FEED_STALE_AFTER_SECONDS = 15
@@ -97,6 +98,7 @@ DHAN_SECTOR_SECURITY_IDS = {
     "NIFTY 50": "13",
     "NIFTY IT": "15",
     "NIFTY BANK": "25",
+    "NIFTY PVT BANK": "21",
 }
 NIFTY_50_SCANNER_STOCKS = [
     "HDFCBANK", "ICICIBANK", "MAXHEALTH", "RELIANCE", "INFY",
@@ -139,10 +141,12 @@ class DhanClient:
         return data
 
     def marketfeed_quote(self, securities):
-        return self._post("/marketfeed/quote", securities).get("data") or {}
+        data = self._post("/marketfeed/quote", securities).get("data") or {}
+        return data.get("data") if isinstance(data.get("data"), dict) else data
 
     def marketfeed_ohlc(self, securities):
-        return self._post("/marketfeed/ohlc", securities).get("data") or {}
+        data = self._post("/marketfeed/ohlc", securities).get("data") or {}
+        return data.get("data") if isinstance(data.get("data"), dict) else data
 
     def historical_data(self, security_id, from_date, to_date, interval):
         from_value = from_date.date().isoformat() if hasattr(from_date, "date") else str(from_date)
@@ -164,6 +168,8 @@ class DhanClient:
             "toDate": to_value,
         }
         data = self._post("/charts/historical", payload)
+        if isinstance(data.get("data"), dict):
+            data = data["data"]
         return self._candles_from_dhan_arrays(data)
 
     def _candles_from_dhan_arrays(self, data):
@@ -258,6 +264,15 @@ class MarketEngine:
         self.badge_warm_lock = threading.Lock()
         self.badge_warm_thread = None
         self.pending_badge_symbols = set()
+        self.scanner_lock = threading.Lock()
+        self.scanner_thread = None
+        self.scanner_status = {
+            "status": "idle",
+            "started_at": None,
+            "finished_at": None,
+            "message": "Scanner cache has not been warmed yet.",
+            "error": None,
+        }
         self.http = requests.Session()
         self.http.headers.update(HTTP_HEADERS)
 
@@ -753,6 +768,15 @@ class MarketEngine:
         if isinstance(cached, dict):
             self.previous_day_levels_cache = cached
 
+    def _save_scanner_cache(self, payload):
+        try:
+            save_market_cache(PDH_PDL_SCANNER_CACHE_KEY, payload)
+        except Exception:
+            return
+
+    def _cached_scanner_payload(self):
+        return load_market_cache(PDH_PDL_SCANNER_CACHE_KEY)
+
     def _restore_previous_day_badges_cache(self):
         if self.previous_day_badges_cache:
             return
@@ -893,6 +917,22 @@ class MarketEngine:
         if source:
             runtime["snapshot_source"] = source
         return runtime
+
+    def _snapshot_cache_marker(self, snapshot):
+        if not snapshot:
+            return None
+        marker = snapshot.get("session_marker") or snapshot.get("cache_marker")
+        if marker:
+            return marker
+        updated_at = snapshot.get("updated_at")
+        if not updated_at:
+            return None
+        try:
+            parsed = datetime.fromisoformat(str(updated_at).replace("Z", "+00:00"))
+            return parsed.astimezone(IST).date().isoformat() if parsed.tzinfo else parsed.date().isoformat()
+        except Exception:
+            match = re.search(r"\d{4}-\d{2}-\d{2}", str(updated_at))
+            return match.group(0) if match else None
 
     def _merge_with_cached_snapshot(self, snapshot, cached):
         if not cached:
@@ -1110,13 +1150,100 @@ class MarketEngine:
         self._save_previous_day_levels_cache()
         return levels
 
-    def get_pdh_pdl_scanner(self):
+    def _scanner_current_rows(self, symbols):
+        requested = [symbol for symbol in symbols if symbol]
+        rows = []
+        with self.lock:
+            for symbol in requested:
+                row = self.latest.get(symbol)
+                if row:
+                    rows.append(dict(row))
+        if rows:
+            return rows
+        return self._rows_for_symbols_from_cache(requested)
+
+    def _scanner_status_payload(self):
+        status = dict(self.scanner_status)
+        status["is_running"] = bool(self.scanner_thread and self.scanner_thread.is_alive())
+        return status
+
+    def _run_scanner_refresh_job(self):
+        with self.scanner_lock:
+            self.scanner_status.update(
+                {
+                    "status": "running",
+                    "started_at": self._utc_now(),
+                    "finished_at": None,
+                    "message": "Refreshing PDH/PDL scanner data...",
+                    "error": None,
+                }
+            )
+        try:
+            symbols = [symbol for symbol in NIFTY_50_SCANNER_STOCKS if symbol in self.symbol_to_token]
+            if self.kite and symbols:
+                if self._is_market_open():
+                    self._get_latest_rows_for_symbols(symbols)
+                else:
+                    rows = self._get_latest_rows_for_symbols(symbols)
+                    if not rows:
+                        completed_session = self._latest_completed_session_date()
+                        from_date = self._session_start_dt(completed_session - timedelta(days=15))
+                        to_date = self._session_end_dt(completed_session)
+                        for symbol in symbols:
+                            candles = self._fetch_last_two_day_candles(self.symbol_to_token.get(symbol), from_date, to_date)
+                            row, latest_dt = self._build_stock_row_from_candles(symbol, candles)
+                            if row:
+                                with self.lock:
+                                    self.latest[symbol] = row
+                                if latest_dt and hasattr(latest_dt, "isoformat"):
+                                    self.last_update = latest_dt.isoformat()
+
+                for symbol in symbols:
+                    self._get_previous_day_levels(symbol)
+
+            payload = self._build_pdh_pdl_scanner_payload()
+            self._save_scanner_cache(payload)
+            with self.scanner_lock:
+                self.scanner_status.update(
+                    {
+                        "status": "completed",
+                        "finished_at": self._utc_now(),
+                        "message": f"Scanner refreshed for {payload.get('tracked_count', 0)} Nifty 50 stocks.",
+                        "error": payload.get("error"),
+                    }
+                )
+        except Exception as exc:
+            self.last_error = str(exc)
+            with self.scanner_lock:
+                self.scanner_status.update(
+                    {
+                        "status": "failed",
+                        "finished_at": self._utc_now(),
+                        "message": "PDH/PDL scanner refresh failed.",
+                        "error": str(exc),
+                    }
+                )
+        finally:
+            with self.scanner_lock:
+                self.scanner_thread = None
+
+    def _ensure_scanner_background_refresh(self):
+        with self.scanner_lock:
+            if self.scanner_thread and self.scanner_thread.is_alive():
+                return False
+            thread = threading.Thread(target=self._run_scanner_refresh_job, daemon=True)
+            self.scanner_thread = thread
+            thread.start()
+            return True
+
+    def _build_pdh_pdl_scanner_payload(self):
         symbols = [symbol for symbol in NIFTY_50_SCANNER_STOCKS if symbol in self.symbol_to_token]
         market_open = self._is_market_open()
         if not symbols:
             return {
                 "pdh_breaks": [],
                 "pdl_breaks": [],
+                "rows": [],
                 "symbols": NIFTY_50_SCANNER_STOCKS,
                 "tracked_count": 0,
                 "updated_at": self.last_update,
@@ -1125,17 +1252,22 @@ class MarketEngine:
                 "error": self.last_error or "Broker universe is not ready yet.",
             }
 
-        rows = self._get_latest_rows_for_symbols(symbols)
+        rows = self._scanner_current_rows(symbols)
         row_map = {row.get("symbol"): row for row in rows if isinstance(row, dict)}
         pdh_breaks = []
         pdl_breaks = []
+        scanner_rows = []
         missing_levels = 0
 
         for symbol in symbols:
             row = row_map.get(symbol)
             if not row:
                 continue
-            levels = self._get_previous_day_levels(symbol)
+            self._restore_previous_day_levels_cache()
+            cache_marker = self._completed_session_cache_marker()
+            levels = self.previous_day_levels_cache.get(symbol)
+            if levels and levels.get("cache_marker") != cache_marker:
+                levels = None
             if not levels:
                 missing_levels += 1
                 continue
@@ -1154,6 +1286,25 @@ class MarketEngine:
                 "previous_date": levels.get("date"),
                 "is_fno": row.get("is_fno", False),
             }
+            high = levels.get("high")
+            low = levels.get("low")
+            if high not in (None, 0):
+                base["pdh_distance_points"] = round(price - high, 2)
+                base["pdh_distance_percent"] = round(((price - high) / high) * 100, 3)
+                base["pdh_side"] = "above" if price >= high else "below"
+            else:
+                base["pdh_distance_points"] = None
+                base["pdh_distance_percent"] = None
+                base["pdh_side"] = None
+            if low not in (None, 0):
+                base["pdl_distance_points"] = round(price - low, 2)
+                base["pdl_distance_percent"] = round(((price - low) / low) * 100, 3)
+                base["pdl_side"] = "above" if price >= low else "below"
+            else:
+                base["pdl_distance_points"] = None
+                base["pdl_distance_percent"] = None
+                base["pdl_side"] = None
+            scanner_rows.append(dict(base))
             if levels.get("high") not in (None, 0) and price > levels["high"]:
                 item = dict(base)
                 item["break_points"] = round(price - levels["high"], 2)
@@ -1170,6 +1321,7 @@ class MarketEngine:
         return {
             "pdh_breaks": pdh_breaks,
             "pdl_breaks": pdl_breaks,
+            "rows": scanner_rows,
             "symbols": symbols,
             "tracked_count": len(symbols),
             "missing_levels": missing_levels,
@@ -1178,6 +1330,60 @@ class MarketEngine:
             "snapshot_source": self.last_snapshot_source,
             "error": self.last_error,
         }
+
+    def _apply_scanner_filters(self, payload, level="all", side="all", min_pct=None, max_pct=None):
+        filtered = dict(payload or {})
+        rows = list(filtered.get("rows") or [])
+        level = (level or "all").lower()
+        side = (side or "all").lower()
+
+        def passes(row):
+            checks = []
+            if level in {"all", "pdh"}:
+                checks.append(("pdh", row.get("pdh_distance_percent"), row.get("pdh_side")))
+            if level in {"all", "pdl"}:
+                checks.append(("pdl", row.get("pdl_distance_percent"), row.get("pdl_side")))
+            for level_name, distance, row_side in checks:
+                if distance is None:
+                    continue
+                abs_distance = abs(float(distance))
+                if side != "all" and row_side != side:
+                    continue
+                if min_pct is not None and abs_distance < min_pct:
+                    continue
+                if max_pct is not None and abs_distance > max_pct:
+                    continue
+                return True
+            return False
+
+        filtered["filtered_rows"] = [row for row in rows if passes(row)]
+        filtered["filter"] = {
+            "level": level,
+            "side": side,
+            "min_pct": min_pct,
+            "max_pct": max_pct,
+        }
+        return filtered
+
+    def get_pdh_pdl_scanner(self, level="all", side="all", min_pct=None, max_pct=None, cached_only=True):
+        payload = self._build_pdh_pdl_scanner_payload()
+        has_live_rows = bool(payload.get("rows"))
+        missing_levels = int(payload.get("missing_levels") or 0)
+        if (not has_live_rows or missing_levels) and self.kite:
+            self._ensure_scanner_background_refresh()
+        if cached_only and (not has_live_rows or missing_levels):
+            cached = self._cached_scanner_payload()
+            if cached and cached.get("rows"):
+                payload = dict(cached)
+                payload["cache_pending"] = True
+                payload["cache_stale"] = True
+                payload["market_open"] = self._is_market_open()
+                payload["error"] = payload.get("error") or "Refreshing scanner data in the background."
+            else:
+                payload["cache_pending"] = True
+                payload["error"] = payload.get("error") or "Scanner data is warming in the background."
+        payload["status"] = self._scanner_status_payload()
+        return self._apply_scanner_filters(payload, level=level, side=side, min_pct=min_pct, max_pct=max_pct)
 
     def _run_refresh_job(self, reason, market_open):
         try:
@@ -1614,6 +1820,7 @@ class MarketEngine:
                 self._save_sector_breakdowns_cache(stock_rows, False)
             snapshot = self._build_snapshot(False)
             if self._stock_row_count(snapshot):
+                snapshot["session_marker"] = completed_session.isoformat()
                 self._save_snapshot(snapshot)
                 self._save_closed_snapshot(snapshot)
             return True
@@ -2100,7 +2307,14 @@ class MarketEngine:
 
         market_open = self._is_market_open()
         closed_cached = self._cached_closed_snapshot() if not market_open else None
-        if not market_open and closed_cached and self._stock_row_count(closed_cached):
+        completed_marker = self._completed_session_cache_marker() if not market_open else None
+        closed_cache_fresh = (
+            not market_open
+            and closed_cached
+            and self._stock_row_count(closed_cached)
+            and self._snapshot_cache_marker(closed_cached) == completed_marker
+        )
+        if not market_open and closed_cache_fresh:
             if self.kite and (not self.latest or not self.sector_latest):
                 self._ensure_background_refresh(market_open=False, reason="closed_market_bootstrap")
             return self._decorate_snapshot_rows(self._with_runtime_fields(closed_cached, False, "closed_cache"))
@@ -2121,12 +2335,14 @@ class MarketEngine:
             else:
                 if not self.latest or not self.sector_latest:
                     self._ensure_background_refresh(market_open=False, reason="closed_market_bootstrap")
+                elif closed_cached and not closed_cache_fresh:
+                    self._ensure_background_refresh(market_open=False, reason="closed_market_stale")
 
         snapshot = self._build_snapshot(market_open)
         cached = self._cached_snapshot()
         has_stock_data = any(snapshot.get(key) for key in ("gainers", "losers"))
         has_sector_data = any(snapshot.get(key) for key in ("sector_gainers", "sector_losers"))
-        if not market_open and closed_cached:
+        if not market_open and closed_cache_fresh:
             if self._stock_row_count(closed_cached) > self._stock_row_count(snapshot):
                 return self._decorate_snapshot_rows(self._with_runtime_fields(closed_cached, False, "closed_cache"))
         if has_stock_data:
@@ -2139,7 +2355,12 @@ class MarketEngine:
         if has_sector_data and not cached:
             self._save_snapshot(snapshot)
             return snapshot
-        if cached and not market_open:
+        cached_fresh = (
+            cached
+            and not market_open
+            and self._snapshot_cache_marker(cached) == completed_marker
+        )
+        if cached_fresh:
             cached["connected"] = self.connected
             cached["error"] = self.last_error
             cached["market_open"] = market_open

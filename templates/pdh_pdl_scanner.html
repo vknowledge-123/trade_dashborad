@@ -6,7 +6,7 @@
     <div>
       <div class="panel-sub">Nifty 50 scanner</div>
       <h1>PDH / PDL Breaks</h1>
-      <p class="muted">Tracks stocks trading above previous day high or below previous day low.</p>
+      <p class="muted">Tracks Nifty 50 stocks above, below, or near previous day high and low.</p>
     </div>
     <div class="status-line">
       <span class="pill">{{ scanner.tracked_count }} stocks</span>
@@ -18,6 +18,75 @@
   {% if scanner.error %}
     <div class="scanner-alert">{{ scanner.error }}</div>
   {% endif %}
+
+  <div class="panel scanner-filter-panel">
+    <div class="panel-header">
+      <h3>Distance Filter</h3>
+      <span class="pill neutral" id="filtered-count">{{ scanner.filtered_rows|length if scanner.filtered_rows is defined else 0 }}</span>
+    </div>
+    <div class="scanner-filters">
+      <label>
+        Level
+        <select id="filter-level">
+          <option value="all">PDH and PDL</option>
+          <option value="pdh">PDH only</option>
+          <option value="pdl">PDL only</option>
+        </select>
+      </label>
+      <label>
+        Side
+        <select id="filter-side">
+          <option value="all">Above and below</option>
+          <option value="above">Above level</option>
+          <option value="below">Below level</option>
+        </select>
+      </label>
+      <label>
+        Preset
+        <select id="filter-preset">
+          <option value="">Custom</option>
+          <option value="0,0.1">Within 0.1%</option>
+          <option value="0,0.2">Within 0.2%</option>
+          <option value="0,0.3">Within 0.3%</option>
+          <option value="0,0.5">Within 0.5%</option>
+        </select>
+      </label>
+      <label>
+        Min %
+        <input id="filter-min" type="number" min="0" step="0.01" placeholder="0" />
+      </label>
+      <label>
+        Max %
+        <input id="filter-max" type="number" min="0" step="0.01" placeholder="0.5" />
+      </label>
+      <button class="btn btn-primary btn-mini" id="filter-apply" type="button">Apply</button>
+    </div>
+    <div class="table scanner-table scanner-distance-table" id="filtered-body">
+      <div class="table-row table-head scanner-distance-row">
+        <span>Symbol</span>
+        <span>Price</span>
+        <span>PDH</span>
+        <span>PDH Dist</span>
+        <span>PDL</span>
+        <span>PDL Dist</span>
+        <span>Chart</span>
+      </div>
+      {% for row in scanner.filtered_rows or [] %}
+        <div class="table-row scanner-distance-row" data-symbol="{{ row.symbol }}">
+          <span class="cell-symbol">
+            <span class="cell-symbol-main">{{ row.symbol }}{% if row.is_fno %} <span class="fno-tag">F&amp;O</span>{% endif %}</span>
+            <span class="sector-stock-name">{{ row.name }}</span>
+          </span>
+          <span class="mono">{{ row.price }}</span>
+          <span class="mono">{{ row.previous_high }}</span>
+          <span class="mono {{ 'positive' if row.pdh_side == 'above' else 'negative' }}">{{ row.pdh_distance_percent }}%</span>
+          <span class="mono">{{ row.previous_low }}</span>
+          <span class="mono {{ 'positive' if row.pdl_side == 'above' else 'negative' }}">{{ row.pdl_distance_percent }}%</span>
+          <a class="tv-link" href="https://www.tradingview.com/chart/?symbol=NSE%3A{{ row.symbol | urlencode }}" target="_blank" rel="noopener noreferrer">TradingView</a>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
 
   <div class="scanner-grid">
     <div class="panel panel-gainers">
@@ -118,12 +187,43 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
 }
+.scanner-filter-panel {
+  display: grid;
+  gap: 10px;
+}
+.scanner-filters {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+  align-items: end;
+}
+.scanner-filters label {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  color: #8ca5c8;
+}
+.scanner-filters select,
+.scanner-filters input {
+  width: 100%;
+  min-height: 38px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(8,12,24,0.76);
+  color: #e8f0fe;
+  padding: 8px 10px;
+}
 .scanner-row {
   grid-template-columns: 1.2fr 0.75fr 0.75fr 0.75fr auto;
 }
+.scanner-distance-row {
+  grid-template-columns: 1.2fr 0.7fr 0.7fr 0.75fr 0.7fr 0.75fr auto;
+}
 @media (max-width: 900px) {
   .scanner-grid { grid-template-columns: 1fr; }
+  .scanner-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .scanner-row { grid-template-columns: 1.1fr 0.7fr 0.7fr 0.7fr auto; }
+  .scanner-distance-row { grid-template-columns: 1fr; }
 }
 </style>
 
@@ -133,11 +233,26 @@
   const pdlBody = document.getElementById("pdl-body");
   const pdhCount = document.getElementById("pdh-count");
   const pdlCount = document.getElementById("pdl-count");
+  const filteredBody = document.getElementById("filtered-body");
+  const filteredCount = document.getElementById("filtered-count");
+  const filterLevel = document.getElementById("filter-level");
+  const filterSide = document.getElementById("filter-side");
+  const filterPreset = document.getElementById("filter-preset");
+  const filterMin = document.getElementById("filter-min");
+  const filterMax = document.getElementById("filter-max");
+  const filterApply = document.getElementById("filter-apply");
   const updatedAt = document.getElementById("scanner-updated-at");
   if (!pdhBody || !pdlBody) return;
 
   const tvUrl = (symbol) => `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(`NSE:${symbol}`)}`;
   const headHtml = "<div class=\"table-row table-head scanner-row\"><span>Symbol</span><span>Price</span><span>Level</span><span>Break</span><span>Chart</span></div>";
+  const distanceHeadHtml = "<div class=\"table-row table-head scanner-distance-row\"><span>Symbol</span><span>Price</span><span>PDH</span><span>PDH Dist</span><span>PDL</span><span>PDL Dist</span><span>Chart</span></div>";
+  const formatDistance = (value) => {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return "-";
+    const side = number >= 0 ? "above" : "below";
+    return `${Math.abs(number).toFixed(3)}% ${side}`;
+  };
   const rowHtml = (row, side) => {
     const level = side === "pdh" ? row.previous_high : row.previous_low;
     const cls = side === "pdh" ? "positive" : "negative";
@@ -158,19 +273,64 @@
   const render = (container, rows, side) => {
     container.innerHTML = headHtml + (rows || []).map((row) => rowHtml(row, side)).join("");
   };
+  const distanceRowHtml = (row) => `
+    <div class="table-row scanner-distance-row" data-symbol="${row.symbol}">
+      <span class="cell-symbol">
+        <span class="cell-symbol-main">${row.symbol}${row.is_fno ? ' <span class="fno-tag">F&O</span>' : ""}</span>
+        <span class="sector-stock-name">${row.name || ""}</span>
+      </span>
+      <span class="mono">${row.price ?? "-"}</span>
+      <span class="mono">${row.previous_high ?? "-"}</span>
+      <span class="mono ${row.pdh_side === "above" ? "positive" : "negative"}">${formatDistance(row.pdh_distance_percent)}</span>
+      <span class="mono">${row.previous_low ?? "-"}</span>
+      <span class="mono ${row.pdl_side === "above" ? "positive" : "negative"}">${formatDistance(row.pdl_distance_percent)}</span>
+      <a class="tv-link" href="${tvUrl(row.symbol)}" target="_blank" rel="noopener noreferrer">TradingView</a>
+    </div>
+  `;
+  const renderDistance = (rows) => {
+    if (!filteredBody) return;
+    filteredBody.innerHTML = distanceHeadHtml + (rows || []).map(distanceRowHtml).join("");
+    if (filteredCount) filteredCount.textContent = (rows || []).length;
+  };
+  const currentParams = () => {
+    const params = new URLSearchParams();
+    params.set("level", filterLevel?.value || "all");
+    params.set("side", filterSide?.value || "all");
+    if (filterMin?.value !== "") params.set("min_pct", filterMin.value);
+    if (filterMax?.value !== "") params.set("max_pct", filterMax.value);
+    return params;
+  };
   const update = async () => {
     try {
-      const res = await fetch(`/api/pdh-pdl-scanner?ts=${Date.now()}`, { cache: "no-store" });
+      const params = currentParams();
+      params.set("ts", Date.now().toString());
+      const res = await fetch(`/api/pdh-pdl-scanner?${params.toString()}`, { cache: "no-store" });
       if (!res.ok) return;
       const data = await res.json();
       render(pdhBody, data.pdh_breaks || [], "pdh");
       render(pdlBody, data.pdl_breaks || [], "pdl");
+      renderDistance(data.filtered_rows || []);
       if (pdhCount) pdhCount.textContent = (data.pdh_breaks || []).length;
       if (pdlCount) pdlCount.textContent = (data.pdl_breaks || []).length;
       if (updatedAt) updatedAt.textContent = data.updated_at || "-";
     } catch (e) {}
   };
-  setInterval(update, 10000);
+  if (filterPreset) {
+    filterPreset.addEventListener("change", () => {
+      const value = filterPreset.value;
+      if (!value) return;
+      const parts = value.split(",");
+      if (filterMin) filterMin.value = parts[0] || "";
+      if (filterMax) filterMax.value = parts[1] || "";
+      update();
+    });
+  }
+  [filterLevel, filterSide, filterMin, filterMax].forEach((input) => {
+    if (input) input.addEventListener("change", update);
+  });
+  if (filterApply) filterApply.addEventListener("click", update);
+  setInterval(update, 5000);
+  update();
 })();
 </script>
 

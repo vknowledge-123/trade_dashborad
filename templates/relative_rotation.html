@@ -55,6 +55,16 @@
           </span>
         </div>
       {% endif %}
+      <div class="rrg-selector">
+        <div class="rrg-selector-head">
+          <span class="panel-sub">Visible indexes</span>
+          <div class="rrg-selector-actions">
+            <button class="btn btn-ghost rrg-select-btn" id="rrg-select-all" type="button">All</button>
+            <button class="btn btn-ghost rrg-select-btn" id="rrg-select-none" type="button">None</button>
+          </div>
+        </div>
+        <div class="rrg-sector-filter" id="rrg-sector-filter"></div>
+      </div>
       <div class="rrg-chart-wrap">
         <svg id="rrg-chart" viewBox="0 0 920 620" role="img" aria-label="Relative Rotation Graph"></svg>
         <div class="rrg-empty" id="rrg-empty" hidden></div>
@@ -211,6 +221,58 @@
 
 .rrg-admin-status span {
   font-size: 12px;
+}
+
+.rrg-selector {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.rrg-selector-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.rrg-selector-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.rrg-select-btn {
+  padding: 6px 10px;
+  font-size: 11px;
+}
+
+.rrg-sector-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-height: 112px;
+  overflow: auto;
+}
+
+.rrg-sector-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(8, 12, 24, 0.72);
+  color: #e8f0fe;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.rrg-sector-toggle input {
+  accent-color: #00d4ff;
 }
 
 .rrg-refresh {
@@ -407,6 +469,9 @@
   const marketState = document.getElementById("rrg-market-state");
   const trailPill = document.getElementById("rrg-trail-pill");
   const itemCount = document.getElementById("rrg-item-count");
+  const sectorFilter = document.getElementById("rrg-sector-filter");
+  const selectAllButton = document.getElementById("rrg-select-all");
+  const selectNoneButton = document.getElementById("rrg-select-none");
   const cacheButton = document.getElementById("rrg-cache");
   const cacheStatusScript = document.getElementById("rrg-cache-initial-status");
   const cacheMessage = document.getElementById("rrg-cache-message");
@@ -416,6 +481,7 @@
 
   let currentPayload = {};
   let currentCacheStatus = {};
+  let selectedSectors = new Set();
   let cachePollTimer = null;
   let rrgPendingTimer = null;
   try {
@@ -436,6 +502,58 @@
   };
 
   const quadrantClass = (quadrant) => (quadrant || "").toLowerCase();
+  const storageKey = "rrg_visible_sectors";
+
+  const loadSelectedSectors = (items) => {
+    const all = (items || []).map((item) => item.sector).filter(Boolean);
+    try {
+      const stored = JSON.parse(localStorage.getItem(storageKey) || "[]");
+      selectedSectors = new Set(stored.filter((sector) => all.includes(sector)));
+    } catch (error) {
+      selectedSectors = new Set();
+    }
+    if (!selectedSectors.size) {
+      selectedSectors = new Set(all);
+    }
+  };
+
+  const saveSelectedSectors = () => {
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(Array.from(selectedSectors)));
+    } catch (error) {}
+  };
+
+  const filteredPayload = (payload) => {
+    const clone = { ...payload };
+    clone.items = (payload.items || []).filter((item) => selectedSectors.has(item.sector));
+    return clone;
+  };
+
+  const renderSectorFilter = (payload) => {
+    if (!sectorFilter) return;
+    const items = payload.items || [];
+    if (!items.length) {
+      sectorFilter.innerHTML = '<span class="muted">No indexes available.</span>';
+      return;
+    }
+    sectorFilter.innerHTML = items.map((item) => `
+      <label class="rrg-sector-toggle">
+        <input type="checkbox" value="${item.sector}" ${selectedSectors.has(item.sector) ? "checked" : ""} />
+        <span>${item.sector}</span>
+      </label>
+    `).join("");
+    sectorFilter.querySelectorAll("input[type='checkbox']").forEach((input) => {
+      input.addEventListener("change", () => {
+        if (input.checked) {
+          selectedSectors.add(input.value);
+        } else {
+          selectedSectors.delete(input.value);
+        }
+        saveSelectedSectors();
+        renderChart(filteredPayload(currentPayload));
+      });
+    });
+  };
 
   const renderCacheStatus = (status) => {
     if (!cacheMessage || !cacheMeta) return;
@@ -609,7 +727,9 @@
       });
       if (!response.ok) throw new Error("Unable to load relative rotation data");
       currentPayload = await response.json();
-      renderChart(currentPayload);
+      loadSelectedSectors(currentPayload.items || []);
+      renderSectorFilter(currentPayload);
+      renderChart(filteredPayload(currentPayload));
       schedulePendingRefresh(currentPayload);
     } catch (error) {
       emptyState.hidden = false;
@@ -674,9 +794,27 @@
     }
   };
 
-  renderChart(currentPayload);
+  loadSelectedSectors(currentPayload.items || []);
+  renderSectorFilter(currentPayload);
+  renderChart(filteredPayload(currentPayload));
   renderCacheStatus(currentCacheStatus);
   schedulePendingRefresh(currentPayload);
+  if (selectAllButton) {
+    selectAllButton.addEventListener("click", () => {
+      selectedSectors = new Set((currentPayload.items || []).map((item) => item.sector));
+      saveSelectedSectors();
+      renderSectorFilter(currentPayload);
+      renderChart(filteredPayload(currentPayload));
+    });
+  }
+  if (selectNoneButton) {
+    selectNoneButton.addEventListener("click", () => {
+      selectedSectors = new Set();
+      saveSelectedSectors();
+      renderSectorFilter(currentPayload);
+      renderChart(filteredPayload(currentPayload));
+    });
+  }
   if (refreshButton) {
     refreshButton.addEventListener("click", fetchRrg);
   }

@@ -566,7 +566,7 @@ def pdh_pdl_scanner(request: Request):
             "user": user,
             "admin": admin,
             "public_mode": True if not user and not admin else False,
-            "scanner": engine.get_pdh_pdl_scanner(),
+            "scanner": engine.get_pdh_pdl_scanner(cached_only=True),
         },
     )
 
@@ -596,9 +596,15 @@ def relative_rotation_data(request: Request):
 
 
 @app.get("/api/pdh-pdl-scanner")
-def pdh_pdl_scanner_data(request: Request):
+def pdh_pdl_scanner_data(
+    request: Request,
+    level: str = "all",
+    side: str = "all",
+    min_pct: float = None,
+    max_pct: float = None,
+):
     return JSONResponse(
-        engine.get_pdh_pdl_scanner(),
+        engine.get_pdh_pdl_scanner(level=level, side=side, min_pct=min_pct, max_pct=max_pct, cached_only=True),
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",

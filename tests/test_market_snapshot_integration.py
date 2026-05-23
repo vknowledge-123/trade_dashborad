@@ -247,6 +247,88 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertEqual(snapshot["gainers"], [])
         self.assertEqual(snapshot["sector_gainers"], [])
 
+    def test_closed_market_does_not_return_stale_closed_snapshot_for_old_session(self):
+        engine = MarketEngine(redis_client=None)
+        engine.kite = object()
+        engine.latest = {}
+        engine.sector_latest = {}
+        engine._is_market_open = lambda: False
+        engine._completed_session_cache_marker = lambda: "2026-05-22"
+        engine._cached_closed_snapshot = lambda: {
+            "session_marker": "2026-05-21",
+            "gainers": [{"symbol": "OLD", "price": 10, "change": 1}],
+            "losers": [],
+            "sector_gainers": [],
+            "sector_losers": [],
+            "updated_at": "2026-05-21T15:30:00+05:30",
+        }
+        engine._cached_snapshot = lambda: {
+            "session_marker": "2026-05-21",
+            "gainers": [{"symbol": "OLD", "price": 10, "change": 1}],
+            "losers": [],
+            "sector_gainers": [],
+            "sector_losers": [],
+            "updated_at": "2026-05-21T15:30:00+05:30",
+        }
+        engine._save_snapshot = lambda snapshot: None
+        engine._save_closed_snapshot = lambda snapshot: None
+        scheduled = []
+        engine._ensure_background_refresh = lambda market_open, reason="initial": scheduled.append((market_open, reason)) or True
+
+        snapshot = engine.get_snapshot()
+
+        self.assertEqual(snapshot["gainers"], [])
+        self.assertEqual(scheduled, [(False, "closed_market_bootstrap")])
+
+    def test_pdh_pdl_scanner_uses_cached_rows_without_blocking_on_history(self):
+        engine = MarketEngine(redis_client=None)
+        engine.kite = object()
+        engine.symbol_to_token = {"INFY": 123}
+        engine._is_market_open = lambda: True
+        engine._completed_session_cache_marker = lambda: "2026-05-22"
+        engine.latest = {
+            "INFY": {
+                "symbol": "INFY",
+                "name": "Infosys",
+                "price": 100.0,
+                "change": 0.2,
+                "volume": 1000,
+                "is_fno": True,
+                "sectors": [],
+            }
+        }
+        engine.previous_day_levels_cache = {
+            "INFY": {
+                "cache_marker": "2026-05-22",
+                "high": 100.10,
+                "low": 98.0,
+                "close": 99.5,
+                "date": "2026-05-22",
+            }
+        }
+        engine._get_latest_rows_for_symbols = lambda symbols: self.fail("scanner API should not fetch quotes inline")
+        engine._get_previous_day_levels = lambda symbol: self.fail("scanner API should not fetch history inline")
+        engine._ensure_scanner_background_refresh = lambda: False
+
+        payload = engine.get_pdh_pdl_scanner(level="pdh", side="below", max_pct=0.2)
+
+        self.assertEqual(payload["filtered_rows"][0]["symbol"], "INFY")
+        self.assertEqual(payload["filtered_rows"][0]["pdh_side"], "below")
+        self.assertAlmostEqual(abs(payload["filtered_rows"][0]["pdh_distance_percent"]), 0.1, places=3)
+
+    def test_dhan_private_bank_security_id_is_available_for_idx_segment(self):
+        engine = MarketEngine(redis_client=None)
+        engine.broker = "dhan"
+        engine._dhan_scrip_rows = lambda: iter([])
+        engine.kite = object()
+        engine._refresh_sector_memberships = lambda *args, **kwargs: None
+        engine._fetch_sector_quote = lambda *args, **kwargs: ({}, {})
+
+        engine._build_dhan_universe(["NIFTY PVT BANK"])
+
+        self.assertEqual(engine.sector_tokens["NIFTY PVT BANK"], 21)
+        self.assertEqual(engine.dhan_security_to_segment[21], "IDX_I")
+
     def test_closed_market_sector_breakdown_uses_cached_rows_and_memberships(self):
         engine = MarketEngine(redis_client=None)
         engine.kite = None
