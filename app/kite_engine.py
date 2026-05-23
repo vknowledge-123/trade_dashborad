@@ -114,6 +114,10 @@ NIFTY_50_SCANNER_STOCKS = [
 ]
 
 
+class DhanRateLimitError(RuntimeError):
+    pass
+
+
 class DhanClient:
     def __init__(self, client_id, access_token, http_session=None):
         self.client_id = client_id
@@ -138,6 +142,8 @@ class DhanClient:
             response.raise_for_status()
         except requests.HTTPError as exc:
             detail = response.text[:500] if response.text else str(exc)
+            if response.status_code == 429:
+                raise DhanRateLimitError(f"Dhan API {path} rate limited (429): {detail}") from exc
             raise RuntimeError(f"Dhan API {path} failed ({response.status_code}): {detail}") from exc
         data = response.json()
         if isinstance(data, dict) and data.get("status") not in (None, "success"):
@@ -240,6 +246,8 @@ class MarketEngine:
         self.last_sector_quote_ts = 0
         self.last_rest_refresh_ts = 0
         self.last_closed_refresh_ts = 0
+        self.quote_rate_limited_until = 0.0
+        self.historical_rate_limited_until = 0.0
         self.last_membership_refresh_date = None
         self.last_snapshot_source = "empty"
         self.refresh_lock = threading.Lock()
@@ -426,6 +434,20 @@ class MarketEngine:
 
     def _tracked_feed_activity_ts(self):
         return max(self.last_tick_ts, self.last_connect_ts)
+
+    def _is_quote_rate_limited(self):
+        return time.time() < self.quote_rate_limited_until
+
+    def _mark_quote_rate_limited(self, exc):
+        self.quote_rate_limited_until = time.time() + 300
+        self.last_error = str(exc)
+
+    def _is_historical_rate_limited(self):
+        return time.time() < self.historical_rate_limited_until
+
+    def _mark_historical_rate_limited(self, exc):
+        self.historical_rate_limited_until = time.time() + 900
+        self.last_error = str(exc)
 
     def _is_live_feed_stale(self):
         if not self.kite or not self._is_market_open():
@@ -735,6 +757,7 @@ class MarketEngine:
                 "sector": sector,
                 "stocks": ranked,
                 "updated_at": self.last_update,
+                "session_marker": self._completed_session_cache_marker() if not market_open else None,
                 "market_open": market_open,
                 "snapshot_source": self.last_snapshot_source,
                 "constituent_count": len(ranked),
@@ -743,7 +766,9 @@ class MarketEngine:
         if not payload:
             return
         try:
-            save_market_cache(SECTOR_BREAKDOWNS_CACHE_KEY, payload)
+            existing = self._cached_sector_breakdowns() or {}
+            existing.update(payload)
+            save_market_cache(SECTOR_BREAKDOWNS_CACHE_KEY, existing)
         except Exception:
             return
 
@@ -831,6 +856,8 @@ class MarketEngine:
     def _throttled_historical_day_data(self, token, from_date, to_date):
         if not self.kite or not token:
             return []
+        if self.broker == "dhan" and self._is_historical_rate_limited():
+            return []
         with self.historical_fetch_lock:
             elapsed = time.monotonic() - self.last_historical_fetch_ts
             if elapsed < HISTORICAL_DAY_REQUEST_DELAY_SECONDS:
@@ -849,6 +876,10 @@ class MarketEngine:
                     self._historical_date_arg(to_date),
                     "day",
                 )
+            except DhanRateLimitError as exc:
+                self._mark_historical_rate_limited(exc)
+                self.last_historical_fetch_ts = time.monotonic()
+                return []
             except Exception as exc:
                 self.last_error = str(exc)
                 self.last_historical_fetch_ts = time.monotonic()
@@ -1341,7 +1372,8 @@ class MarketEngine:
             "updated_at": self.last_update or self._utc_now(),
             "market_open": market_open,
             "snapshot_source": self.last_snapshot_source,
-            "error": self.last_error,
+            "warning": "Using cached rows while Dhan quote cooldown is active." if scanner_rows and self._is_quote_rate_limited() else None,
+            "error": None if scanner_rows else self.last_error,
         }
 
     def _apply_scanner_filters(self, payload, level="all", side="all", min_pct=None, max_pct=None):
@@ -1559,6 +1591,8 @@ class MarketEngine:
             return {}, {}
         try:
             if self.broker == "dhan":
+                if self._is_quote_rate_limited():
+                    return {}, {}
                 ids = [
                     int(self.sector_tokens.get(symbol))
                     for symbol in sector_symbols
@@ -1566,7 +1600,11 @@ class MarketEngine:
                 ]
                 if not ids:
                     return {}, {}
-                data = kite.marketfeed_quote({"IDX_I": ids})
+                try:
+                    data = kite.marketfeed_quote({"IDX_I": ids})
+                except DhanRateLimitError as exc:
+                    self._mark_quote_rate_limited(exc)
+                    return {}, {}
                 prev = {}
                 latest = {}
                 segment_data = data.get("IDX_I") or {}
@@ -1677,6 +1715,8 @@ class MarketEngine:
         if not symbols:
             return quoted
         if self.broker == "dhan":
+            if self._is_quote_rate_limited():
+                return quoted
             ids = [
                 int(self.symbol_to_token.get(symbol))
                 for symbol in symbols
@@ -1685,6 +1725,9 @@ class MarketEngine:
             for chunk in self._chunked(ids, 1000):
                 try:
                     data = kite.marketfeed_quote({"NSE_EQ": chunk})
+                except DhanRateLimitError as exc:
+                    self._mark_quote_rate_limited(exc)
+                    break
                 except Exception as exc:
                     self.last_error = str(exc)
                     continue
@@ -1703,6 +1746,8 @@ class MarketEngine:
 
     def _refresh_rest_snapshot(self, force=False):
         if not self.kite or not self.symbol_to_token:
+            return False
+        if self.broker == "dhan" and self._is_quote_rate_limited():
             return False
 
         market_open = self._is_market_open()
@@ -2458,13 +2503,27 @@ class MarketEngine:
         if not market_open:
             cached_breakdowns = self._cached_sector_breakdowns() or {}
             cached_payload = cached_breakdowns.get(sector)
+            cache_marker = self._completed_session_cache_marker()
             if cached_payload and cached_payload.get("stocks"):
-                self._decorate_rows_with_previous_day_badges(cached_payload["stocks"])
-                return cached_payload
+                marker = cached_payload.get("session_marker") or self._snapshot_cache_marker(cached_payload)
+                if marker == cache_marker:
+                    self._decorate_rows_with_previous_day_badges(cached_payload["stocks"])
+                    return cached_payload
 
         self._refresh_sector_memberships(force=not bool(self.sector_members))
         symbols = self.sector_members.get(sector, [])
-        rows = self._get_latest_rows_for_symbols(symbols)
+
+        if not market_open:
+            rows = self._rows_for_symbols_from_cache(symbols)
+            if not rows:
+                if cached_payload and cached_payload.get("stocks"):
+                    marker = cached_payload.get("session_marker") or self._snapshot_cache_marker(cached_payload)
+                    if marker == cache_marker:
+                        self._decorate_rows_with_previous_day_badges(cached_payload["stocks"])
+                        return cached_payload
+        else:
+            rows = self._get_latest_rows_for_symbols(symbols)
+
         ranked = sorted(rows, key=lambda row: row["change"], reverse=True)
         self._decorate_rows_with_previous_day_badges(ranked)
         for index, row in enumerate(ranked, start=1):
@@ -2473,6 +2532,7 @@ class MarketEngine:
             "sector": sector,
             "stocks": ranked,
             "updated_at": self.last_update,
+            "session_marker": self._completed_session_cache_marker() if not market_open else None,
             "market_open": market_open,
             "snapshot_source": self.last_snapshot_source,
             "constituent_count": len(ranked),

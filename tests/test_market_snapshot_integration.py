@@ -59,6 +59,12 @@ class FakeSession:
         return self.response
 
 
+class RateLimitedDhan:
+    def marketfeed_quote(self, securities):
+        from app.kite_engine import DhanRateLimitError
+        raise DhanRateLimitError("Dhan API /marketfeed/quote rate limited (429)")
+
+
 def make_snapshot(sector_price):
     return {
         "gainers": [
@@ -386,6 +392,18 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertEqual(fake_session.last_payload["instrument"], "EQUITY")
         self.assertEqual(candles[0]["high"], 101)
 
+    def test_dhan_quote_rate_limit_sets_cooldown(self):
+        engine = MarketEngine(redis_client=None)
+        engine.broker = "dhan"
+        engine.kite = RateLimitedDhan()
+        engine.symbol_to_token = {"INFY": 123}
+        engine.token_to_symbol = {123: "INFY"}
+
+        quoted = engine._quote_symbols(engine.kite, ["INFY"])
+
+        self.assertEqual(quoted, {})
+        self.assertTrue(engine._is_quote_rate_limited())
+
     def test_closed_market_sector_breakdown_uses_cached_rows_and_memberships(self):
         engine = MarketEngine(redis_client=None)
         engine.kite = None
@@ -428,12 +446,59 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertEqual(payload["stocks"][0]["symbol"], "INFY")
         self.assertEqual(payload["stocks"][1]["symbol"], "TCS")
 
+    def test_closed_market_sector_breakdown_prefers_latest_rows_cache_over_stale_breakdown_cache(self):
+        engine = MarketEngine(redis_client=None)
+        engine.kite = object()
+        engine.latest = {}
+        engine._is_market_open = lambda: False
+        engine._completed_session_cache_marker = lambda: "2026-05-22"
+        engine.sector_members = {"NIFTY IT": ["INFY", "TCS"]}
+        engine._refresh_sector_memberships = lambda *args, **kwargs: None
+        engine._cached_latest_rows = lambda: {
+            "rows": {
+                "INFY": {
+                    "symbol": "INFY",
+                    "name": "Infosys",
+                    "price": 1500.0,
+                    "change": 1.25,
+                    "volume": 123,
+                    "is_fno": True,
+                    "sectors": ["NIFTY IT"],
+                },
+                "TCS": {
+                    "symbol": "TCS",
+                    "name": "TCS",
+                    "price": 4200.0,
+                    "change": -0.5,
+                    "volume": 456,
+                    "is_fno": True,
+                    "sectors": ["NIFTY IT"],
+                },
+            },
+            "updated_at": "2026-05-22T15:30:00+05:30",
+            "snapshot_source": "historical_eod",
+        }
+        engine._cached_sector_breakdowns = lambda: {
+            "NIFTY IT": {
+                "session_marker": "2026-05-21",
+                "stocks": [{"symbol": "OLD", "price": 1, "change": 0}],
+            }
+        }
+        engine._quote_symbols = lambda *args, **kwargs: self.fail("closed sector breakdown should use shared row cache")
+
+        payload = engine.get_sector_breakdown("NIFTY IT")
+
+        self.assertEqual([row["symbol"] for row in payload["stocks"]], ["INFY", "TCS"])
+        self.assertEqual(payload["session_marker"], "2026-05-22")
+
     def test_closed_market_sector_breakdown_prefers_cached_sector_payload(self):
         engine = MarketEngine(redis_client=None)
         engine._is_market_open = lambda: False
+        engine._completed_session_cache_marker = lambda: "2026-05-12"
         engine._cached_sector_breakdowns = lambda: {
             "NIFTY IT": {
                 "sector": "NIFTY IT",
+                "session_marker": "2026-05-12",
                 "stocks": [
                     {
                         "rank": 1,

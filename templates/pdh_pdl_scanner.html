@@ -18,6 +18,9 @@
   {% if scanner.error %}
     <div class="scanner-alert">{{ scanner.error }}</div>
   {% endif %}
+  {% if scanner.warning %}
+    <div class="scanner-alert scanner-warning">{{ scanner.warning }}</div>
+  {% endif %}
 
   <div class="panel scanner-filter-panel">
     <div class="panel-header">
@@ -181,6 +184,11 @@
   background: rgba(255, 184, 48, 0.08);
   color: #ffe9a8;
   font-size: 13px;
+}
+.scanner-warning {
+  border-color: rgba(0, 212, 255, 0.22);
+  background: rgba(0, 212, 255, 0.08);
+  color: #dff8ff;
 }
 .scanner-grid {
   display: grid;
