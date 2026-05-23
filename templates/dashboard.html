@@ -56,12 +56,24 @@
   </section>
 
   <div class="promo-strip promo-rich">
-    <span class="promo-strip-label">Academy</span>
-    <span class="promo-strip-text">Learn SL hunting, operator concepts, liquidity zones, pyramiding, and premium equity, Nifty, and Banknifty strategy with Mentors Amol Charpe and Ravinder Jadhav.</span>
-    <div class="inquiry-note">
-      Premium plans include a 20-hour course, trading psychology, technical indicators, and live Q&amp;A support. Amol Charpe is an Urban Pro Excellence Award winner.
-      <a href="/premium" class="promo-strip-cta">View Premium</a>
+    <div class="promo-strip-label">
+      <span class="promo-dot"></span>
+      <span>Academy</span>
     </div>
+    <div class="promo-copy">
+      <div class="promo-title">Premium trading academy</div>
+      <div class="promo-strip-text">
+        Learn SL hunting, operator concepts, liquidity zones, pyramiding, and premium equity, Nifty, and Banknifty strategy with Mentors Amol Charpe and Ravinder Jadhav.
+      </div>
+      <div class="promo-meta" aria-label="Premium plan highlights">
+        <span>20-hour course</span>
+        <span>Trading psychology</span>
+        <span>Technical indicators</span>
+        <span>Live Q&amp;A support</span>
+        <span>Urban Pro Excellence Award winner</span>
+      </div>
+    </div>
+    <a href="/premium" class="promo-strip-cta">View Premium</a>
   </div>
 
   <section class="dash-grid">
@@ -262,8 +274,10 @@
   flex-wrap: wrap;
   margin: 6px 8px !important;
   padding: 10px 14px !important;
-  background: linear-gradient(135deg, rgba(14, 24, 46, 0.85), rgba(12, 18, 32, 0.65)) !important;
+  background: linear-gradient(180deg, rgba(14, 22, 38, 0.94), rgba(9, 15, 26, 0.86)) !important;
+  border: 1px solid rgba(88, 112, 152, 0.28) !important;
   border-radius: 10px !important;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.04) !important;
 }
 .trial-chip {
   max-width: 70%;
@@ -285,38 +299,92 @@
 
 .promo-strip {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  padding: 10px 14px !important;
-  background: rgba(10, 14, 24, 0.65) !important;
-  border: 1px solid rgba(99, 210, 255, 0.18) !important;
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22) !important;
+  gap: 14px;
+  padding: 12px 14px !important;
+  background:
+    radial-gradient(circle at top left, rgba(0, 212, 255, 0.10), transparent 32%),
+    linear-gradient(180deg, rgba(10, 16, 28, 0.96), rgba(8, 13, 22, 0.90)) !important;
+  border: 1px solid rgba(88, 112, 152, 0.35) !important;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.04) !important;
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
 }
 .promo-strip-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: max-content;
+  padding: 6px 9px;
+  border: 1px solid rgba(0, 212, 255, 0.18);
+  border-radius: 999px;
+  background: rgba(0, 212, 255, 0.08);
   color: #7be6ff !important;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 800;
-  letter-spacing: 0.3px;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+.promo-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #00d4ff;
+  box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.14), 0 0 12px rgba(0, 212, 255, 0.45);
+}
+.promo-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.promo-title {
+  color: #eef6ff;
+  font-size: 13px;
+  font-weight: 850;
+  line-height: 1.25;
 }
 .promo-strip-text {
   min-width: 0;
   white-space: normal;
-  line-height: 1.4;
-  font-size: 13px !important;
-  color: #dbe7ff !important;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+  font-size: 12px !important;
+  color: #b9c7dc !important;
   font-weight: 500 !important;
 }
+.promo-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+.promo-meta span {
+  padding: 3px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.045);
+  color: #8fa2bd;
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 1.2;
+}
 .promo-strip-cta {
-  padding: 6px 12px !important;
+  align-self: center;
+  padding: 8px 13px !important;
   border-radius: 999px !important;
   font-size: 11px !important;
   font-weight: 800 !important;
   color: #fff !important;
   text-decoration: none !important;
-  background: linear-gradient(135deg, #00d4ff 0%, #6366f1 100%) !important;
-  box-shadow: 0 10px 24px rgba(0, 212, 255, 0.35) !important;
+  white-space: nowrap;
+  background: linear-gradient(135deg, #00b8e6 0%, #3f6df6 100%) !important;
+  box-shadow: 0 10px 22px rgba(0, 151, 206, 0.28) !important;
+  transition: transform 0.16s ease, box-shadow 0.16s ease;
+}
+.promo-strip-cta:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 26px rgba(0, 151, 206, 0.34) !important;
 }
 
 .panel-header {
@@ -451,7 +519,10 @@
 @media (max-width: 900px) {
   .trial-chip { max-width: 100%; }
   .hero-badge { justify-content: flex-start; }
-  .promo-strip { grid-template-columns: 1fr; }
+  .promo-strip {
+    grid-template-columns: 1fr;
+    align-items: flex-start;
+  }
   .promo-strip-cta { justify-self: start; }
   .sector-modal-card {
     width: calc(100vw - 16px);
@@ -491,6 +562,20 @@
   .promo-strip {
     margin: 6px 4px !important;
     padding: 10px !important;
+    gap: 10px;
+  }
+
+  .promo-meta {
+    display: none;
+  }
+
+  .promo-title {
+    font-size: 12px;
+  }
+
+  .promo-strip-cta {
+    width: 100%;
+    text-align: center;
   }
 
   .dash-grid {
