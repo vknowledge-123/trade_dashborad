@@ -33,6 +33,32 @@ class FakeKite:
         }
 
 
+class FakeResponse:
+    def __init__(self, payload, status_code=200):
+        self.payload = payload
+        self.status_code = status_code
+        self.text = str(payload)
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            import requests
+            raise requests.HTTPError(f"{self.status_code} error")
+
+    def json(self):
+        return self.payload
+
+
+class FakeSession:
+    def __init__(self, response):
+        self.response = response
+        self.headers = {}
+        self.last_payload = None
+
+    def post(self, url, json, timeout):
+        self.last_payload = json
+        return self.response
+
+
 def make_snapshot(sector_price):
     return {
         "gainers": [
@@ -328,6 +354,37 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
 
         self.assertEqual(engine.sector_tokens["NIFTY PVT BANK"], 21)
         self.assertEqual(engine.dhan_security_to_segment[21], "IDX_I")
+
+    def test_dhan_historical_daily_payload_matches_sdk_dates_without_future_day(self):
+        from app.kite_engine import DhanClient
+
+        fake_session = FakeSession(
+            FakeResponse(
+                {
+                    "open": [100],
+                    "high": [101],
+                    "low": [99],
+                    "close": [100.5],
+                    "volume": [1000],
+                    "timestamp": [1779906600],
+                }
+            )
+        )
+        client = DhanClient("client", "token", http_session=fake_session)
+
+        candles = client.historical_data(
+            ("NSE_EQ", "1594", "EQUITY"),
+            datetime(2026, 5, 27),
+            datetime(2026, 5, 27, 23, 59),
+            "day",
+        )
+
+        self.assertEqual(fake_session.last_payload["fromDate"], "2026-05-27")
+        self.assertEqual(fake_session.last_payload["toDate"], "2026-05-27")
+        self.assertEqual(fake_session.last_payload["securityId"], "1594")
+        self.assertEqual(fake_session.last_payload["exchangeSegment"], "NSE_EQ")
+        self.assertEqual(fake_session.last_payload["instrument"], "EQUITY")
+        self.assertEqual(candles[0]["high"], 101)
 
     def test_closed_market_sector_breakdown_uses_cached_rows_and_memberships(self):
         engine = MarketEngine(redis_client=None)

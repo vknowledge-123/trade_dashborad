@@ -134,7 +134,11 @@ class DhanClient:
             json=payload,
             timeout=(10, 40),
         )
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            detail = response.text[:500] if response.text else str(exc)
+            raise RuntimeError(f"Dhan API {path} failed ({response.status_code}): {detail}") from exc
         data = response.json()
         if isinstance(data, dict) and data.get("status") not in (None, "success"):
             raise RuntimeError(data.get("remarks") or data.get("message") or str(data))
@@ -150,10 +154,7 @@ class DhanClient:
 
     def historical_data(self, security_id, from_date, to_date, interval):
         from_value = from_date.date().isoformat() if hasattr(from_date, "date") else str(from_date)
-        if hasattr(to_date, "date"):
-            to_value = (to_date.date() + timedelta(days=1)).isoformat()
-        else:
-            to_value = str(to_date)
+        to_value = to_date.date().isoformat() if hasattr(to_date, "date") else str(to_date)
         segment = "NSE_EQ"
         instrument = "EQUITY"
         if isinstance(security_id, tuple):
@@ -1125,15 +1126,27 @@ class MarketEngine:
         if not token or not self.kite:
             return cached
         completed_session = self._latest_completed_session_date()
+        lookup_start = self._trading_session_window(completed_session, 6)
+        from_session = lookup_start[0] if lookup_start else completed_session
         candles = self._fetch_recent_day_candles(
             token,
-            self._session_start_dt(completed_session),
+            self._session_start_dt(from_session),
             self._session_end_dt(completed_session),
-            limit=1,
+            limit=None,
         )
         if not candles:
             return cached
-        candle = candles[-1]
+        candle = None
+        for item in reversed(candles):
+            candle_date = self._candle_date(item)
+            if hasattr(candle_date, "isoformat") and candle_date <= completed_session:
+                candle = item
+                break
+            if isinstance(candle_date, str) and candle_date <= completed_session.isoformat():
+                candle = item
+                break
+        if not candle:
+            candle = candles[-1]
         high = candle.get("high")
         low = candle.get("low")
         close = candle.get("close")
