@@ -1428,6 +1428,148 @@ body.modal-open {
   border-color: rgba(0,212,255,0.45);
   box-shadow: 0 0 0 3px rgba(0,212,255,0.10);
 }
+
+/* Responsive market UI refinements */
+.nav,
+.panel,
+.panel-header,
+.table-row,
+.sector-row,
+.cell-symbol,
+.cell-symbol-main,
+.sector-name,
+.sector-price,
+.sector-change {
+  min-width: 0;
+}
+
+.nav {
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.nav::-webkit-scrollbar { display: none; }
+.nav-link,
+.tv-link {
+  white-space: nowrap;
+}
+
+.table-row > *,
+.sector-row > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.cell-symbol-main {
+  line-height: 1.25;
+}
+
+@media (max-width: 760px) {
+  .topbar {
+    align-items: stretch;
+    height: auto;
+    min-height: 0;
+  }
+
+  .brand {
+    min-width: 0;
+  }
+
+  .nav {
+    justify-content: flex-start !important;
+    flex-wrap: nowrap !important;
+    border-radius: 14px;
+    width: 100%;
+  }
+
+  .panel {
+    border-radius: 14px;
+  }
+
+  .panel:hover {
+    transform: none;
+  }
+
+  .panel-header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .table {
+    gap: 8px;
+  }
+
+  .table-head {
+    display: none !important;
+  }
+
+  .table-row:not(.table-head) {
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    gap: 8px 12px;
+    align-items: start;
+    padding: 10px 11px;
+  }
+
+  .table-row:not(.table-head) > .cell-symbol,
+  .table-row:not(.table-head) > span:first-child {
+    grid-column: 1 / -1;
+  }
+
+  .table-row:not(.table-head) > .tv-link {
+    grid-column: 1 / -1;
+    width: 100%;
+    min-width: 0;
+    min-height: 34px;
+  }
+
+  .sector-row {
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    gap: 5px 10px;
+    padding: 9px 10px;
+  }
+
+  .sector-row:not(.sector-head) .sector-name {
+    grid-column: 1 / -1;
+  }
+
+  .sector-row:not(.sector-head) .sector-change {
+    text-align: right;
+  }
+}
+
+@media (max-width: 420px) {
+  .brand {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .brand-mark {
+    width: 32px;
+    height: 32px;
+  }
+
+  .brand-name {
+    font-size: 15px;
+  }
+
+  .brand-tag {
+    font-size: 9px;
+  }
+
+  .nav-link {
+    padding: 7px 10px;
+    font-size: 11px;
+  }
+
+  .nav-tool {
+    width: 32px;
+    height: 32px;
+  }
+
+  .pill {
+    font-size: 10px;
+    padding: 4px 8px;
+  }
+}
   </style>
 </head>
 <body data-public="{{ 1 if public_mode is defined and public_mode else 0 }}">

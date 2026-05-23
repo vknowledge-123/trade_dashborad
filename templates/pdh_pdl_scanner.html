@@ -233,6 +233,90 @@
   .scanner-row { grid-template-columns: 1.1fr 0.7fr 0.7fr 0.7fr auto; }
   .scanner-distance-row { grid-template-columns: 1fr; }
 }
+
+@media (max-width: 760px) {
+  .scanner-header {
+    padding: 10px;
+    gap: 10px;
+  }
+
+  .scanner-header h1 {
+    font-size: 20px;
+  }
+
+  .scanner-filters {
+    grid-template-columns: 1fr;
+  }
+
+  .scanner-row:not(.table-head),
+  .scanner-distance-row:not(.table-head) {
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    gap: 7px 10px;
+  }
+
+  .scanner-row:not(.table-head) > span,
+  .scanner-distance-row:not(.table-head) > span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .scanner-row:not(.table-head) > span:nth-child(1),
+  .scanner-distance-row:not(.table-head) > span:nth-child(1) {
+    grid-column: 1 / -1;
+  }
+
+  .scanner-row:not(.table-head) > span:nth-child(2)::before,
+  .scanner-distance-row:not(.table-head) > span:nth-child(2)::before {
+    content: "Price ";
+    color: #6b7fa3;
+  }
+
+  .scanner-row:not(.table-head) > span:nth-child(3)::before {
+    content: "Level ";
+    color: #6b7fa3;
+  }
+
+  .scanner-row:not(.table-head) > span:nth-child(4)::before {
+    content: "Break ";
+    color: #6b7fa3;
+  }
+
+  .scanner-distance-row:not(.table-head) > span:nth-child(3)::before {
+    content: "PDH ";
+    color: #6b7fa3;
+  }
+
+  .scanner-distance-row:not(.table-head) > span:nth-child(4)::before {
+    content: "PDH Dist ";
+    color: #6b7fa3;
+  }
+
+  .scanner-distance-row:not(.table-head) > span:nth-child(5)::before {
+    content: "PDL ";
+    color: #6b7fa3;
+  }
+
+  .scanner-distance-row:not(.table-head) > span:nth-child(6)::before {
+    content: "PDL Dist ";
+    color: #6b7fa3;
+  }
+
+  .scanner-row:not(.table-head) > .tv-link,
+  .scanner-distance-row:not(.table-head) > .tv-link {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+}
+
+@media (min-width: 761px) and (max-width: 1180px) {
+  .scanner-filters {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .scanner-grid {
+    grid-template-columns: 1fr;
+  }
+}
 </style>
 
 <script>

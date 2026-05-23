@@ -185,10 +185,14 @@
 .rrg-chart-wrap {
   position: relative;
   min-height: 560px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
 }
 
 #rrg-chart {
   width: 100%;
+  min-width: 720px;
   min-height: 560px;
   border-radius: 18px;
   background:
@@ -446,6 +450,24 @@
 }
 
 @media (max-width: 720px) {
+  .rrg-shell {
+    gap: 12px;
+  }
+
+  .rrg-hero {
+    padding: 12px;
+  }
+
+  .rrg-hero h1 {
+    font-size: 22px;
+    line-height: 1.2;
+  }
+
+  .rrg-hero p {
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
   .rrg-hero-meta,
   .rrg-item-stats {
     grid-template-columns: 1fr;
@@ -453,11 +475,59 @@
 
   .rrg-actions {
     width: 100%;
-    justify-content: space-between;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .rrg-selector-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .rrg-sector-filter {
+    max-height: 170px;
+  }
+
+  .rrg-sector-toggle {
+    max-width: 100%;
+  }
+
+  .rrg-chart-wrap {
+    min-height: 430px;
+    padding-bottom: 8px;
   }
 
   #rrg-chart {
-    min-height: 460px;
+    min-width: 680px;
+    min-height: 430px;
+  }
+
+  .rrg-quadrant-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .rrg-list {
+    max-height: none;
+  }
+
+  .rrg-item-top {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+@media (min-width: 721px) and (max-width: 1180px) {
+  .rrg-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .rrg-hero {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .rrg-side {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 </style>

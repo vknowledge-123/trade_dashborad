@@ -468,6 +468,107 @@
     grid-template-columns: 1.2fr 0.75fr 0.9fr 0.8fr auto;
   }
 }
+
+@media (max-width: 760px) {
+  .dash-shell {
+    padding: 6px !important;
+  }
+
+  .hero-badge {
+    margin: 6px 4px !important;
+    padding: 10px !important;
+  }
+
+  .trial-chip {
+    font-size: 11px !important;
+  }
+
+  .status-line {
+    width: 100%;
+    align-items: flex-start;
+  }
+
+  .promo-strip {
+    margin: 6px 4px !important;
+    padding: 10px !important;
+  }
+
+  .dash-grid {
+    gap: 10px;
+  }
+
+  .panel-title-group {
+    min-width: 0;
+  }
+
+  #gainers-body .table-row:not(.table-head),
+  #losers-body .table-row:not(.table-head) {
+    grid-template-columns: minmax(0, 1fr) auto !important;
+  }
+
+  .sector-split {
+    gap: 8px;
+  }
+
+  .sector-modal-card {
+    width: calc(100vw - 10px);
+    max-height: calc(100dvh - 10px);
+    margin: 5px auto;
+    border-radius: 12px;
+  }
+
+  .sector-modal-header {
+    padding: 12px;
+  }
+
+  .sector-modal-table {
+    padding: 0 8px 10px;
+  }
+
+  .sector-stock-body {
+    max-height: calc(100dvh - 150px);
+  }
+
+  .sector-stock-head {
+    display: none;
+  }
+
+  .sector-stock-row {
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    gap: 7px 10px;
+    padding: 10px 8px;
+    align-items: start;
+  }
+
+  .sector-stock-row > span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .sector-stock-row > span:nth-child(1)::before { content: "Rank "; color: #6b7fa3; }
+  .sector-stock-row > span:nth-child(2) { grid-column: 1 / -1; }
+  .sector-stock-row > span:nth-child(3)::before { content: "Price "; color: #6b7fa3; }
+  .sector-stock-row > span:nth-child(4)::before { content: "Vol "; color: #6b7fa3; }
+  .sector-stock-row > span:nth-child(5)::before { content: "Chg "; color: #6b7fa3; }
+  .sector-stock-row > .tv-link {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+}
+
+@media (max-width: 420px) {
+  .panel-icon {
+    display: none !important;
+  }
+
+  .panel-header h3 {
+    font-size: 13px;
+  }
+
+  .sector-modal-header h3 {
+    font-size: 16px;
+  }
+}
 </style>
 
 {% endblock %}
