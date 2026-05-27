@@ -750,9 +750,7 @@ class MarketEngine:
 
         payload = {}
         for sector, rows in grouped.items():
-            ranked = sorted(rows, key=lambda item: item["change"], reverse=True)
-            for index, row in enumerate(ranked, start=1):
-                row["rank"] = index
+            ranked = self._rank_sector_breakdown_rows(rows, market_open)
             payload[sector] = {
                 "sector": sector,
                 "stocks": ranked,
@@ -1124,6 +1122,22 @@ class MarketEngine:
         self._decorate_rows_with_previous_day_badges(snapshot.get("gainers") or [], fetch_missing=False)
         self._decorate_rows_with_previous_day_badges(snapshot.get("losers") or [], fetch_missing=False)
         return snapshot
+
+    def _rank_sector_breakdown_rows(self, rows, market_open):
+        prepared = [dict(row) for row in rows or [] if isinstance(row, dict)]
+        if not market_open:
+            self._decorate_rows_with_previous_day_badges(prepared, fetch_missing=False)
+            for row in prepared:
+                previous_change = row.get("previous_day_change")
+                try:
+                    if previous_change is not None:
+                        row["change"] = round(float(previous_change), 2)
+                except (TypeError, ValueError):
+                    continue
+        ranked = sorted(prepared, key=lambda item: item.get("change") or 0, reverse=True)
+        for index, row in enumerate(ranked, start=1):
+            row["rank"] = index
+        return ranked
 
     def _get_previous_day_change(self, symbol, allow_fetch=True):
         symbol = (symbol or "").upper()
@@ -2507,8 +2521,10 @@ class MarketEngine:
             if cached_payload and cached_payload.get("stocks"):
                 marker = cached_payload.get("session_marker") or self._snapshot_cache_marker(cached_payload)
                 if marker == cache_marker:
-                    self._decorate_rows_with_previous_day_badges(cached_payload["stocks"])
-                    return cached_payload
+                    payload = dict(cached_payload)
+                    payload["stocks"] = self._rank_sector_breakdown_rows(cached_payload["stocks"], market_open=False)
+                    payload["constituent_count"] = len(payload["stocks"])
+                    return payload
 
         self._refresh_sector_memberships(force=not bool(self.sector_members))
         symbols = self.sector_members.get(sector, [])
@@ -2519,15 +2535,16 @@ class MarketEngine:
                 if cached_payload and cached_payload.get("stocks"):
                     marker = cached_payload.get("session_marker") or self._snapshot_cache_marker(cached_payload)
                     if marker == cache_marker:
-                        self._decorate_rows_with_previous_day_badges(cached_payload["stocks"])
-                        return cached_payload
+                        payload = dict(cached_payload)
+                        payload["stocks"] = self._rank_sector_breakdown_rows(cached_payload["stocks"], market_open=False)
+                        payload["constituent_count"] = len(payload["stocks"])
+                        return payload
         else:
             rows = self._get_latest_rows_for_symbols(symbols)
 
-        ranked = sorted(rows, key=lambda row: row["change"], reverse=True)
-        self._decorate_rows_with_previous_day_badges(ranked)
-        for index, row in enumerate(ranked, start=1):
-            row["rank"] = index
+        ranked = self._rank_sector_breakdown_rows(rows, market_open)
+        if market_open:
+            self._decorate_rows_with_previous_day_badges(ranked)
         return {
             "sector": sector,
             "stocks": ranked,
