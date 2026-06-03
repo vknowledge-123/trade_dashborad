@@ -491,6 +491,35 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertEqual([row["symbol"] for row in payload["stocks"]], ["INFY", "TCS"])
         self.assertEqual(payload["session_marker"], "2026-05-22")
 
+    def test_closed_market_sector_breakdown_can_use_previous_close_cache_without_latest_rows(self):
+        engine = MarketEngine(redis_client=None)
+        engine.kite = None
+        engine.latest = {}
+        engine._is_market_open = lambda: False
+        engine._completed_session_cache_marker = lambda: "2026-05-22"
+        engine.sector_members = {"NIFTY MEDIA": ["ZEEL", "PVRINOX"]}
+        engine.symbol_to_name = {"ZEEL": "Zee Entertainment", "PVRINOX": "PVR Inox"}
+        engine.symbol_to_sectors = {"ZEEL": ["NIFTY MEDIA"], "PVRINOX": ["NIFTY MEDIA"]}
+        engine.previous_close_cache = {
+            "symbols": {
+                "ZEEL": {"cache_marker": "2026-05-22", "close": 91.46},
+                "PVRINOX": {"cache_marker": "2026-05-22", "close": 957.8},
+            }
+        }
+        engine.previous_day_badges_cache = {
+            "ZEEL": {"cache_marker": "2026-05-22", "change": 3.72},
+            "PVRINOX": {"cache_marker": "2026-05-22", "change": 0.78},
+        }
+        engine._cached_latest_rows = lambda: {"rows": {}}
+        engine._cached_sector_breakdowns = lambda: {}
+
+        payload = engine.get_sector_breakdown("NIFTY MEDIA")
+
+        self.assertEqual(payload["constituent_count"], 2)
+        self.assertEqual([row["symbol"] for row in payload["stocks"]], ["ZEEL", "PVRINOX"])
+        self.assertEqual(payload["stocks"][0]["change"], 3.72)
+        self.assertEqual(payload["stocks"][1]["price"], 957.8)
+
     def test_closed_market_sector_breakdown_prefers_cached_sector_payload(self):
         engine = MarketEngine(redis_client=None)
         engine._is_market_open = lambda: False

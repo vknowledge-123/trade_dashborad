@@ -22,6 +22,7 @@ CLOSED_SNAPSHOT_CACHE_KEY = "latest_closed_snapshot"
 LATEST_ROWS_CACHE_KEY = "latest_rows"
 SECTOR_MEMBERS_CACHE_KEY = "sector_memberships"
 SECTOR_BREAKDOWNS_CACHE_KEY = "sector_breakdowns"
+PREVIOUS_CLOSE_CACHE_KEY = "previous_close_map"
 PREVIOUS_DAY_BADGES_CACHE_KEY = "previous_day_badges"
 PREVIOUS_DAY_LEVELS_CACHE_KEY = "previous_day_levels"
 PDH_PDL_SCANNER_CACHE_KEY = "pdh_pdl_scanner"
@@ -233,6 +234,7 @@ class MarketEngine:
         self.sector_members = {}
         self.sector_prev_close = {}
         self.rest_prev_close = {}
+        self.previous_close_cache = {}
         self.latest = {}
         self.sector_latest = {}
         self.connected = False
@@ -371,10 +373,12 @@ class MarketEngine:
             token for symbol, token in symbol_to_token.items()
             if not tracked or symbol in tracked
         ]
-        self._refresh_sector_memberships(force=True)
+        self._refresh_sector_memberships(force=False)
+        self._restore_previous_close_cache()
 
         prev, latest = self._fetch_sector_quote(self.kite, list(sector_tokens.keys()))
-        self.sector_prev_close = prev
+        if prev:
+            self.sector_prev_close.update(prev)
         if latest:
             self.sector_latest.update(latest)
 
@@ -773,6 +777,65 @@ class MarketEngine:
     def _cached_sector_breakdowns(self):
         return load_market_cache(SECTOR_BREAKDOWNS_CACHE_KEY)
 
+    def _save_previous_close_cache(self):
+        try:
+            save_market_cache(PREVIOUS_CLOSE_CACHE_KEY, self.previous_close_cache)
+        except Exception:
+            return
+
+    def _restore_previous_close_cache(self):
+        cached = load_market_cache(PREVIOUS_CLOSE_CACHE_KEY)
+        if not isinstance(cached, dict):
+            return {}
+        self.previous_close_cache = cached
+        marker = self._completed_session_cache_marker()
+        symbols = cached.get("symbols") or {}
+        sectors = cached.get("sectors") or {}
+        for symbol, payload in symbols.items():
+            if not isinstance(payload, dict) or payload.get("cache_marker") != marker:
+                continue
+            close = payload.get("close")
+            if close not in (None, 0):
+                self.rest_prev_close[str(symbol).upper()] = close
+        for sector, payload in sectors.items():
+            if not isinstance(payload, dict) or payload.get("cache_marker") != marker:
+                continue
+            close = payload.get("close")
+            if close not in (None, 0):
+                self.sector_prev_close[str(sector).upper()] = close
+        return cached
+
+    def _remember_previous_close(self, bucket, key, close, cache_marker=None):
+        if close in (None, 0) or not key:
+            return False
+        marker = cache_marker or self._completed_session_cache_marker()
+        normalized_key = str(key).upper()
+        cache_bucket = "sectors" if bucket == "sectors" else "symbols"
+        self.previous_close_cache.setdefault(cache_bucket, {})
+        self.previous_close_cache[cache_bucket][normalized_key] = {
+            "cache_marker": marker,
+            "close": round(float(close), 2),
+            "updated_at": self._utc_now(),
+        }
+        if cache_bucket == "sectors":
+            self.sector_prev_close[normalized_key] = close
+        else:
+            self.rest_prev_close[normalized_key] = close
+        return True
+
+    def _cached_previous_close(self, bucket, key):
+        if not key:
+            return None
+        if not self.previous_close_cache:
+            self._restore_previous_close_cache()
+        marker = self._completed_session_cache_marker()
+        cache_bucket = "sectors" if bucket == "sectors" else "symbols"
+        payload = (self.previous_close_cache.get(cache_bucket) or {}).get(str(key).upper())
+        if not isinstance(payload, dict) or payload.get("cache_marker") != marker:
+            return None
+        close = payload.get("close")
+        return close if close not in (None, 0) else None
+
     def _save_previous_day_badges_cache(self):
         try:
             save_market_cache(PREVIOUS_DAY_BADGES_CACHE_KEY, self.previous_day_badges_cache)
@@ -911,15 +974,29 @@ class MarketEngine:
             return []
 
         with self.lock:
+            in_memory_by_symbol = {}
             if self.latest:
-                in_memory_rows = [dict(self.latest[symbol]) for symbol in requested if symbol in self.latest]
-                if in_memory_rows:
-                    return in_memory_rows
+                in_memory_by_symbol = {
+                    symbol: dict(self.latest[symbol])
+                    for symbol in requested
+                    if symbol in self.latest
+                }
+                if len(in_memory_by_symbol) == len(requested):
+                    return [in_memory_by_symbol[symbol] for symbol in requested]
 
         cached = self._cached_latest_rows()
         rows = (cached or {}).get("rows") or {}
         if not rows:
-            return []
+            previous_close_rows = {
+                row["symbol"]: row
+                for row in self._rows_for_symbols_from_previous_close_cache(requested)
+                if isinstance(row, dict) and row.get("symbol")
+            }
+            return [
+                in_memory_by_symbol.get(symbol) or previous_close_rows.get(symbol)
+                for symbol in requested
+                if in_memory_by_symbol.get(symbol) or previous_close_rows.get(symbol)
+            ]
 
         with self.lock:
             for symbol, row in rows.items():
@@ -931,7 +1008,49 @@ class MarketEngine:
         if cached.get("snapshot_source") and self.last_snapshot_source == "empty":
             self.last_snapshot_source = cached["snapshot_source"]
 
-        return [dict(rows[symbol]) for symbol in requested if symbol in rows]
+        previous_close_rows = {
+            row["symbol"]: row
+            for row in self._rows_for_symbols_from_previous_close_cache(requested)
+            if isinstance(row, dict) and row.get("symbol")
+        }
+        merged = []
+        for symbol in requested:
+            if symbol in in_memory_by_symbol:
+                merged.append(in_memory_by_symbol[symbol])
+            elif symbol in rows:
+                merged.append(dict(rows[symbol]))
+            elif symbol in previous_close_rows:
+                merged.append(previous_close_rows[symbol])
+        return merged
+
+    def _rows_for_symbols_from_previous_close_cache(self, symbols):
+        requested = [symbol for symbol in symbols if symbol]
+        if not requested:
+            return []
+        self._restore_previous_day_badges_cache()
+        rows = []
+        for symbol in requested:
+            symbol = str(symbol).upper()
+            close = self._cached_previous_close("symbols", symbol)
+            change = self._get_previous_day_change(symbol, allow_fetch=False)
+            if close in (None, 0) or change is None:
+                continue
+            rows.append(
+                {
+                    "symbol": symbol,
+                    "name": self.symbol_to_name.get(symbol, symbol),
+                    "price": round(float(close), 2),
+                    "change": round(float(change), 2),
+                    "volume": None,
+                    "is_fno": symbol in self.fno_symbols or self.symbol_to_name.get(symbol, "").upper() in self.fno_symbols,
+                    "sectors": self.symbol_to_sectors.get(symbol, []),
+                    "previous_day_change": round(float(change), 2),
+                    "previous_day_positive": float(change) > 0,
+                }
+            )
+        if rows and not self.last_update:
+            self.last_update = self._utc_now()
+        return rows
 
     def _stock_row_count(self, snapshot):
         return len(snapshot.get("gainers") or []) + len(snapshot.get("losers") or [])
@@ -1056,6 +1175,7 @@ class MarketEngine:
         if current_close in (None, 0) or prior_close in (None, 0):
             return None
         change = round(((current_close - prior_close) / prior_close) * 100, 2)
+        self._remember_previous_close("symbols", symbol, current_close, cache_marker=cache_marker)
         self.previous_day_badges_cache[symbol] = {
             "cache_marker": cache_marker,
             "change": change,
@@ -1511,10 +1631,14 @@ class MarketEngine:
             return []
 
     def _refresh_sector_memberships(self, force=False):
+        restored_from_cache = False
         if not self.sector_members:
-            self._restore_cached_sector_memberships()
+            restored_from_cache = self._restore_cached_sector_memberships()
 
         today = datetime.now(IST).date().isoformat()
+        if restored_from_cache and not force and self.sector_members:
+            self.last_membership_refresh_date = today
+            return
         if not force and self.last_membership_refresh_date == today and self.sector_members:
             return
 
@@ -1593,10 +1717,12 @@ class MarketEngine:
         self.sector_tokens = index_tokens
         self.sector_token_to_name = {token: name for name, token in index_tokens.items()}
         self.equity_tokens = equity_tokens
-        self._refresh_sector_memberships(force=True)
+        self._refresh_sector_memberships(force=False)
+        self._restore_previous_close_cache()
 
         prev_close, latest = self._fetch_sector_quote(kite, list(index_tokens.keys()))
-        self.sector_prev_close = prev_close
+        if prev_close:
+            self.sector_prev_close.update(prev_close)
         if latest:
             self.sector_latest.update(latest)
 
@@ -1621,6 +1747,7 @@ class MarketEngine:
                     return {}, {}
                 prev = {}
                 latest = {}
+                prev_cache_updated = False
                 segment_data = data.get("IDX_I") or {}
                 for security_id, payload in segment_data.items():
                     token = int(security_id)
@@ -1632,20 +1759,26 @@ class MarketEngine:
                     last_price = payload.get("last_price")
                     if close not in (None, 0):
                         prev[name] = close
+                        prev_cache_updated = self._remember_previous_close("sectors", name, close) or prev_cache_updated
                     if last_price not in (None, 0):
                         base_close = close if close not in (None, 0) else self.sector_prev_close.get(name)
+                        if base_close in (None, 0):
+                            base_close = self._cached_previous_close("sectors", name)
                         change = 0.0 if base_close in (None, 0) else (last_price - base_close) / base_close * 100
                         latest[name] = {
                             "sector": name,
                             "price": round(last_price, 2),
                             "change": round(change, 2),
                         }
+                if prev_cache_updated:
+                    self._save_previous_close_cache()
                 return prev, latest
 
             symbols = [f"NSE:{s}" for s in sector_symbols]
             data = kite.quote(symbols)
             prev = {}
             latest = {}
+            prev_cache_updated = False
             for sym, payload in data.items():
                 ohlc = payload.get("ohlc") or {}
                 close = ohlc.get("close")
@@ -1653,8 +1786,11 @@ class MarketEngine:
                 name = sym.split(":", 1)[-1]
                 if close not in (None, 0):
                     prev[name] = close
+                    prev_cache_updated = self._remember_previous_close("sectors", name, close) or prev_cache_updated
                 if last_price not in (None, 0):
                     base_close = close if close not in (None, 0) else self.sector_prev_close.get(name)
+                    if base_close in (None, 0):
+                        base_close = self._cached_previous_close("sectors", name)
                     if base_close in (None, 0):
                         change = 0.0
                     else:
@@ -1664,6 +1800,8 @@ class MarketEngine:
                         "price": round(last_price, 2),
                         "change": round(change, 2),
                     }
+            if prev_cache_updated:
+                self._save_previous_close_cache()
             return prev, latest
         except Exception:
             return {}, {}
@@ -1682,7 +1820,11 @@ class MarketEngine:
             self._session_end_dt(session_window[-1]),
             limit=1,
         )
-        return candles[-1].get("close") if candles else None
+        close = candles[-1].get("close") if candles else None
+        if close not in (None, 0):
+            self._remember_previous_close("symbols", symbol, close)
+            self._save_previous_close_cache()
+        return close
 
     def _fetch_recent_day_candles(self, token, from_date, to_date, limit=None):
         candles = self._throttled_historical_day_data(token, from_date, to_date)
@@ -1705,6 +1847,8 @@ class MarketEngine:
         prev_close = candles[-2].get("close")
         latest_close = candles[-1].get("close")
         latest_volume = candles[-1].get("volume")
+        if latest_close not in (None, 0):
+            self._remember_previous_close("symbols", symbol, latest_close)
         row = self._build_stock_row(symbol, latest_close, prev_close, volume=latest_volume)
         latest_dt = candles[-1].get("date")
         return row, latest_dt
@@ -1716,6 +1860,7 @@ class MarketEngine:
         latest_close = candles[-1].get("close")
         if latest_close in (None, 0) or prev_close in (None, 0):
             return None, None
+        self._remember_previous_close("sectors", sector_name, latest_close)
         change = (latest_close - prev_close) / prev_close * 100
         latest_dt = candles[-1].get("date")
         return {
@@ -1777,6 +1922,7 @@ class MarketEngine:
         quoted = self._quote_symbols(self.kite, tracked_symbols)
         updated = {}
         missing_history = []
+        prev_cache_updated = False
 
         for key, payload in quoted.items():
             symbol = key.split(":", 1)[-1]
@@ -1786,7 +1932,10 @@ class MarketEngine:
             close = ohlc.get("close")
             if close not in (None, 0):
                 self.rest_prev_close[symbol] = close
+                prev_cache_updated = self._remember_previous_close("symbols", symbol, close) or prev_cache_updated
             base_close = close if close not in (None, 0) else self.rest_prev_close.get(symbol)
+            if base_close in (None, 0):
+                base_close = self._cached_previous_close("symbols", symbol)
             row = self._build_stock_row(symbol, last_price, base_close, volume=volume)
             if row:
                 updated[symbol] = row
@@ -1798,6 +1947,7 @@ class MarketEngine:
             if close in (None, 0):
                 continue
             self.rest_prev_close[symbol] = close
+            prev_cache_updated = self._remember_previous_close("symbols", symbol, close) or prev_cache_updated
             row = self._build_stock_row(symbol, last_price, close, volume=volume)
             if row:
                 updated[symbol] = row
@@ -1809,6 +1959,8 @@ class MarketEngine:
             self.last_snapshot_source = "api"
             self._save_latest_rows_cache()
             self._save_sector_breakdowns_cache(updated, market_open)
+        if prev_cache_updated:
+            self._save_previous_close_cache()
 
         self.last_rest_refresh_ts = now_ts
         return bool(updated)
@@ -1890,6 +2042,8 @@ class MarketEngine:
             if stock_rows:
                 self._save_latest_rows_cache()
                 self._save_sector_breakdowns_cache(stock_rows, False)
+            if stock_rows or sector_rows:
+                self._save_previous_close_cache()
             snapshot = self._build_snapshot(False)
             if self._stock_row_count(snapshot):
                 snapshot["session_marker"] = completed_session.isoformat()
@@ -1990,6 +2144,10 @@ class MarketEngine:
                     symbol = self.token_to_symbol[token]
                     volume = self._extract_volume(tick, fallback=(self.latest.get(symbol) or {}).get("volume"))
                     base_close = close if close not in (None, 0) else self.rest_prev_close.get(symbol)
+                    if close not in (None, 0):
+                        self._remember_previous_close("symbols", symbol, close)
+                    if base_close in (None, 0):
+                        base_close = self._cached_previous_close("symbols", symbol)
                     row = self._build_stock_row(symbol, last_price, base_close, volume=volume)
                     if row:
                         self.latest[symbol] = row
@@ -2000,6 +2158,10 @@ class MarketEngine:
                     base_close = close
                     if base_close in (None, 0):
                         base_close = self.sector_prev_close.get(name)
+                    if close not in (None, 0):
+                        self._remember_previous_close("sectors", name, close)
+                    if base_close in (None, 0):
+                        base_close = self._cached_previous_close("sectors", name)
                     if base_close in (None, 0):
                         change = 0.0
                     else:
@@ -2082,13 +2244,15 @@ class MarketEngine:
                 message=f"Caching previous-day badge history for tracked stocks ({processed}/{total})",
             )
             cached = self.previous_day_badges_cache.get(symbol)
-            if not force and cached and cached.get("cache_marker") == cache_marker:
+            cached_close = self._cached_previous_close("symbols", symbol)
+            if not force and cached and cached.get("cache_marker") == cache_marker and cached_close not in (None, 0):
                 continue
             if self._warm_previous_day_badge_for_symbol(symbol, cache_marker) is not None:
                 updated += 1
 
         if updated:
             self._save_previous_day_badges_cache()
+            self._save_previous_close_cache()
         return {"processed": processed, "total": total, "updated": updated}
 
     def _build_rrg_series_map(self, benchmark_symbol, cache_marker):
@@ -2110,6 +2274,8 @@ class MarketEngine:
                 f"{benchmark_symbol} returned only {len(benchmark_series)} daily candles for "
                 f"{session_window[0].isoformat()} to {session_window[-1].isoformat()}."
             )
+        if benchmark_series:
+            self._remember_previous_close("sectors", benchmark_symbol, benchmark_series[-1][1], cache_marker)
         component_series = {}
         sector_names = list(self.sector_tokens.keys()) or list(self.sector_names)
 
@@ -2132,6 +2298,7 @@ class MarketEngine:
             series = self._fetch_rrg_price_series(token, from_date, to_date)
             if len(series) >= RRG_LOOKBACK_SESSIONS:
                 component_series[sector_name] = series
+                self._remember_previous_close("sectors", sector_name, series[-1][1], cache_marker)
 
         if not component_series:
             return None, {}, (
@@ -2195,6 +2362,7 @@ class MarketEngine:
         try:
             badge_summary = self._warm_previous_day_badges_cache(cache_marker, force=force)
             rrg_payload = self._warm_relative_rotation_graph_cache(cache_marker, force=force)
+            self._save_previous_close_cache()
             status = "completed" if rrg_payload.get("items") else "warning"
             self._update_history_cache_status(
                 status=status,
@@ -2466,6 +2634,7 @@ class MarketEngine:
                         self.latest[row["symbol"]] = row
                 self.last_snapshot_source = "historical_eod"
                 self._save_latest_rows_cache()
+                self._save_previous_close_cache()
             return rows
 
         requested = [symbol for symbol in symbols if symbol in self.symbol_to_token]
@@ -2475,6 +2644,7 @@ class MarketEngine:
         quoted = self._quote_symbols(self.kite, requested)
         rows = []
         missing_history = []
+        prev_cache_updated = False
         for key, payload in quoted.items():
             symbol = key.split(":", 1)[-1]
             last_price = payload.get("last_price")
@@ -2483,7 +2653,10 @@ class MarketEngine:
             close = ohlc.get("close")
             if close not in (None, 0):
                 self.rest_prev_close[symbol] = close
+                prev_cache_updated = self._remember_previous_close("symbols", symbol, close) or prev_cache_updated
             base_close = close if close not in (None, 0) else self.rest_prev_close.get(symbol)
+            if base_close in (None, 0):
+                base_close = self._cached_previous_close("symbols", symbol)
             row = self._build_stock_row(symbol, last_price, base_close, volume=volume)
             if row:
                 rows.append(row)
@@ -2495,6 +2668,7 @@ class MarketEngine:
             if close in (None, 0):
                 continue
             self.rest_prev_close[symbol] = close
+            prev_cache_updated = self._remember_previous_close("symbols", symbol, close) or prev_cache_updated
             row = self._build_stock_row(symbol, last_price, close, volume=volume)
             if row:
                 rows.append(row)
@@ -2506,6 +2680,13 @@ class MarketEngine:
                 self.last_update = self._utc_now()
             self.last_snapshot_source = "api"
             self._save_latest_rows_cache()
+        if prev_cache_updated:
+            self._save_previous_close_cache()
+        if not rows:
+            cached_rows = self._rows_for_symbols_from_cache(requested)
+            if cached_rows:
+                self.last_snapshot_source = "live_cache_rows"
+                return cached_rows
         return rows
 
     def get_sector_breakdown(self, sector_name):
