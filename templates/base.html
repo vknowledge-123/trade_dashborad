@@ -67,6 +67,12 @@
 
 /* ─── Body & Background ──────────────────────────────────── */
 html, body { margin: 0; padding: 0; }
+html {
+  min-height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
 body {
   padding-top: 0 !important;
 
@@ -75,6 +81,8 @@ body {
   color: var(--text);
   min-height: 100vh;
   overflow-x: hidden;
+  overflow-y: auto;
+  touch-action: pan-y;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -1406,6 +1414,7 @@ body {
   width: 100%;
   max-width: 100%;
   overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .nav {
@@ -1619,7 +1628,10 @@ html {
 
 @media (max-width: 760px) {
   body {
-    overscroll-behavior-y: contain;
+    min-height: 100%;
+    overflow-y: auto !important;
+    overscroll-behavior-y: auto;
+    touch-action: pan-y;
   }
 
   .page {
@@ -1627,6 +1639,7 @@ html {
     max-width: 100vw;
     padding: 6px 8px 18px !important;
     overflow-x: hidden;
+    overflow-y: visible;
   }
 
   .panel,
@@ -1946,17 +1959,25 @@ html {
   const calcRiskPerShare = document.getElementById("calc-risk-per-share");
   const calcUsedRisk = document.getElementById("calc-used-risk");
   const calcNote = document.getElementById("calc-note");
+  const syncModalScrollLock = () => {
+    const hasOpenModal = Boolean(
+      (calcModal && !calcModal.hidden) ||
+      (sectorModal && !sectorModal.hidden)
+    );
+    document.body.classList.toggle("modal-open", hasOpenModal);
+  };
+  syncModalScrollLock();
 
   const closeQuantityCalculator = () => {
     if (!calcModal) return;
     calcModal.hidden = true;
-    document.body.classList.remove("modal-open");
+    syncModalScrollLock();
   };
 
   const openQuantityCalculator = () => {
     if (!calcModal) return;
     calcModal.hidden = false;
-    document.body.classList.add("modal-open");
+    syncModalScrollLock();
     if (calcRisk) calcRisk.focus();
   };
 
@@ -2167,13 +2188,13 @@ html {
     const closeSectorModal = () => {
       if (!sectorModal) return;
       sectorModal.hidden = true;
-      document.body.classList.remove("modal-open");
+      syncModalScrollLock();
     };
 
     const openSectorModal = () => {
       if (!sectorModal) return;
       sectorModal.hidden = false;
-      document.body.classList.add("modal-open");
+      syncModalScrollLock();
     };
 
     const renderSectorBreakdown = (payload) => {
