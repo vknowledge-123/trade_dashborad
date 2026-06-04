@@ -1528,6 +1528,174 @@ body.modal-open {
     padding: 4px 8px;
   }
 }
+
+/* Mobile app ergonomics */
+html {
+  scroll-behavior: smooth;
+}
+
+.page,
+.panel,
+.table,
+.nav,
+.rrg-chart-wrap,
+.rrg-sector-filter,
+.rrg-list,
+.sector-stock-body {
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 760px) {
+  body {
+    overscroll-behavior-y: contain;
+  }
+
+  .page {
+    width: 100%;
+    max-width: 100vw;
+    padding: 6px 8px 18px !important;
+    overflow-x: hidden;
+  }
+
+  .panel,
+  .auth-card,
+  .hero-card,
+  .premium-contact-card,
+  .plan-card,
+  .topic-card,
+  .academy-video-card,
+  .academy-support-card,
+  .academy-mentor-card,
+  .svc-card {
+    max-width: 100%;
+    border-radius: 12px !important;
+  }
+
+  .dash-grid,
+  .premium-hero,
+  .premium-grid,
+  .premium-pricing,
+  .topic-grid,
+  .academy-header,
+  .academy-grid,
+  .admin-grid,
+  .course-settings-grid,
+  .academy-video-grid,
+  .rrg-grid,
+  .rrg-hero,
+  .rrg-hero-meta,
+  .rrg-side,
+  .rrg-quadrant-grid,
+  .rrg-item-stats,
+  .scanner-filter-grid,
+  .scanner-grid,
+  .svc-layout,
+  .svc-compare,
+  .svc-feature-grid,
+  .feature-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .panel-header {
+    gap: 8px;
+  }
+
+  .panel-header h3,
+  .premium-copy h1,
+  .academy-header h1,
+  .rrg-hero h1 {
+    overflow-wrap: anywhere;
+  }
+
+  .btn,
+  button.btn,
+  a.btn {
+    min-height: 38px;
+    padding: 9px 12px;
+  }
+
+  .premium-actions,
+  .premium-contact-actions,
+  .academy-support-actions,
+  .hero-actions,
+  .rrg-actions,
+  .rrg-selector-actions {
+    width: 100%;
+    gap: 8px;
+  }
+
+  .premium-actions .btn,
+  .premium-contact-actions .btn,
+  .academy-support-actions .btn,
+  .hero-actions .btn {
+    flex: 1 1 140px;
+  }
+
+  .auth-form input,
+  .auth-form textarea,
+  .auth-form select,
+  .inquiry input,
+  .inquiry textarea,
+  .inquiry select,
+  .scanner-filter-panel input,
+  .scanner-filter-panel select {
+    width: 100%;
+    max-width: 100%;
+    font-size: 16px;
+  }
+
+  .table,
+  .academy-admin-table,
+  .svc-table,
+  .scanner-table {
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+  }
+
+  .academy-admin-table .table-row,
+  .inquiry-row-grid,
+  .user-activity-row,
+  .svc-table-row {
+    min-width: 640px;
+  }
+
+  .rrg-chart-wrap {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  #rrg-chart {
+    min-width: 680px;
+  }
+
+  .rrg-sector-filter,
+  .rrg-list {
+    max-height: 42dvh;
+    overflow: auto;
+  }
+}
+
+@media (max-width: 520px) {
+  .topbar {
+    gap: 8px;
+  }
+
+  .panel {
+    padding: 10px !important;
+  }
+
+  .btn,
+  button.btn,
+  a.btn {
+    width: 100%;
+  }
+
+  .pill {
+    max-width: 100%;
+    white-space: normal;
+  }
+}
   </style>
 </head>
 <body data-public="{{ 1 if public_mode is defined and public_mode else 0 }}">

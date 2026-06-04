@@ -281,7 +281,9 @@
 .panel-sector .sector-split {
   min-height: 0;
   overflow: auto;
+  scroll-behavior: smooth;
   scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
 }
 
 #gainers-body .table-row,
@@ -651,6 +653,7 @@
     flex: 1 1 auto;
     overflow: auto;
     overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
   }
 
   .panel-header {
@@ -698,6 +701,10 @@
   }
 
   .dash-shell .table-row.table-head {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--surface) !important;
     padding: 2px 4px !important;
     font-size: 8px !important;
     letter-spacing: 0.02em !important;
@@ -769,7 +776,7 @@
 
   .sector-split {
     gap: 4px;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr;
   }
 
   .sector-grid {
@@ -788,6 +795,10 @@
 
   .sector-head {
     display: grid !important;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--surface) !important;
     font-size: 8px !important;
     letter-spacing: 0.02em !important;
     padding: 2px 4px !important;
@@ -839,6 +850,10 @@
 
   .sector-stock-head {
     display: grid;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--surface-solid);
     grid-template-columns: 0.32fr minmax(70px, 1fr) 0.62fr 0.62fr;
     padding: 3px 5px;
     font-size: 8px;
@@ -869,6 +884,7 @@
   }
 
   .sector-stock-row > span:nth-child(4),
+  .sector-stock-head > span:nth-child(4),
   .sector-stock-head > span:nth-child(6),
   .sector-stock-row > .tv-link {
     display: none !important;
