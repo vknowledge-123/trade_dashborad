@@ -598,7 +598,8 @@
 @media (max-width: 760px) {
   .dash-shell {
     padding: 4px !important;
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: visible;
   }
 
   .hero-badge {
@@ -645,11 +646,11 @@
   .dash-grid {
     display: grid;
     grid-template-columns: 1fr !important;
-    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: none;
     gap: 5px;
-    height: calc(100dvh - 104px);
-    min-height: 520px;
-    overflow: hidden;
+    height: auto;
+    min-height: 0;
+    overflow: visible;
     width: 100%;
     max-width: 100%;
   }
@@ -667,10 +668,19 @@
   .panel-gainers .table,
   .panel-losers .table,
   .panel-sector .sector-split {
-    flex: 1 1 auto;
+    flex: 0 1 auto;
     overflow: auto;
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
+  }
+
+  .panel-gainers .table,
+  .panel-losers .table {
+    max-height: 192px;
+  }
+
+  .panel-sector .sector-split {
+    max-height: 430px;
   }
 
   .panel-header {
