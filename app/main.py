@@ -79,10 +79,10 @@ templates = Jinja2Templates(directory="templates")
 redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB, password=REDIS_PASSWORD)
 
 SECTOR_INDICES = [
-    "NIFTY AUTO",
-    "NIFTY IT",
     "NIFTY METAL",
+    "NIFTY INDIA MFG",
     "NIFTY FINSEREXBNK",
+    "NIFTY INFRA",
     "NIFTY MS FIN SERV",
     "NIFTY HEALTHCARE",
     "NIFTY MIDSML HLTH",
@@ -91,15 +91,18 @@ SECTOR_INDICES = [
     "NIFTY FMCG",
     "NIFTY PVT BANK",
     "NIFTY ENERGY",
+    "NIFTY IT",
     "NIFTY CPSE",
     "NIFTY MS IT TELCM",
     "NIFTY IND DEFENCE",
+    "NIFTY AUTO",
+    "NIFTY BANK",
     "NIFTY MEDIA",
     "NIFTY IND DIGITAL",
+    "NIFTY PHARMA",
     "NIFTY IND TOURISM",
     "NIFTY CAPITAL MKT",
     "NIFTY OIL AND GAS",
-    "NIFTY INDIA MFG",
 ]
 
 

@@ -358,8 +358,48 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
 
         engine._build_dhan_universe(["NIFTY PVT BANK"])
 
-        self.assertEqual(engine.sector_tokens["NIFTY PVT BANK"], 21)
-        self.assertEqual(engine.dhan_security_to_segment[21], "IDX_I")
+        self.assertEqual(engine.sector_tokens["NIFTY PVT BANK"], 15)
+        self.assertEqual(engine.dhan_security_to_segment[15], "IDX_I")
+
+    def test_dhan_sector_security_id_fallbacks_cover_configured_indices(self):
+        expected_ids = {
+            "NIFTY AUTO": 14,
+            "NIFTY IT": 29,
+            "NIFTY METAL": 31,
+            "NIFTY INFRA": 43,
+            "NIFTY FINSEREXBNK": 495,
+            "NIFTY MS FIN SERV": 819,
+            "NIFTY HEALTHCARE": 447,
+            "NIFTY MIDSML HLTH": 471,
+            "NIFTY PSU BANK": 33,
+            "NIFTY CONSR DURBL": 466,
+            "NIFTY FMCG": 28,
+            "NIFTY PVT BANK": 15,
+            "NIFTY ENERGY": 42,
+            "NIFTY CPSE": 45,
+            "NIFTY BANK": 25,
+            "NIFTY MS IT TELCM": 821,
+            "NIFTY IND DEFENCE": 493,
+            "NIFTY MEDIA": 30,
+            "NIFTY IND DIGITAL": 473,
+            "NIFTY PHARMA": 32,
+            "NIFTY IND TOURISM": 815,
+            "NIFTY CAPITAL MKT": 803,
+            "NIFTY OIL AND GAS": 470,
+            "NIFTY INDIA MFG": 474,
+        }
+        engine = MarketEngine(redis_client=None)
+        engine.broker = "dhan"
+        engine._dhan_scrip_rows = lambda: iter([])
+        engine.kite = object()
+        engine._refresh_sector_memberships = lambda *args, **kwargs: None
+        engine._fetch_sector_quote = lambda *args, **kwargs: ({}, {})
+
+        engine._build_dhan_universe(list(expected_ids))
+
+        self.assertEqual(engine.sector_tokens, expected_ids)
+        for security_id in expected_ids.values():
+            self.assertEqual(engine.dhan_security_to_segment[security_id], "IDX_I")
 
     def test_dhan_historical_daily_payload_matches_sdk_dates_without_future_day(self):
         from app.kite_engine import DhanClient
