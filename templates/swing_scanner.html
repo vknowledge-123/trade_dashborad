@@ -6,7 +6,7 @@
     <div>
       <div class="panel-sub">Daily timeframe scanner</div>
       <h1>Swing Trading Scanner</h1>
-      <p class="muted">Dow theory, simplified Elliott wave phase, liquidity levels, retracement quality, and heuristic score.</p>
+      <p class="muted">Long-only swing scanner using Dow theory, simplified Elliott wave phase, liquidity levels, retracement quality, and heuristic score.</p>
     </div>
     <div class="status-line">
       <span class="pill">{{ scanner.tracked_count or 0 }} stocks</span>
@@ -30,14 +30,10 @@
       <span class="pill neutral" id="swing-count">{{ scanner.filtered_rows|length if scanner.filtered_rows is defined else 0 }} / {{ scanner.total_rows or scanner.rows|length or 0 }}</span>
     </div>
     <div class="swing-filters">
-      <label>
-        Direction
-        <select id="swing-side">
-          <option value="all">All</option>
-          <option value="buy">Buy / Watch Buy</option>
-          <option value="sell">Sell / Watch Sell</option>
-        </select>
-      </label>
+      <div class="swing-mode">
+        <span>Mode</span>
+        <strong>Long only</strong>
+      </div>
       <label>
         Min Score
         <input id="swing-min-score" type="number" min="0" max="100" step="1" value="45" />
@@ -66,7 +62,7 @@
             <span class="cell-symbol-main">{{ row.symbol }}</span>
             <span class="sector-stock-name">{{ row.name }}</span>
           </span>
-          <span class="pill {{ 'positive' if row.side in ['BUY', 'WATCH_BUY'] else 'negative' if row.side in ['SELL', 'WATCH_SELL'] else 'neutral' }}">{{ row.side }}</span>
+          <span class="pill {{ 'positive' if row.side in ['BUY', 'WATCH_BUY'] else 'neutral' }}">{{ row.side }}</span>
           <span class="mono">{{ row.score }}</span>
           <span class="mono">{{ row.price }}</span>
           <span>{{ row.setup }}</span>
@@ -97,17 +93,17 @@
         </div>
       </div>
       <div class="swing-notes">
-        <div><strong>Dow:</strong> higher high and higher low for buy, lower high and lower low for sell.</div>
-        <div><strong>Elliott:</strong> identifies impulse, Wave 2/4 pullback, or corrective range from daily pivots.</div>
-        <div><strong>Heuristic:</strong> waits for controlled retracement, reclaim/rejection, VWAP/MA support, liquidity break, volume expansion, and enough reward-to-risk.</div>
+        <div><strong>Dow:</strong> focuses on higher high and higher low, or early accumulation with higher low.</div>
+        <div><strong>Elliott:</strong> looks for bullish impulse, Wave 2/4 pullback, or corrective range turning upward.</div>
+        <div><strong>Heuristic:</strong> waits for controlled retracement, bullish reclaim, MA support, PDH liquidity break, volume expansion, and enough reward-to-risk.</div>
       </div>
     </div>
 
     <div class="panel">
       <div class="panel-header">
         <div>
-          <h3>Backtest Any Stock</h3>
-          <div class="panel-sub">Daily swing signal simulation</div>
+          <h3>Backtest Long Swing</h3>
+          <div class="panel-sub">Daily buy-side signal simulation</div>
         </div>
       </div>
       <div class="backtest-form">
@@ -181,6 +177,25 @@
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
   align-items: end;
+}
+.swing-mode {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(129, 201, 149, 0.18);
+  background: rgba(129, 201, 149, 0.08);
+}
+.swing-mode span {
+  color: #8ca5c8;
+  font-size: 12px;
+}
+.swing-mode strong {
+  color: var(--green);
+  font-size: 13px;
 }
 .swing-filters label,
 .backtest-form label {
@@ -292,7 +307,6 @@
   const count = document.getElementById("swing-count");
   const updatedAt = document.getElementById("swing-updated-at");
   const alertBox = document.getElementById("swing-alert");
-  const sideInput = document.getElementById("swing-side");
   const scoreInput = document.getElementById("swing-min-score");
   const applyBtn = document.getElementById("swing-apply");
   const refreshBtn = document.getElementById("swing-refresh");
@@ -306,7 +320,7 @@
 
   const tvUrl = (symbol) => `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(`NSE:${symbol}`)}`;
   const tableHead = body.querySelector(".table-head")?.outerHTML || "";
-  const sideClass = (side) => side === "BUY" || side === "WATCH_BUY" ? "positive" : side === "SELL" || side === "WATCH_SELL" ? "negative" : "neutral";
+  const sideClass = (side) => side === "BUY" || side === "WATCH_BUY" ? "positive" : "neutral";
   const rowHtml = (row) => `
     <div class="table-row swing-row" data-symbol="${row.symbol}">
       <span class="cell-symbol">
@@ -325,7 +339,7 @@
   `;
   const loadScan = async (refresh = false) => {
     const params = new URLSearchParams();
-    params.set("side", sideInput?.value || "all");
+    params.set("side", "long");
     params.set("min_score", scoreInput?.value || "0");
     if (refresh) params.set("refresh", "true");
     params.set("ts", Date.now().toString());
@@ -372,7 +386,7 @@
       backtestBody.innerHTML = backtestHead + trades.slice(-20).reverse().map((trade) => `
         <div class="table-row backtest-row">
           <span>${trade.entry_date || "-"}</span>
-          <span class="${trade.side === "BUY" ? "positive" : "negative"}">${trade.side || "-"}</span>
+          <span class="positive">${trade.side || "-"}</span>
           <span class="mono">${trade.entry_price ?? "-"}</span>
           <span class="mono">${trade.exit_price ?? "-"}</span>
           <span class="mono ${Number(trade.return_pct) > 0 ? "positive" : "negative"}">${trade.return_pct ?? "-"}%</span>
@@ -388,7 +402,7 @@
 
   if (applyBtn) applyBtn.addEventListener("click", () => loadScan(false));
   if (refreshBtn) refreshBtn.addEventListener("click", () => loadScan(true));
-  [sideInput, scoreInput].forEach((input) => {
+  [scoreInput].forEach((input) => {
     if (input) input.addEventListener("change", () => loadScan(false));
   });
   if (backtestRun) backtestRun.addEventListener("click", runBacktest);

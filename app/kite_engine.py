@@ -1772,14 +1772,10 @@ class MarketEngine:
         notes = [dow_note, wave_note]
 
         bullish_bias = dow_state in {"uptrend", "accumulation"} and sma20 and price >= sma20
-        bearish_bias = dow_state in {"downtrend", "distribution"} and sma20 and price <= sma20
         if dow_state == "building" and sma20 and sma50:
             if price > sma20 > sma50:
                 bullish_bias = True
                 notes.append("Dow pivots are still building, but moving-average trend is bullish.")
-            elif price < sma20 < sma50:
-                bearish_bias = True
-                notes.append("Dow pivots are still building, but moving-average trend is bearish.")
         if sma20 and sma50:
             if price > sma20 > sma50:
                 score += 12
@@ -1796,11 +1792,8 @@ class MarketEngine:
 
         range_20 = max(recent_high - recent_low, 0.01)
         bullish_retrace = price >= recent_low + range_20 * 0.38 and price <= recent_high - range_20 * 0.08
-        bearish_retrace = price <= recent_high - range_20 * 0.38 and price >= recent_low + range_20 * 0.08
         bullish_reclaim = price > previous["close"] and price >= prev_high - max(atr * 0.25, 0.01)
-        bearish_reclaim = price < previous["close"] and price <= prev_low + max(atr * 0.25, 0.01)
         pdh_break = price > prev_high
-        pdl_break = price < prev_low
 
         if bullish_bias and (bullish_reclaim or pdh_break):
             side = "BUY"
@@ -1813,35 +1806,16 @@ class MarketEngine:
                 score += 6
                 setup = "Bullish swing breakout"
                 notes.append("Close is breaking prior-day high liquidity.")
-        elif bearish_bias and (bearish_reclaim or pdl_break):
-            side = "SELL"
-            setup = "Dow downtrend bounce rejection"
-            score += 18
-            if bearish_retrace:
-                score += 8
-                notes.append("Bounce is controlled inside the recent swing range.")
-            if pdl_break:
-                score += 6
-                setup = "Bearish swing breakdown"
-                notes.append("Close is breaking prior-day low liquidity.")
         elif bullish_bias:
             side = "WATCH_BUY"
             setup = "Bullish structure, waiting for reclaim"
             score += 8
             notes.append("Trend is bullish but daily reclaim trigger has not completed.")
-        elif bearish_bias:
-            side = "WATCH_SELL"
-            setup = "Bearish structure, waiting for rejection"
-            score += 8
-            notes.append("Trend is bearish but daily rejection trigger has not completed.")
 
         risk = max(atr, price * 0.015)
         if side in {"BUY", "WATCH_BUY"}:
             stop = min(recent_low, prev_low) - risk * 0.15
             target = price + max(price - stop, risk) * 2.0
-        elif side in {"SELL", "WATCH_SELL"}:
-            stop = max(recent_high, prev_high) + risk * 0.15
-            target = price - max(stop - price, risk) * 2.0
         else:
             stop = None
             target = None
@@ -1857,7 +1831,7 @@ class MarketEngine:
         else:
             rr = None
 
-        rating = "Strong" if score >= 75 and side in {"BUY", "SELL"} else "Valid" if score >= 62 else "Watch" if side.startswith("WATCH") else "Neutral"
+        rating = "Strong" if score >= 75 and side == "BUY" else "Valid" if score >= 62 and side == "BUY" else "Watch" if side == "WATCH_BUY" else "Neutral"
         return {
             "symbol": symbol,
             "name": self.symbol_to_name.get(symbol, symbol),
@@ -1976,9 +1950,9 @@ class MarketEngine:
             thread.start()
             return True
 
-    def _filter_swing_rows(self, payload, side="all", min_score=0):
+    def _filter_swing_rows(self, payload, side="long", min_score=0):
         filtered = dict(payload or {})
-        side = (side or "all").upper()
+        side = "LONG"
         try:
             min_score = float(min_score or 0)
         except (TypeError, ValueError):
@@ -1988,20 +1962,17 @@ class MarketEngine:
             if (row.get("score") or 0) < min_score:
                 continue
             row_side = (row.get("side") or "").upper()
-            if side != "ALL":
-                if side == "BUY" and row_side not in {"BUY", "WATCH_BUY"}:
-                    continue
-                if side == "SELL" and row_side not in {"SELL", "WATCH_SELL"}:
-                    continue
+            if row_side not in {"BUY", "WATCH_BUY"}:
+                continue
             rows.append(row)
         filtered["filtered_rows"] = rows
         filtered["total_rows"] = len(filtered.get("rows") or [])
         if filtered.get("rows") and not rows:
             filtered["warning"] = "No swing rows match the current filter. Lower Min Score or change direction."
-        filtered["filter"] = {"side": side.lower(), "min_score": min_score}
+        filtered["filter"] = {"side": "long", "min_score": min_score}
         return filtered
 
-    def get_swing_scanner(self, side="all", min_score=0, cached_only=True):
+    def get_swing_scanner(self, side="long", min_score=0, cached_only=True):
         cached = self._cached_swing_scanner_payload()
         cache_marker = self._completed_session_cache_marker()
         if cached and cached.get("cache_marker") == cache_marker:
@@ -2017,7 +1988,7 @@ class MarketEngine:
         payload["status"] = self._swing_status_payload()
         if not payload.get("rows") and self.kite:
             payload["cache_pending"] = True
-        return self._filter_swing_rows(payload, side=side, min_score=min_score)
+        return self._filter_swing_rows(payload, side="long", min_score=min_score)
 
     def backtest_swing_symbol(self, symbol, sessions=260, holding_days=20):
         symbol = (symbol or "").strip().upper()
@@ -2051,26 +2022,17 @@ class MarketEngine:
             current = candles[index]
             if open_trade:
                 exit_reason = None
-                if open_trade["side"] == "BUY":
-                    if current["low"] <= open_trade["stop"]:
-                        exit_price = open_trade["stop"]
-                        exit_reason = "stop"
-                    elif current["high"] >= open_trade["target"]:
-                        exit_price = open_trade["target"]
-                        exit_reason = "target"
-                else:
-                    if current["high"] >= open_trade["stop"]:
-                        exit_price = open_trade["stop"]
-                        exit_reason = "stop"
-                    elif current["low"] <= open_trade["target"]:
-                        exit_price = open_trade["target"]
-                        exit_reason = "target"
+                if current["low"] <= open_trade["stop"]:
+                    exit_price = open_trade["stop"]
+                    exit_reason = "stop"
+                elif current["high"] >= open_trade["target"]:
+                    exit_price = open_trade["target"]
+                    exit_reason = "target"
                 if not exit_reason and index - open_trade["entry_index"] >= holding_days:
                     exit_price = current["close"]
                     exit_reason = "time"
                 if exit_reason:
-                    direction = 1 if open_trade["side"] == "BUY" else -1
-                    pnl_pct = ((exit_price - open_trade["entry_price"]) / open_trade["entry_price"]) * 100 * direction
+                    pnl_pct = ((exit_price - open_trade["entry_price"]) / open_trade["entry_price"]) * 100
                     trade = dict(open_trade)
                     trade.update(
                         {
@@ -2084,7 +2046,7 @@ class MarketEngine:
                     trades.append(trade)
                     open_trade = None
                 continue
-            if signal and signal.get("side") in {"BUY", "SELL"} and (signal.get("score") or 0) >= 68:
+            if signal and signal.get("side") == "BUY" and (signal.get("score") or 0) >= 68:
                 next_candle = candles[index + 1]
                 open_trade = {
                     "symbol": symbol,

@@ -636,7 +636,7 @@ def pdh_pdl_scanner_data(
 @app.get("/api/swing-scanner")
 def swing_scanner_data(
     request: Request,
-    side: str = "all",
+    side: str = "long",
     min_score: float = 0,
     refresh: bool = False,
 ):
