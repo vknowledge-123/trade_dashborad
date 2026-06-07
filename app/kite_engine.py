@@ -1649,7 +1649,11 @@ class MarketEngine:
     def _fetch_swing_candles(self, symbol, sessions=180):
         symbol = (symbol or "").strip().upper()
         token = self.symbol_to_token.get(symbol)
-        if not token or not self.kite:
+        if not self.kite:
+            self.last_error = "Broker is not authenticated yet, so daily swing history cannot be fetched."
+            return []
+        if not token:
+            self.last_error = f"{symbol} is not available in the current broker universe yet."
             return []
         completed_session = self._latest_completed_session_date()
         session_window = self._trading_session_window(completed_session, max(30, int(sessions)))
@@ -1882,6 +1886,28 @@ class MarketEngine:
     def _build_swing_scanner_payload(self, symbols=None, sessions=180):
         requested = [str(symbol).upper() for symbol in (symbols or NIFTY_50_SCANNER_STOCKS) if symbol]
         tracked = [symbol for symbol in requested if symbol in self.symbol_to_token]
+        if not self.kite:
+            return {
+                "rows": [],
+                "tracked_count": 0,
+                "missing_count": len(requested),
+                "symbols": requested,
+                "updated_at": self._utc_now(),
+                "market_open": self._is_market_open(),
+                "cache_marker": self._completed_session_cache_marker(),
+                "error": "Broker is not authenticated yet. Add Kite/Dhan credentials, then refresh the swing scanner.",
+            }
+        if not tracked:
+            return {
+                "rows": [],
+                "tracked_count": 0,
+                "missing_count": len(requested),
+                "symbols": requested,
+                "updated_at": self._utc_now(),
+                "market_open": self._is_market_open(),
+                "cache_marker": self._completed_session_cache_marker(),
+                "error": "Broker universe is still loading. Wait a minute after authentication, then refresh the swing scanner.",
+            }
         rows = []
         missing = 0
         for symbol in tracked:
@@ -1969,6 +1995,9 @@ class MarketEngine:
                     continue
             rows.append(row)
         filtered["filtered_rows"] = rows
+        filtered["total_rows"] = len(filtered.get("rows") or [])
+        if filtered.get("rows") and not rows:
+            filtered["warning"] = "No swing rows match the current filter. Lower Min Score or change direction."
         filtered["filter"] = {"side": side.lower(), "min_score": min_score}
         return filtered
 
@@ -1978,7 +2007,7 @@ class MarketEngine:
         if cached and cached.get("cache_marker") == cache_marker:
             payload = dict(cached)
         else:
-            payload = cached if cached else {"rows": [], "tracked_count": 0, "updated_at": None, "error": "Swing scanner data is warming."}
+            payload = cached if cached else self._build_swing_scanner_payload()
             if self.kite:
                 self._ensure_swing_scanner_background_refresh()
             if not cached_only and self.kite:
@@ -1992,13 +2021,27 @@ class MarketEngine:
 
     def backtest_swing_symbol(self, symbol, sessions=260, holding_days=20):
         symbol = (symbol or "").strip().upper()
+        if not self.kite:
+            return {
+                "symbol": symbol,
+                "trades": [],
+                "summary": {"total": 0, "wins": 0, "losses": 0, "win_rate": 0, "avg_return": 0},
+                "error": "Broker is not authenticated yet, so backtest history cannot be fetched.",
+            }
+        if symbol not in self.symbol_to_token:
+            return {
+                "symbol": symbol,
+                "trades": [],
+                "summary": {"total": 0, "wins": 0, "losses": 0, "win_rate": 0, "avg_return": 0},
+                "error": f"{symbol} is not loaded in the broker universe yet. Wait after authentication or check the symbol.",
+            }
         candles = self._fetch_swing_candles(symbol, sessions=max(80, min(int(sessions or 260), 420)))
         if len(candles) < 60:
             return {
                 "symbol": symbol,
                 "trades": [],
                 "summary": {"total": 0, "wins": 0, "losses": 0, "win_rate": 0, "avg_return": 0},
-                "error": "Not enough daily candles available for this stock.",
+                "error": f"Only {len(candles)} daily candles were available. Increase sessions, refresh broker token, or wait for historical cache warming.",
             }
         trades = []
         open_trade = None

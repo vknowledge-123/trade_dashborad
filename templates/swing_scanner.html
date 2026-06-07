@@ -27,7 +27,7 @@
         <h3>Live Swing Scan</h3>
         <div class="panel-sub">Nifty 50 stocks, daily candles</div>
       </div>
-      <span class="pill neutral" id="swing-count">{{ scanner.filtered_rows|length if scanner.filtered_rows is defined else 0 }}</span>
+      <span class="pill neutral" id="swing-count">{{ scanner.filtered_rows|length if scanner.filtered_rows is defined else 0 }} / {{ scanner.total_rows or scanner.rows|length or 0 }}</span>
     </div>
     <div class="swing-filters">
       <label>
@@ -40,7 +40,7 @@
       </label>
       <label>
         Min Score
-        <input id="swing-min-score" type="number" min="0" max="100" step="1" value="60" />
+        <input id="swing-min-score" type="number" min="0" max="100" step="1" value="45" />
       </label>
       <button class="btn btn-primary btn-mini" id="swing-apply" type="button">Apply</button>
       <button class="btn btn-ghost btn-mini" id="swing-refresh" type="button">Refresh Cache</button>
@@ -79,6 +79,12 @@
           <a class="tv-link" href="https://www.tradingview.com/chart/?symbol=NSE%3A{{ row.symbol | urlencode }}" target="_blank" rel="noopener noreferrer">TradingView</a>
         </div>
       {% endfor %}
+      {% if not scanner.filtered_rows %}
+        <div class="table-row swing-row swing-empty-row">
+          <span>No swing candidates match the current filter yet.</span>
+          <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+        </div>
+      {% endif %}
     </div>
   </div>
 
@@ -196,6 +202,12 @@
 }
 .swing-row {
   grid-template-columns: 1.05fr 0.7fr 0.5fr 0.65fr 1.2fr 1fr 0.65fr 0.65fr auto;
+}
+.swing-empty-row {
+  color: #9fb2d0;
+}
+.swing-empty-row > span:first-child {
+  grid-column: 1 / -1;
 }
 .swing-grid {
   display: grid;
@@ -322,12 +334,13 @@
       if (!response.ok) return;
       const data = await response.json();
       const rows = data.filtered_rows || [];
-      body.innerHTML = tableHead + rows.map(rowHtml).join("");
-      if (count) count.textContent = rows.length;
+      body.innerHTML = tableHead + (rows.length ? rows.map(rowHtml).join("") : '<div class="table-row swing-row swing-empty-row"><span>No swing candidates match the current filter yet.</span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>');
+      if (count) count.textContent = `${rows.length} / ${data.total_rows ?? (data.rows || []).length ?? 0}`;
       if (updatedAt) updatedAt.textContent = data.updated_at || "-";
       if (alertBox) {
-        alertBox.hidden = !data.error;
-        alertBox.textContent = data.error || "";
+        const message = data.error || data.warning || data.status?.message || "";
+        alertBox.hidden = !message;
+        alertBox.textContent = message;
       }
     } catch (error) {}
   };
@@ -366,7 +379,7 @@
         </div>
       `).join("");
       if (!trades.length) {
-        backtestBody.innerHTML += `<div class="table-row backtest-row"><span>${data.error || "No completed trades found."}</span><span></span><span></span><span></span><span></span></div>`;
+        backtestBody.innerHTML += `<div class="table-row backtest-row"><span>${data.error || "No completed trades found for this rule set."}</span><span></span><span></span><span></span><span></span></div>`;
       }
     } catch (error) {
       backtestBody.innerHTML = backtestHead + '<div class="table-row backtest-row"><span>Backtest failed.</span><span></span><span></span><span></span><span></span></div>';
