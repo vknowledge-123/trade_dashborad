@@ -27,6 +27,7 @@ PREVIOUS_DAY_BADGES_CACHE_KEY = "previous_day_badges"
 PREVIOUS_DAY_LEVELS_CACHE_KEY = "previous_day_levels"
 PDH_PDL_SCANNER_CACHE_KEY = "pdh_pdl_scanner"
 RRG_CACHE_KEY = "relative_rotation_graph"
+SWING_SCANNER_CACHE_KEY = "swing_scanner"
 IST = ZoneInfo("Asia/Kolkata")
 LIVE_FEED_STALE_AFTER_SECONDS = 15
 LIVE_FEED_RECONNECT_COOLDOWN_SECONDS = 20
@@ -317,6 +318,15 @@ class MarketEngine:
             "started_at": None,
             "finished_at": None,
             "message": "Scanner cache has not been warmed yet.",
+            "error": None,
+        }
+        self.swing_scanner_lock = threading.Lock()
+        self.swing_scanner_thread = None
+        self.swing_scanner_status = {
+            "status": "idle",
+            "started_at": None,
+            "finished_at": None,
+            "message": "Swing scanner cache has not been warmed yet.",
             "error": None,
         }
         self.http = requests.Session()
@@ -1598,6 +1608,469 @@ class MarketEngine:
                 payload["error"] = payload.get("error") or "Scanner data is warming in the background."
         payload["status"] = self._scanner_status_payload()
         return self._apply_scanner_filters(payload, level=level, side=side, min_pct=min_pct, max_pct=max_pct)
+
+    def _save_swing_scanner_cache(self, payload):
+        if payload:
+            save_market_cache(SWING_SCANNER_CACHE_KEY, payload)
+
+    def _cached_swing_scanner_payload(self):
+        return load_market_cache(SWING_SCANNER_CACHE_KEY)
+
+    def _swing_status_payload(self):
+        status = dict(self.swing_scanner_status)
+        status["is_running"] = bool(self.swing_scanner_thread and self.swing_scanner_thread.is_alive())
+        return status
+
+    def _clean_daily_candles(self, candles):
+        cleaned = []
+        for candle in candles or []:
+            try:
+                close = float(candle.get("close"))
+                high = float(candle.get("high"))
+                low = float(candle.get("low"))
+                open_price = float(candle.get("open"))
+            except (TypeError, ValueError):
+                continue
+            if close <= 0 or high <= 0 or low <= 0:
+                continue
+            cleaned.append(
+                {
+                    "date": self._format_candle_date(candle),
+                    "open": open_price,
+                    "high": high,
+                    "low": low,
+                    "close": close,
+                    "volume": float(candle.get("volume") or 0),
+                }
+            )
+        cleaned.sort(key=lambda item: item.get("date") or "")
+        return cleaned
+
+    def _fetch_swing_candles(self, symbol, sessions=180):
+        symbol = (symbol or "").strip().upper()
+        token = self.symbol_to_token.get(symbol)
+        if not token or not self.kite:
+            return []
+        completed_session = self._latest_completed_session_date()
+        session_window = self._trading_session_window(completed_session, max(30, int(sessions)))
+        if not session_window:
+            return []
+        candles = self._fetch_recent_day_candles(
+            token,
+            self._session_start_dt(session_window[0]),
+            self._session_end_dt(session_window[-1]),
+            limit=None,
+        )
+        return self._clean_daily_candles(candles)
+
+    def _sma(self, values, period):
+        if len(values) < period:
+            return None
+        return sum(values[-period:]) / period
+
+    def _atr_from_candles(self, candles, period=14):
+        if len(candles) < 2:
+            return 0.0
+        ranges = []
+        for previous, current in zip(candles[-period - 1:], candles[-period:]):
+            high = current["high"]
+            low = current["low"]
+            prev_close = previous["close"]
+            ranges.append(max(high - low, abs(high - prev_close), abs(low - prev_close)))
+        return sum(ranges) / len(ranges) if ranges else 0.0
+
+    def _pivot_points(self, candles, left=2, right=2):
+        pivots = []
+        total = len(candles)
+        for index in range(left, total - right):
+            window = candles[index - left:index + right + 1]
+            high = candles[index]["high"]
+            low = candles[index]["low"]
+            if high == max(item["high"] for item in window):
+                pivots.append({"type": "H", "index": index, "price": high, "date": candles[index]["date"]})
+            if low == min(item["low"] for item in window):
+                pivots.append({"type": "L", "index": index, "price": low, "date": candles[index]["date"]})
+        pivots.sort(key=lambda item: item["index"])
+        compact = []
+        for pivot in pivots:
+            if not compact or compact[-1]["type"] != pivot["type"]:
+                compact.append(pivot)
+                continue
+            previous = compact[-1]
+            if pivot["type"] == "H" and pivot["price"] >= previous["price"]:
+                compact[-1] = pivot
+            elif pivot["type"] == "L" and pivot["price"] <= previous["price"]:
+                compact[-1] = pivot
+        return compact
+
+    def _dow_structure(self, pivots):
+        highs = [pivot for pivot in pivots if pivot["type"] == "H"]
+        lows = [pivot for pivot in pivots if pivot["type"] == "L"]
+        if len(highs) < 2 or len(lows) < 2:
+            return "building", "Need more pivots"
+        higher_high = highs[-1]["price"] > highs[-2]["price"]
+        higher_low = lows[-1]["price"] > lows[-2]["price"]
+        lower_high = highs[-1]["price"] < highs[-2]["price"]
+        lower_low = lows[-1]["price"] < lows[-2]["price"]
+        if higher_high and higher_low:
+            return "uptrend", "Higher high and higher low"
+        if lower_high and lower_low:
+            return "downtrend", "Lower high and lower low"
+        if higher_low and not higher_high:
+            return "accumulation", "Higher low but breakout pending"
+        if lower_high and not lower_low:
+            return "distribution", "Lower high but breakdown pending"
+        return "range", "Mixed swing pivots"
+
+    def _elliott_phase(self, pivots, trend):
+        recent = pivots[-6:]
+        if len(recent) < 4:
+            return "Wave count building", "Insufficient pivots"
+        pattern = "".join(pivot["type"] for pivot in recent[-5:])
+        if trend == "uptrend":
+            if pattern.endswith("HLH") or pattern.endswith("LHLH"):
+                return "Wave 3 impulse / Wave 4 watch", "Upside impulse is active; wait for controlled pullback or breakout continuation."
+            if recent[-1]["type"] == "L":
+                return "Wave 2/4 pullback", "Daily pullback is forming after bullish impulse."
+            return "Bullish wave expansion", "Higher-degree bullish leg remains intact."
+        if trend == "downtrend":
+            if pattern.endswith("LHL") or pattern.endswith("HLHL"):
+                return "Wave 3 decline / Wave 4 watch", "Downside impulse is active; wait for controlled bounce or breakdown continuation."
+            if recent[-1]["type"] == "H":
+                return "Wave 2/4 bounce", "Daily bounce is forming after bearish impulse."
+            return "Bearish wave expansion", "Higher-degree bearish leg remains intact."
+        return "Corrective / range wave", "Wave structure is corrective until Dow pivots resolve."
+
+    def _swing_signal_for_candles(self, symbol, candles):
+        candles = self._clean_daily_candles(candles)
+        if len(candles) < 35:
+            return None
+        closes = [item["close"] for item in candles]
+        volumes = [item["volume"] for item in candles]
+        current = candles[-1]
+        previous = candles[-2]
+        atr = self._atr_from_candles(candles, 14)
+        sma20 = self._sma(closes, 20)
+        sma50 = self._sma(closes, 50) or self._sma(closes, min(30, len(closes)))
+        pivots = self._pivot_points(candles)
+        dow_state, dow_note = self._dow_structure(pivots)
+        wave, wave_note = self._elliott_phase(pivots, dow_state)
+        recent_high = max(item["high"] for item in candles[-20:])
+        recent_low = min(item["low"] for item in candles[-20:])
+        prev_high = previous["high"]
+        prev_low = previous["low"]
+        avg_volume = self._sma(volumes, min(20, len(volumes))) or 0
+        volume_ratio = (current["volume"] / avg_volume) if avg_volume else 0
+        price = current["close"]
+        score = 45.0
+        side = "WAIT"
+        setup = "No clean swing setup"
+        notes = [dow_note, wave_note]
+
+        bullish_bias = dow_state in {"uptrend", "accumulation"} and sma20 and price >= sma20
+        bearish_bias = dow_state in {"downtrend", "distribution"} and sma20 and price <= sma20
+        if dow_state == "building" and sma20 and sma50:
+            if price > sma20 > sma50:
+                bullish_bias = True
+                notes.append("Dow pivots are still building, but moving-average trend is bullish.")
+            elif price < sma20 < sma50:
+                bearish_bias = True
+                notes.append("Dow pivots are still building, but moving-average trend is bearish.")
+        if sma20 and sma50:
+            if price > sma20 > sma50:
+                score += 12
+                notes.append("Price is above 20-DMA and 50-DMA.")
+            elif price < sma20 < sma50:
+                score += 12
+                notes.append("Price is below 20-DMA and 50-DMA.")
+            else:
+                score -= 4
+                notes.append("Moving averages are mixed.")
+        if volume_ratio >= 1.15:
+            score += 6
+            notes.append("Volume is expanding versus 20-day average.")
+
+        range_20 = max(recent_high - recent_low, 0.01)
+        bullish_retrace = price >= recent_low + range_20 * 0.38 and price <= recent_high - range_20 * 0.08
+        bearish_retrace = price <= recent_high - range_20 * 0.38 and price >= recent_low + range_20 * 0.08
+        bullish_reclaim = price > previous["close"] and price >= prev_high - max(atr * 0.25, 0.01)
+        bearish_reclaim = price < previous["close"] and price <= prev_low + max(atr * 0.25, 0.01)
+        pdh_break = price > prev_high
+        pdl_break = price < prev_low
+
+        if bullish_bias and (bullish_reclaim or pdh_break):
+            side = "BUY"
+            setup = "Dow uptrend pullback reclaim"
+            score += 18
+            if bullish_retrace:
+                score += 8
+                notes.append("Retracement is controlled inside the recent swing range.")
+            if pdh_break:
+                score += 6
+                setup = "Bullish swing breakout"
+                notes.append("Close is breaking prior-day high liquidity.")
+        elif bearish_bias and (bearish_reclaim or pdl_break):
+            side = "SELL"
+            setup = "Dow downtrend bounce rejection"
+            score += 18
+            if bearish_retrace:
+                score += 8
+                notes.append("Bounce is controlled inside the recent swing range.")
+            if pdl_break:
+                score += 6
+                setup = "Bearish swing breakdown"
+                notes.append("Close is breaking prior-day low liquidity.")
+        elif bullish_bias:
+            side = "WATCH_BUY"
+            setup = "Bullish structure, waiting for reclaim"
+            score += 8
+            notes.append("Trend is bullish but daily reclaim trigger has not completed.")
+        elif bearish_bias:
+            side = "WATCH_SELL"
+            setup = "Bearish structure, waiting for rejection"
+            score += 8
+            notes.append("Trend is bearish but daily rejection trigger has not completed.")
+
+        risk = max(atr, price * 0.015)
+        if side in {"BUY", "WATCH_BUY"}:
+            stop = min(recent_low, prev_low) - risk * 0.15
+            target = price + max(price - stop, risk) * 2.0
+        elif side in {"SELL", "WATCH_SELL"}:
+            stop = max(recent_high, prev_high) + risk * 0.15
+            target = price - max(stop - price, risk) * 2.0
+        else:
+            stop = None
+            target = None
+            score = min(score, 55)
+
+        if stop is not None:
+            reward = abs(target - price)
+            risk_points = abs(price - stop)
+            rr = reward / risk_points if risk_points else 0
+            if rr < 1.6:
+                score -= 8
+                notes.append("Reward-to-risk is tight for a swing entry.")
+        else:
+            rr = None
+
+        rating = "Strong" if score >= 75 and side in {"BUY", "SELL"} else "Valid" if score >= 62 else "Watch" if side.startswith("WATCH") else "Neutral"
+        return {
+            "symbol": symbol,
+            "name": self.symbol_to_name.get(symbol, symbol),
+            "date": current["date"],
+            "price": round(price, 2),
+            "side": side,
+            "rating": rating,
+            "setup": setup,
+            "score": round(max(0.0, min(score, 100.0)), 1),
+            "dow_state": dow_state,
+            "dow_note": dow_note,
+            "elliott_phase": wave,
+            "wave_note": wave_note,
+            "sma20": round(sma20, 2) if sma20 else None,
+            "sma50": round(sma50, 2) if sma50 else None,
+            "atr": round(atr, 2),
+            "volume_ratio": round(volume_ratio, 2) if volume_ratio else None,
+            "stop": round(stop, 2) if stop is not None else None,
+            "target": round(target, 2) if target is not None else None,
+            "rr": round(rr, 2) if rr is not None else None,
+            "pdh": round(prev_high, 2),
+            "pdl": round(prev_low, 2),
+            "notes": notes[:5],
+        }
+
+    def _build_swing_scanner_payload(self, symbols=None, sessions=180):
+        requested = [str(symbol).upper() for symbol in (symbols or NIFTY_50_SCANNER_STOCKS) if symbol]
+        tracked = [symbol for symbol in requested if symbol in self.symbol_to_token]
+        rows = []
+        missing = 0
+        for symbol in tracked:
+            candles = self._fetch_swing_candles(symbol, sessions=sessions)
+            signal = self._swing_signal_for_candles(symbol, candles)
+            if signal:
+                rows.append(signal)
+            else:
+                missing += 1
+        rows.sort(key=lambda item: (item.get("score") or 0, item.get("volume_ratio") or 0), reverse=True)
+        return {
+            "rows": rows,
+            "tracked_count": len(tracked),
+            "missing_count": missing,
+            "symbols": tracked or requested,
+            "updated_at": self._utc_now(),
+            "market_open": self._is_market_open(),
+            "cache_marker": self._completed_session_cache_marker(),
+            "error": None if rows else (self.last_error or "Swing scanner data is warming or broker history is unavailable."),
+        }
+
+    def _run_swing_scanner_refresh_job(self):
+        with self.swing_scanner_lock:
+            self.swing_scanner_status.update(
+                {
+                    "status": "running",
+                    "started_at": self._utc_now(),
+                    "finished_at": None,
+                    "message": "Refreshing daily swing scanner...",
+                    "error": None,
+                }
+            )
+        try:
+            payload = self._build_swing_scanner_payload()
+            self._save_swing_scanner_cache(payload)
+            with self.swing_scanner_lock:
+                self.swing_scanner_status.update(
+                    {
+                        "status": "completed",
+                        "finished_at": self._utc_now(),
+                        "message": f"Swing scanner refreshed for {payload.get('tracked_count', 0)} stocks.",
+                        "error": payload.get("error"),
+                    }
+                )
+        except Exception as exc:
+            self.last_error = str(exc)
+            with self.swing_scanner_lock:
+                self.swing_scanner_status.update(
+                    {
+                        "status": "failed",
+                        "finished_at": self._utc_now(),
+                        "message": "Swing scanner refresh failed.",
+                        "error": str(exc),
+                    }
+                )
+        finally:
+            with self.swing_scanner_lock:
+                self.swing_scanner_thread = None
+
+    def _ensure_swing_scanner_background_refresh(self):
+        with self.swing_scanner_lock:
+            if self.swing_scanner_thread and self.swing_scanner_thread.is_alive():
+                return False
+            thread = threading.Thread(target=self._run_swing_scanner_refresh_job, daemon=True)
+            self.swing_scanner_thread = thread
+            thread.start()
+            return True
+
+    def _filter_swing_rows(self, payload, side="all", min_score=0):
+        filtered = dict(payload or {})
+        side = (side or "all").upper()
+        try:
+            min_score = float(min_score or 0)
+        except (TypeError, ValueError):
+            min_score = 0
+        rows = []
+        for row in filtered.get("rows") or []:
+            if (row.get("score") or 0) < min_score:
+                continue
+            row_side = (row.get("side") or "").upper()
+            if side != "ALL":
+                if side == "BUY" and row_side not in {"BUY", "WATCH_BUY"}:
+                    continue
+                if side == "SELL" and row_side not in {"SELL", "WATCH_SELL"}:
+                    continue
+            rows.append(row)
+        filtered["filtered_rows"] = rows
+        filtered["filter"] = {"side": side.lower(), "min_score": min_score}
+        return filtered
+
+    def get_swing_scanner(self, side="all", min_score=0, cached_only=True):
+        cached = self._cached_swing_scanner_payload()
+        cache_marker = self._completed_session_cache_marker()
+        if cached and cached.get("cache_marker") == cache_marker:
+            payload = dict(cached)
+        else:
+            payload = cached if cached else {"rows": [], "tracked_count": 0, "updated_at": None, "error": "Swing scanner data is warming."}
+            if self.kite:
+                self._ensure_swing_scanner_background_refresh()
+            if not cached_only and self.kite:
+                payload = self._build_swing_scanner_payload()
+                self._save_swing_scanner_cache(payload)
+        payload["market_open"] = self._is_market_open()
+        payload["status"] = self._swing_status_payload()
+        if not payload.get("rows") and self.kite:
+            payload["cache_pending"] = True
+        return self._filter_swing_rows(payload, side=side, min_score=min_score)
+
+    def backtest_swing_symbol(self, symbol, sessions=260, holding_days=20):
+        symbol = (symbol or "").strip().upper()
+        candles = self._fetch_swing_candles(symbol, sessions=max(80, min(int(sessions or 260), 420)))
+        if len(candles) < 60:
+            return {
+                "symbol": symbol,
+                "trades": [],
+                "summary": {"total": 0, "wins": 0, "losses": 0, "win_rate": 0, "avg_return": 0},
+                "error": "Not enough daily candles available for this stock.",
+            }
+        trades = []
+        open_trade = None
+        for index in range(45, len(candles) - 1):
+            window = candles[:index + 1]
+            signal = self._swing_signal_for_candles(symbol, window)
+            current = candles[index]
+            if open_trade:
+                exit_reason = None
+                if open_trade["side"] == "BUY":
+                    if current["low"] <= open_trade["stop"]:
+                        exit_price = open_trade["stop"]
+                        exit_reason = "stop"
+                    elif current["high"] >= open_trade["target"]:
+                        exit_price = open_trade["target"]
+                        exit_reason = "target"
+                else:
+                    if current["high"] >= open_trade["stop"]:
+                        exit_price = open_trade["stop"]
+                        exit_reason = "stop"
+                    elif current["low"] <= open_trade["target"]:
+                        exit_price = open_trade["target"]
+                        exit_reason = "target"
+                if not exit_reason and index - open_trade["entry_index"] >= holding_days:
+                    exit_price = current["close"]
+                    exit_reason = "time"
+                if exit_reason:
+                    direction = 1 if open_trade["side"] == "BUY" else -1
+                    pnl_pct = ((exit_price - open_trade["entry_price"]) / open_trade["entry_price"]) * 100 * direction
+                    trade = dict(open_trade)
+                    trade.update(
+                        {
+                            "exit_date": current["date"],
+                            "exit_price": round(exit_price, 2),
+                            "exit_reason": exit_reason,
+                            "return_pct": round(pnl_pct, 2),
+                        }
+                    )
+                    trade.pop("entry_index", None)
+                    trades.append(trade)
+                    open_trade = None
+                continue
+            if signal and signal.get("side") in {"BUY", "SELL"} and (signal.get("score") or 0) >= 68:
+                next_candle = candles[index + 1]
+                open_trade = {
+                    "symbol": symbol,
+                    "side": signal["side"],
+                    "setup": signal["setup"],
+                    "score": signal["score"],
+                    "entry_date": next_candle["date"],
+                    "entry_price": round(next_candle["open"], 2),
+                    "stop": signal["stop"],
+                    "target": signal["target"],
+                    "entry_index": index + 1,
+                }
+        returns = [trade["return_pct"] for trade in trades]
+        wins = len([value for value in returns if value > 0])
+        losses = len([value for value in returns if value <= 0])
+        avg_return = sum(returns) / len(returns) if returns else 0
+        return {
+            "symbol": symbol,
+            "name": self.symbol_to_name.get(symbol, symbol),
+            "trades": trades[-80:],
+            "summary": {
+                "total": len(trades),
+                "wins": wins,
+                "losses": losses,
+                "win_rate": round((wins / len(trades)) * 100, 2) if trades else 0,
+                "avg_return": round(avg_return, 2),
+            },
+            "error": None,
+        }
 
     def _run_refresh_job(self, reason, market_open):
         try:

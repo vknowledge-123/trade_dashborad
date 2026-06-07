@@ -574,6 +574,23 @@ def pdh_pdl_scanner(request: Request):
     )
 
 
+@app.get("/swing-scanner", response_class=HTMLResponse)
+def swing_scanner(request: Request):
+    user = current_user(request)
+    admin = current_admin(request)
+    return templates.TemplateResponse(
+        request,
+        "swing_scanner.html",
+        {
+            "title": "Swing Trading Scanner",
+            "user": user,
+            "admin": admin,
+            "public_mode": True if not user and not admin else False,
+            "scanner": engine.get_swing_scanner(cached_only=True),
+        },
+    )
+
+
 @app.get("/api/market-snapshot")
 def market_snapshot(request: Request):
     return JSONResponse(
@@ -608,6 +625,40 @@ def pdh_pdl_scanner_data(
 ):
     return JSONResponse(
         engine.get_pdh_pdl_scanner(level=level, side=side, min_pct=min_pct, max_pct=max_pct, cached_only=True),
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
+
+
+@app.get("/api/swing-scanner")
+def swing_scanner_data(
+    request: Request,
+    side: str = "all",
+    min_score: float = 0,
+    refresh: bool = False,
+):
+    return JSONResponse(
+        engine.get_swing_scanner(side=side, min_score=min_score, cached_only=not refresh),
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
+
+
+@app.get("/api/swing-backtest")
+def swing_backtest_data(
+    request: Request,
+    symbol: str,
+    sessions: int = 260,
+    holding_days: int = 20,
+):
+    return JSONResponse(
+        engine.backtest_swing_symbol(symbol=symbol, sessions=sessions, holding_days=holding_days),
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",
