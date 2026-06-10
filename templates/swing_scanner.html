@@ -6,7 +6,7 @@
     <div>
       <div class="panel-sub">Daily timeframe scanner</div>
       <h1>Swing Trading Scanner</h1>
-      <p class="muted">Long-only swing scanner using Dow theory, simplified Elliott wave phase, liquidity levels, retracement quality, and heuristic score.</p>
+      <p class="muted">Daily bullish scan using RSI 40-60, liquidity sweep, reclaim, support zone, resistance zone, and heuristic score.</p>
     </div>
     <div class="status-line">
       <span class="pill">{{ scanner.tracked_count or 0 }} stocks</span>
@@ -32,7 +32,7 @@
     <div class="swing-filters">
       <div class="swing-mode">
         <span>Mode</span>
-        <strong>Long only</strong>
+        <strong>Bullish scan</strong>
       </div>
       <label>
         Min Score
@@ -47,13 +47,14 @@
     <div class="table swing-table" id="swing-body">
       <div class="table-row table-head swing-row">
         <span>Symbol</span>
-        <span>Side</span>
+        <span>Scan</span>
         <span>Score</span>
         <span>Price</span>
+        <span>RSI</span>
         <span>Setup</span>
-        <span>Dow / Wave</span>
-        <span>SL</span>
-        <span>Target</span>
+        <span>Liquidity</span>
+        <span>Support Zone</span>
+        <span>Resistance Zone</span>
         <span>Chart</span>
       </div>
       {% for row in scanner.filtered_rows or [] %}
@@ -62,23 +63,24 @@
             <span class="cell-symbol-main">{{ row.symbol }}</span>
             <span class="sector-stock-name">{{ row.name }}</span>
           </span>
-          <span class="pill {{ 'positive' if row.side in ['BUY', 'WATCH_BUY'] else 'neutral' }}">{{ row.side }}</span>
+          <span class="pill {{ 'positive' if row.scan_state == 'BULLISH_SCAN' else 'neutral' }}">{{ row.scan_state }}</span>
           <span class="mono">{{ row.score }}</span>
           <span class="mono">{{ row.price }}</span>
+          <span class="mono">{{ row.rsi }}</span>
           <span>{{ row.setup }}</span>
           <span>
-            <span class="swing-stack-main">{{ row.dow_state }}</span>
-            <span class="sector-stock-name">{{ row.elliott_phase }}</span>
+            <span class="swing-stack-main">{{ row.liquidity_pattern }}</span>
+            <span class="sector-stock-name">Reclaimed {{ row.reclaimed_level or '-' }}</span>
           </span>
-          <span class="mono">{{ row.stop or '-' }}</span>
-          <span class="mono">{{ row.target or '-' }}</span>
+          <span class="mono">{{ row.support_zone or '-' }}</span>
+          <span class="mono">{{ row.resistance_zone or '-' }}</span>
           <a class="tv-link" href="https://www.tradingview.com/chart/?symbol=NSE%3A{{ row.symbol | urlencode }}" target="_blank" rel="noopener noreferrer">TradingView</a>
         </div>
       {% endfor %}
       {% if not scanner.filtered_rows %}
         <div class="table-row swing-row swing-empty-row">
           <span>No swing candidates match the current filter yet.</span>
-          <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+          <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
         </div>
       {% endif %}
     </div>
@@ -93,9 +95,9 @@
         </div>
       </div>
       <div class="swing-notes">
-        <div><strong>Dow:</strong> focuses on higher high and higher low, or early accumulation with higher low.</div>
-        <div><strong>Elliott:</strong> looks for bullish impulse, Wave 2/4 pullback, or corrective range turning upward.</div>
-        <div><strong>Heuristic:</strong> waits for controlled retracement, bullish reclaim, MA support, PDH liquidity break, volume expansion, and enough reward-to-risk.</div>
+        <div><strong>RSI:</strong> only daily RSI 40-60 stocks are considered, so the scan focuses on accumulation/retracement zones instead of overbought moves.</div>
+        <div><strong>Liquidity:</strong> looks for PDL sweep reclaim, 20-day swing-low sweep reclaim, previous close reclaim, or PDH resistance reclaim.</div>
+        <div><strong>Zones:</strong> scanner displays support and resistance zones, not entry calls or exit-price calls.</div>
       </div>
     </div>
 
@@ -103,7 +105,7 @@
       <div class="panel-header">
         <div>
           <h3>Backtest Long Swing</h3>
-          <div class="panel-sub">Daily buy-side signal simulation</div>
+          <div class="panel-sub">Daily bullish-scan simulation</div>
         </div>
       </div>
       <div class="backtest-form">
@@ -129,7 +131,7 @@
       <div class="table backtest-table" id="backtest-body">
         <div class="table-row table-head backtest-row">
           <span>Entry</span>
-          <span>Side</span>
+          <span>Scan</span>
           <span>Entry</span>
           <span>Exit</span>
           <span>Return</span>
@@ -216,7 +218,7 @@
   padding: 8px 10px;
 }
 .swing-row {
-  grid-template-columns: 1.05fr 0.7fr 0.5fr 0.65fr 1.2fr 1fr 0.65fr 0.65fr auto;
+  grid-template-columns: 1.05fr 0.85fr 0.5fr 0.65fr 0.5fr 1.15fr 1fr 0.9fr 0.9fr auto;
 }
 .swing-empty-row {
   color: #9fb2d0;
@@ -259,8 +261,8 @@
 }
 @media (max-width: 1100px) {
   .swing-row {
-    grid-template-columns: minmax(160px, 1.1fr) 0.7fr 0.55fr 0.7fr 1fr 1fr 0.65fr 0.65fr auto;
-    min-width: 980px;
+    grid-template-columns: minmax(160px, 1.1fr) 0.85fr 0.55fr 0.7fr 0.55fr 1fr 1fr 0.9fr 0.9fr auto;
+    min-width: 1120px;
   }
   .swing-table {
     overflow-x: auto;
@@ -296,8 +298,9 @@
   }
   .swing-row:not(.table-head) > span:nth-child(3)::before { content: "Score "; color: #6b7fa3; }
   .swing-row:not(.table-head) > span:nth-child(4)::before { content: "Price "; color: #6b7fa3; }
-  .swing-row:not(.table-head) > span:nth-child(7)::before { content: "SL "; color: #6b7fa3; }
-  .swing-row:not(.table-head) > span:nth-child(8)::before { content: "Target "; color: #6b7fa3; }
+  .swing-row:not(.table-head) > span:nth-child(5)::before { content: "RSI "; color: #6b7fa3; }
+  .swing-row:not(.table-head) > span:nth-child(8)::before { content: "Support "; color: #6b7fa3; }
+  .swing-row:not(.table-head) > span:nth-child(9)::before { content: "Resistance "; color: #6b7fa3; }
 }
 </style>
 
@@ -320,20 +323,21 @@
 
   const tvUrl = (symbol) => `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(`NSE:${symbol}`)}`;
   const tableHead = body.querySelector(".table-head")?.outerHTML || "";
-  const sideClass = (side) => side === "BUY" || side === "WATCH_BUY" ? "positive" : "neutral";
+  const scanClass = (state) => state === "BULLISH_SCAN" ? "positive" : "neutral";
   const rowHtml = (row) => `
     <div class="table-row swing-row" data-symbol="${row.symbol}">
       <span class="cell-symbol">
         <span class="cell-symbol-main">${row.symbol}</span>
         <span class="sector-stock-name">${row.name || ""}</span>
       </span>
-      <span class="pill ${sideClass(row.side)}">${row.side || "-"}</span>
+      <span class="pill ${scanClass(row.scan_state)}">${row.scan_state || "-"}</span>
       <span class="mono">${row.score ?? "-"}</span>
       <span class="mono">${row.price ?? "-"}</span>
+      <span class="mono">${row.rsi ?? "-"}</span>
       <span>${row.setup || "-"}</span>
-      <span><span class="swing-stack-main">${row.dow_state || "-"}</span><span class="sector-stock-name">${row.elliott_phase || ""}</span></span>
-      <span class="mono">${row.stop ?? "-"}</span>
-      <span class="mono">${row.target ?? "-"}</span>
+      <span><span class="swing-stack-main">${row.liquidity_pattern || "-"}</span><span class="sector-stock-name">Reclaimed ${row.reclaimed_level ?? "-"}</span></span>
+      <span class="mono">${row.support_zone ?? "-"}</span>
+      <span class="mono">${row.resistance_zone ?? "-"}</span>
       <a class="tv-link" href="${tvUrl(row.symbol)}" target="_blank" rel="noopener noreferrer">TradingView</a>
     </div>
   `;
@@ -348,7 +352,7 @@
       if (!response.ok) return;
       const data = await response.json();
       const rows = data.filtered_rows || [];
-      body.innerHTML = tableHead + (rows.length ? rows.map(rowHtml).join("") : '<div class="table-row swing-row swing-empty-row"><span>No swing candidates match the current filter yet.</span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>');
+      body.innerHTML = tableHead + (rows.length ? rows.map(rowHtml).join("") : '<div class="table-row swing-row swing-empty-row"><span>No bullish scan candidates match the current filter yet.</span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>');
       if (count) count.textContent = `${rows.length} / ${data.total_rows ?? (data.rows || []).length ?? 0}`;
       if (updatedAt) updatedAt.textContent = data.updated_at || "-";
       if (alertBox) {
@@ -386,7 +390,7 @@
       backtestBody.innerHTML = backtestHead + trades.slice(-20).reverse().map((trade) => `
         <div class="table-row backtest-row">
           <span>${trade.entry_date || "-"}</span>
-          <span class="positive">${trade.side || "-"}</span>
+          <span class="positive">${trade.scan_state || "-"}</span>
           <span class="mono">${trade.entry_price ?? "-"}</span>
           <span class="mono">${trade.exit_price ?? "-"}</span>
           <span class="mono ${Number(trade.return_pct) > 0 ? "positive" : "negative"}">${trade.return_pct ?? "-"}%</span>

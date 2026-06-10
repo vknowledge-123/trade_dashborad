@@ -653,6 +653,7 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         engine._completed_session_cache_marker = lambda: "2026-05-09"
         engine._cached_relative_rotation_graph = lambda: {
             "cache_marker": "2026-05-09",
+            "broker": "kite",
             "items": [{"sector": "NIFTY IT"}],
         }
 
@@ -660,7 +661,62 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
 
         self.assertEqual(status["status"], "completed")
         self.assertEqual(status["session_marker"], "2026-05-09")
+        self.assertEqual(status["broker"], "kite")
         self.assertIn("already ready", status["message"])
+
+    def test_dhan_history_cache_does_not_reuse_kite_ready_cache(self):
+        engine = MarketEngine(redis_client=None)
+        engine.broker = "dhan"
+        engine._completed_session_cache_marker = lambda: "2026-05-09"
+        engine._cached_relative_rotation_graph = lambda: {
+            "cache_marker": "2026-05-09",
+            "broker": "kite",
+            "items": [{"sector": "NIFTY IT"}],
+        }
+        started = []
+
+        class ImmediateThread:
+            def __init__(self, target, args=(), daemon=None):
+                self.target = target
+                self.args = args
+                self.daemon = daemon
+
+            def start(self):
+                started.append(True)
+
+            def is_alive(self):
+                return False
+
+        with patch("app.kite_engine.threading.Thread", ImmediateThread):
+            status = engine.start_daily_market_history_cache(force=False)
+
+        self.assertEqual(status["status"], "running")
+        self.assertEqual(status["broker"], "dhan")
+        self.assertTrue(started)
+
+    def test_dhan_throttled_history_uses_selected_broker_security_tuple(self):
+        class FakeDhan:
+            def __init__(self):
+                self.calls = []
+
+            def historical_data(self, token, from_date, to_date, interval):
+                self.calls.append((token, from_date, to_date, interval))
+                return [{"date": from_date, "close": 100}]
+
+        engine = MarketEngine(redis_client=None)
+        engine.broker = "dhan"
+        engine.kite = FakeDhan()
+        engine.dhan_security_to_segment = {123: "IDX_I"}
+        engine.dhan_security_to_instrument = {123: "INDEX"}
+
+        candles = engine._throttled_historical_day_data(
+            123,
+            datetime(2026, 5, 8),
+            datetime(2026, 5, 9),
+        )
+
+        self.assertEqual(candles[0]["close"], 100)
+        self.assertEqual(engine.kite.calls[0][0], ("IDX_I", "123", "INDEX"))
 
 
 class MarketSnapshotApiIntegrationTests(unittest.TestCase):

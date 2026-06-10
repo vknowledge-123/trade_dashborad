@@ -305,6 +305,7 @@ class MarketEngine:
             "finished_at": None,
             "processed": 0,
             "total": 0,
+            "broker": self._current_broker(),
             "message": "No market history cache job has been started yet.",
             "error": None,
         }
@@ -473,6 +474,19 @@ class MarketEngine:
 
     def _completed_session_cache_marker(self):
         return self._latest_completed_session_date().isoformat()
+
+    def _current_broker(self):
+        return self.broker if self.broker in {"kite", "dhan"} else "kite"
+
+    def _broker_label(self):
+        return "Dhan" if self._current_broker() == "dhan" else "Zerodha"
+
+    def _payload_matches_broker(self, payload):
+        if not isinstance(payload, dict):
+            return False
+        # Older cache rows did not store a broker; treat them as Zerodha/Kite rows.
+        broker = (payload.get("broker") or "kite").lower()
+        return broker == self._current_broker()
 
     def _historical_date_arg(self, value):
         if hasattr(value, "date"):
@@ -837,13 +851,21 @@ class MarketEngine:
         symbols = cached.get("symbols") or {}
         sectors = cached.get("sectors") or {}
         for symbol, payload in symbols.items():
-            if not isinstance(payload, dict) or payload.get("cache_marker") != marker:
+            if (
+                not isinstance(payload, dict)
+                or payload.get("cache_marker") != marker
+                or not self._payload_matches_broker(payload)
+            ):
                 continue
             close = payload.get("close")
             if close not in (None, 0):
                 self.rest_prev_close[str(symbol).upper()] = close
         for sector, payload in sectors.items():
-            if not isinstance(payload, dict) or payload.get("cache_marker") != marker:
+            if (
+                not isinstance(payload, dict)
+                or payload.get("cache_marker") != marker
+                or not self._payload_matches_broker(payload)
+            ):
                 continue
             close = payload.get("close")
             if close not in (None, 0):
@@ -859,6 +881,7 @@ class MarketEngine:
         self.previous_close_cache.setdefault(cache_bucket, {})
         self.previous_close_cache[cache_bucket][normalized_key] = {
             "cache_marker": marker,
+            "broker": self._current_broker(),
             "close": round(float(close), 2),
             "updated_at": self._utc_now(),
         }
@@ -876,7 +899,11 @@ class MarketEngine:
         marker = self._completed_session_cache_marker()
         cache_bucket = "sectors" if bucket == "sectors" else "symbols"
         payload = (self.previous_close_cache.get(cache_bucket) or {}).get(str(key).upper())
-        if not isinstance(payload, dict) or payload.get("cache_marker") != marker:
+        if (
+            not isinstance(payload, dict)
+            or payload.get("cache_marker") != marker
+            or not self._payload_matches_broker(payload)
+        ):
             return None
         close = payload.get("close")
         return close if close not in (None, 0) else None
@@ -929,6 +956,7 @@ class MarketEngine:
         return {
             "benchmark": benchmark_symbol,
             "cache_marker": cache_marker,
+            "broker": self._current_broker(),
             "market_open": market_open,
             "updated_at": self.last_update or self._utc_now(),
             "latest_session": None,
@@ -957,7 +985,11 @@ class MarketEngine:
             return self._history_cache_status_payload()
 
     def _cache_payload_matches_marker(self, payload, cache_marker):
-        return bool(payload and payload.get("cache_marker") == cache_marker)
+        return bool(
+            payload
+            and payload.get("cache_marker") == cache_marker
+            and self._payload_matches_broker(payload)
+        )
 
     def _throttled_historical_day_data(self, token, from_date, to_date):
         if not self.kite or not token:
@@ -1223,6 +1255,7 @@ class MarketEngine:
         self._remember_previous_close("symbols", symbol, current_close, cache_marker=cache_marker)
         self.previous_day_badges_cache[symbol] = {
             "cache_marker": cache_marker,
+            "broker": self._current_broker(),
             "change": change,
         }
         return change
@@ -1239,7 +1272,11 @@ class MarketEngine:
             updated = False
             for symbol in symbols:
                 cached = self.previous_day_badges_cache.get(symbol)
-                if cached and cached.get("cache_marker") == cache_marker:
+                if (
+                    cached
+                    and cached.get("cache_marker") == cache_marker
+                    and self._payload_matches_broker(cached)
+                ):
                     continue
                 if self._warm_previous_day_badge_for_symbol(symbol, cache_marker) is not None:
                     updated = True
@@ -1311,15 +1348,15 @@ class MarketEngine:
         self._restore_previous_day_badges_cache()
         cache_marker = self._completed_session_cache_marker()
         cached = self.previous_day_badges_cache.get(symbol)
-        if cached and cached.get("cache_marker") == cache_marker:
+        if cached and cached.get("cache_marker") == cache_marker and self._payload_matches_broker(cached):
             return cached.get("change")
 
         if not allow_fetch:
-            return cached.get("change") if cached else None
+            return cached.get("change") if cached and self._payload_matches_broker(cached) else None
 
         change = self._warm_previous_day_badge_for_symbol(symbol, cache_marker)
         if change is None:
-            return cached.get("change") if cached else None
+            return cached.get("change") if cached and self._payload_matches_broker(cached) else None
         self._save_previous_day_badges_cache()
         return change
 
@@ -1330,8 +1367,9 @@ class MarketEngine:
         self._restore_previous_day_levels_cache()
         cache_marker = self._completed_session_cache_marker()
         cached = self.previous_day_levels_cache.get(symbol)
-        if cached and cached.get("cache_marker") == cache_marker:
+        if cached and cached.get("cache_marker") == cache_marker and self._payload_matches_broker(cached):
             return cached
+        cached = cached if cached and self._payload_matches_broker(cached) else None
         token = self.symbol_to_token.get(symbol)
         if not token or not self.kite:
             return cached
@@ -1364,6 +1402,7 @@ class MarketEngine:
             return cached
         levels = {
             "cache_marker": cache_marker,
+            "broker": self._current_broker(),
             "high": round(float(high), 2),
             "low": round(float(low), 2),
             "close": round(float(close), 2) if close not in (None, 0) else None,
@@ -1683,67 +1722,21 @@ class MarketEngine:
             ranges.append(max(high - low, abs(high - prev_close), abs(low - prev_close)))
         return sum(ranges) / len(ranges) if ranges else 0.0
 
-    def _pivot_points(self, candles, left=2, right=2):
-        pivots = []
-        total = len(candles)
-        for index in range(left, total - right):
-            window = candles[index - left:index + right + 1]
-            high = candles[index]["high"]
-            low = candles[index]["low"]
-            if high == max(item["high"] for item in window):
-                pivots.append({"type": "H", "index": index, "price": high, "date": candles[index]["date"]})
-            if low == min(item["low"] for item in window):
-                pivots.append({"type": "L", "index": index, "price": low, "date": candles[index]["date"]})
-        pivots.sort(key=lambda item: item["index"])
-        compact = []
-        for pivot in pivots:
-            if not compact or compact[-1]["type"] != pivot["type"]:
-                compact.append(pivot)
-                continue
-            previous = compact[-1]
-            if pivot["type"] == "H" and pivot["price"] >= previous["price"]:
-                compact[-1] = pivot
-            elif pivot["type"] == "L" and pivot["price"] <= previous["price"]:
-                compact[-1] = pivot
-        return compact
-
-    def _dow_structure(self, pivots):
-        highs = [pivot for pivot in pivots if pivot["type"] == "H"]
-        lows = [pivot for pivot in pivots if pivot["type"] == "L"]
-        if len(highs) < 2 or len(lows) < 2:
-            return "building", "Need more pivots"
-        higher_high = highs[-1]["price"] > highs[-2]["price"]
-        higher_low = lows[-1]["price"] > lows[-2]["price"]
-        lower_high = highs[-1]["price"] < highs[-2]["price"]
-        lower_low = lows[-1]["price"] < lows[-2]["price"]
-        if higher_high and higher_low:
-            return "uptrend", "Higher high and higher low"
-        if lower_high and lower_low:
-            return "downtrend", "Lower high and lower low"
-        if higher_low and not higher_high:
-            return "accumulation", "Higher low but breakout pending"
-        if lower_high and not lower_low:
-            return "distribution", "Lower high but breakdown pending"
-        return "range", "Mixed swing pivots"
-
-    def _elliott_phase(self, pivots, trend):
-        recent = pivots[-6:]
-        if len(recent) < 4:
-            return "Wave count building", "Insufficient pivots"
-        pattern = "".join(pivot["type"] for pivot in recent[-5:])
-        if trend == "uptrend":
-            if pattern.endswith("HLH") or pattern.endswith("LHLH"):
-                return "Wave 3 impulse / Wave 4 watch", "Upside impulse is active; wait for controlled pullback or breakout continuation."
-            if recent[-1]["type"] == "L":
-                return "Wave 2/4 pullback", "Daily pullback is forming after bullish impulse."
-            return "Bullish wave expansion", "Higher-degree bullish leg remains intact."
-        if trend == "downtrend":
-            if pattern.endswith("LHL") or pattern.endswith("HLHL"):
-                return "Wave 3 decline / Wave 4 watch", "Downside impulse is active; wait for controlled bounce or breakdown continuation."
-            if recent[-1]["type"] == "H":
-                return "Wave 2/4 bounce", "Daily bounce is forming after bearish impulse."
-            return "Bearish wave expansion", "Higher-degree bearish leg remains intact."
-        return "Corrective / range wave", "Wave structure is corrective until Dow pivots resolve."
+    def _rsi_from_closes(self, closes, period=14):
+        if len(closes) <= period:
+            return None
+        gains = []
+        losses = []
+        for previous, current in zip(closes[-period - 1:-1], closes[-period:]):
+            change = current - previous
+            gains.append(max(change, 0.0))
+            losses.append(abs(min(change, 0.0)))
+        avg_gain = sum(gains) / period
+        avg_loss = sum(losses) / period
+        if avg_loss == 0:
+            return 100.0
+        rs = avg_gain / avg_loss
+        return 100.0 - (100.0 / (1.0 + rs))
 
     def _swing_signal_for_candles(self, symbol, candles):
         candles = self._clean_daily_candles(candles)
@@ -1756,102 +1749,116 @@ class MarketEngine:
         atr = self._atr_from_candles(candles, 14)
         sma20 = self._sma(closes, 20)
         sma50 = self._sma(closes, 50) or self._sma(closes, min(30, len(closes)))
-        pivots = self._pivot_points(candles)
-        dow_state, dow_note = self._dow_structure(pivots)
-        wave, wave_note = self._elliott_phase(pivots, dow_state)
-        recent_high = max(item["high"] for item in candles[-20:])
-        recent_low = min(item["low"] for item in candles[-20:])
+        rsi = self._rsi_from_closes(closes, 14)
+        if rsi is None or rsi < 40 or rsi > 60:
+            return None
+        prior_window = candles[-21:-1] if len(candles) >= 21 else candles[:-1]
+        recent_high = max(item["high"] for item in prior_window)
+        recent_low = min(item["low"] for item in prior_window)
         prev_high = previous["high"]
         prev_low = previous["low"]
+        prev_close = previous["close"]
         avg_volume = self._sma(volumes, min(20, len(volumes))) or 0
         volume_ratio = (current["volume"] / avg_volume) if avg_volume else 0
         price = current["close"]
-        score = 45.0
-        side = "WAIT"
-        setup = "No clean swing setup"
-        notes = [dow_note, wave_note]
+        score = 42.0
+        scan_state = "WATCH_RECLAIM"
+        setup = "Bullish liquidity watch"
+        notes = [f"Daily RSI is {rsi:.1f}, inside the 40-60 swing accumulation band."]
 
-        bullish_bias = dow_state in {"uptrend", "accumulation"} and sma20 and price >= sma20
-        if dow_state == "building" and sma20 and sma50:
-            if price > sma20 > sma50:
-                bullish_bias = True
-                notes.append("Dow pivots are still building, but moving-average trend is bullish.")
-        if sma20 and sma50:
-            if price > sma20 > sma50:
-                score += 12
-                notes.append("Price is above 20-DMA and 50-DMA.")
-            elif price < sma20 < sma50:
-                score += 12
-                notes.append("Price is below 20-DMA and 50-DMA.")
-            else:
-                score -= 4
-                notes.append("Moving averages are mixed.")
+        if sma20 and price >= sma20:
+            score += 8
+            notes.append("Close is holding above 20-DMA.")
+        elif sma20:
+            score -= 4
+            notes.append("Close is still below 20-DMA, so reclaim needs confirmation.")
+        if sma50 and price >= sma50:
+            score += 5
+            notes.append("Price is above 50-DMA support.")
         if volume_ratio >= 1.15:
             score += 6
             notes.append("Volume is expanding versus 20-day average.")
 
         range_20 = max(recent_high - recent_low, 0.01)
-        bullish_retrace = price >= recent_low + range_20 * 0.38 and price <= recent_high - range_20 * 0.08
-        bullish_reclaim = price > previous["close"] and price >= prev_high - max(atr * 0.25, 0.01)
-        pdh_break = price > prev_high
+        controlled_retracement = price >= recent_low + range_20 * 0.30 and price <= recent_high - range_20 * 0.05
+        pdl_sweep_reclaim = current["low"] < prev_low and price > prev_low
+        swing_low_sweep_reclaim = current["low"] <= recent_low + max(atr * 0.12, 0.01) and price > recent_low + max(atr * 0.15, 0.01)
+        previous_close_reclaim = current["low"] <= prev_close <= current["high"] and price > prev_close and price > current["open"]
+        resistance_reclaim = price > prev_high and price > current["open"]
 
-        if bullish_bias and (bullish_reclaim or pdh_break):
-            side = "BUY"
-            setup = "Dow uptrend pullback reclaim"
-            score += 18
-            if bullish_retrace:
-                score += 8
-                notes.append("Retracement is controlled inside the recent swing range.")
-            if pdh_break:
-                score += 6
-                setup = "Bullish swing breakout"
-                notes.append("Close is breaking prior-day high liquidity.")
-        elif bullish_bias:
-            side = "WATCH_BUY"
-            setup = "Bullish structure, waiting for reclaim"
+        defended_level = min(current["low"], prev_low if pdl_sweep_reclaim else recent_low)
+        reclaimed_level = None
+        liquidity_pattern = "Waiting for bullish reclaim"
+        if pdl_sweep_reclaim:
+            reclaimed_level = prev_low
+            liquidity_pattern = "PDL sweep and reclaim"
+            setup = "Bullish scan: PDL sweep reclaim"
+            scan_state = "BULLISH_SCAN"
+            score += 24
+            notes.append("Price swept prior-day low liquidity and closed back above it.")
+        elif swing_low_sweep_reclaim:
+            reclaimed_level = recent_low
+            liquidity_pattern = "20-day swing-low sweep and reclaim"
+            setup = "Bullish scan: swing-low reclaim"
+            scan_state = "BULLISH_SCAN"
+            score += 22
+            notes.append("Price swept the recent swing-low zone and reclaimed it on the daily candle.")
+        elif previous_close_reclaim:
+            reclaimed_level = prev_close
+            liquidity_pattern = "Previous close reclaim"
+            setup = "Bullish scan: previous close reclaim"
+            scan_state = "BULLISH_SCAN"
+            score += 16
+            notes.append("Previous close was revisited and reclaimed with a bullish daily close.")
+        elif resistance_reclaim:
+            reclaimed_level = prev_high
+            liquidity_pattern = "PDH resistance reclaim"
+            setup = "Bullish scan: resistance reclaim"
+            scan_state = "BULLISH_SCAN"
+            score += 14
+            notes.append("Close reclaimed prior-day high resistance.")
+        else:
+            reclaimed_level = max(prev_close, recent_low)
             score += 8
-            notes.append("Trend is bullish but daily reclaim trigger has not completed.")
+            notes.append("Liquidity zone is mapped, but bullish reclaim is not complete yet.")
 
-        risk = max(atr, price * 0.015)
-        if side in {"BUY", "WATCH_BUY"}:
-            stop = min(recent_low, prev_low) - risk * 0.15
-            target = price + max(price - stop, risk) * 2.0
-        else:
-            stop = None
-            target = None
-            score = min(score, 55)
+        if controlled_retracement:
+            score += 8
+            notes.append("Retracement is controlled inside the 20-day range.")
+        resistance_zone_low = min(prev_high, recent_high)
+        resistance_zone_high = max(prev_high, recent_high)
+        support_zone_low = min(defended_level, reclaimed_level or defended_level)
+        support_zone_high = max(defended_level, reclaimed_level or defended_level) + max(atr * 0.15, 0.01)
+        if resistance_zone_high <= price:
+            resistance_zone_high = price + max(atr, price * 0.015)
+        room_to_resistance = ((resistance_zone_low - price) / price) * 100 if price else 0
+        if scan_state == "BULLISH_SCAN" and resistance_zone_low > price and room_to_resistance < 2.0:
+            score -= 6
+            notes.append("Nearest resistance zone is close, so scan quality is capped.")
 
-        if stop is not None:
-            reward = abs(target - price)
-            risk_points = abs(price - stop)
-            rr = reward / risk_points if risk_points else 0
-            if rr < 1.6:
-                score -= 8
-                notes.append("Reward-to-risk is tight for a swing entry.")
-        else:
-            rr = None
-
-        rating = "Strong" if score >= 75 and side == "BUY" else "Valid" if score >= 62 and side == "BUY" else "Watch" if side == "WATCH_BUY" else "Neutral"
+        rating = "Strong Bullish" if score >= 75 and scan_state == "BULLISH_SCAN" else "Bullish" if score >= 62 and scan_state == "BULLISH_SCAN" else "Watch"
         return {
             "symbol": symbol,
             "name": self.symbol_to_name.get(symbol, symbol),
             "date": current["date"],
             "price": round(price, 2),
-            "side": side,
+            "scan_state": scan_state,
             "rating": rating,
             "setup": setup,
             "score": round(max(0.0, min(score, 100.0)), 1),
-            "dow_state": dow_state,
-            "dow_note": dow_note,
-            "elliott_phase": wave,
-            "wave_note": wave_note,
+            "liquidity_pattern": liquidity_pattern,
+            "reclaimed_level": round(reclaimed_level, 2) if reclaimed_level is not None else None,
             "sma20": round(sma20, 2) if sma20 else None,
             "sma50": round(sma50, 2) if sma50 else None,
+            "rsi": round(rsi, 2),
             "atr": round(atr, 2),
             "volume_ratio": round(volume_ratio, 2) if volume_ratio else None,
-            "stop": round(stop, 2) if stop is not None else None,
-            "target": round(target, 2) if target is not None else None,
-            "rr": round(rr, 2) if rr is not None else None,
+            "support_zone": f"{support_zone_low:.2f} - {support_zone_high:.2f}",
+            "resistance_zone": f"{resistance_zone_low:.2f} - {resistance_zone_high:.2f}",
+            "support_zone_low": round(support_zone_low, 2),
+            "support_zone_high": round(support_zone_high, 2),
+            "resistance_zone_low": round(resistance_zone_low, 2),
+            "resistance_zone_high": round(resistance_zone_high, 2),
             "pdh": round(prev_high, 2),
             "pdl": round(prev_low, 2),
             "notes": notes[:5],
@@ -1961,14 +1968,14 @@ class MarketEngine:
         for row in filtered.get("rows") or []:
             if (row.get("score") or 0) < min_score:
                 continue
-            row_side = (row.get("side") or "").upper()
-            if row_side not in {"BUY", "WATCH_BUY"}:
+            row_state = (row.get("scan_state") or "").upper()
+            if row_state not in {"BULLISH_SCAN", "WATCH_RECLAIM"}:
                 continue
             rows.append(row)
         filtered["filtered_rows"] = rows
         filtered["total_rows"] = len(filtered.get("rows") or [])
         if filtered.get("rows") and not rows:
-            filtered["warning"] = "No swing rows match the current filter. Lower Min Score or change direction."
+            filtered["warning"] = "No bullish scan rows match the current filter. Lower Min Score."
         filtered["filter"] = {"side": "long", "min_score": min_score}
         return filtered
 
@@ -2022,12 +2029,12 @@ class MarketEngine:
             current = candles[index]
             if open_trade:
                 exit_reason = None
-                if current["low"] <= open_trade["stop"]:
-                    exit_price = open_trade["stop"]
-                    exit_reason = "stop"
-                elif current["high"] >= open_trade["target"]:
-                    exit_price = open_trade["target"]
-                    exit_reason = "target"
+                if current["low"] <= open_trade["support_zone_low"]:
+                    exit_price = open_trade["support_zone_low"]
+                    exit_reason = "support_broken"
+                elif current["high"] >= open_trade["resistance_zone_low"]:
+                    exit_price = open_trade["resistance_zone_low"]
+                    exit_reason = "resistance_reached"
                 if not exit_reason and index - open_trade["entry_index"] >= holding_days:
                     exit_price = current["close"]
                     exit_reason = "time"
@@ -2046,17 +2053,19 @@ class MarketEngine:
                     trades.append(trade)
                     open_trade = None
                 continue
-            if signal and signal.get("side") == "BUY" and (signal.get("score") or 0) >= 68:
+            if signal and signal.get("scan_state") == "BULLISH_SCAN" and (signal.get("score") or 0) >= 68:
                 next_candle = candles[index + 1]
                 open_trade = {
                     "symbol": symbol,
-                    "side": signal["side"],
+                    "scan_state": signal["scan_state"],
                     "setup": signal["setup"],
                     "score": signal["score"],
                     "entry_date": next_candle["date"],
                     "entry_price": round(next_candle["open"], 2),
-                    "stop": signal["stop"],
-                    "target": signal["target"],
+                    "support_zone": signal["support_zone"],
+                    "resistance_zone": signal["resistance_zone"],
+                    "support_zone_low": signal["support_zone_low"],
+                    "resistance_zone_low": signal["resistance_zone_low"],
                     "entry_index": index + 1,
                 }
         returns = [trade["return_pct"] for trade in trades]
@@ -2758,7 +2767,13 @@ class MarketEngine:
             )
             cached = self.previous_day_badges_cache.get(symbol)
             cached_close = self._cached_previous_close("symbols", symbol)
-            if not force and cached and cached.get("cache_marker") == cache_marker and cached_close not in (None, 0):
+            if (
+                not force
+                and cached
+                and cached.get("cache_marker") == cache_marker
+                and self._payload_matches_broker(cached)
+                and cached_close not in (None, 0)
+            ):
                 continue
             if self._warm_previous_day_badge_for_symbol(symbol, cache_marker) is not None:
                 updated += 1
@@ -2770,7 +2785,7 @@ class MarketEngine:
 
     def _build_rrg_series_map(self, benchmark_symbol, cache_marker):
         if not self.kite:
-            return None, {}, "Kite Connect session is not available for historical index candles."
+            return None, {}, f"{self._broker_label()} session is not available for historical index candles."
         benchmark_token = self.index_tokens.get(benchmark_symbol)
         if not benchmark_token:
             return None, {}, f"Benchmark token for {benchmark_symbol} is not available."
@@ -2830,6 +2845,7 @@ class MarketEngine:
             return {
                 "benchmark": RRG_BENCHMARK_SYMBOL,
                 "cache_marker": cache_marker,
+                "broker": self._current_broker(),
                 "market_open": self._is_market_open(),
                 "updated_at": self.last_update or self._utc_now(),
                 "latest_session": cache_marker,
@@ -2843,6 +2859,7 @@ class MarketEngine:
 
         payload = self._build_rrg_payload_from_series(RRG_BENCHMARK_SYMBOL, benchmark_series, component_series)
         payload["cache_marker"] = cache_marker
+        payload["broker"] = self._current_broker()
         payload["market_open"] = self._is_market_open()
         payload["updated_at"] = self.last_update or self._utc_now()
         if not payload.get("items"):
@@ -2869,7 +2886,8 @@ class MarketEngine:
             finished_at=None,
             processed=0,
             total=total,
-            message="Preparing historical market cache...",
+            message=f"Preparing {self._broker_label()} historical market cache...",
+            broker=self._current_broker(),
             error=None,
         )
         try:
@@ -2883,7 +2901,7 @@ class MarketEngine:
                 processed=total,
                 total=total,
                 message=(
-                    f"Cached {badge_summary['updated']} badge rows and "
+                    f"Synced {self._broker_label()} history: cached {badge_summary['updated']} badge rows and "
                     f"{len(rrg_payload.get('items') or [])} RRG sectors for {cache_marker}."
                 ),
                 error=rrg_payload.get("error"),
@@ -2907,8 +2925,9 @@ class MarketEngine:
             return self._update_history_cache_status(
                 status="completed",
                 session_marker=cache_marker,
+                broker=self._current_broker(),
                 finished_at=self._utc_now(),
-                message=f"Historical market cache for {cache_marker} is already ready.",
+                message=f"{self._broker_label()} historical market cache for {cache_marker} is already ready.",
                 error=None,
             )
         with self.history_cache_lock:
@@ -2922,7 +2941,8 @@ class MarketEngine:
                     "finished_at": None,
                     "processed": 0,
                     "total": 0,
-                    "message": "Preparing historical market cache...",
+                    "message": f"Preparing {self._broker_label()} historical market cache...",
+                    "broker": self._current_broker(),
                     "error": None,
                 }
             )
@@ -2993,6 +3013,7 @@ class MarketEngine:
         return {
             "benchmark": benchmark_symbol,
             "market_open": self._is_market_open(),
+            "broker": self._current_broker(),
             "updated_at": self.last_update or self._utc_now(),
             "latest_session": latest_session,
             "normalization_window": RRG_NORMALIZATION_WINDOW,
@@ -3013,12 +3034,12 @@ class MarketEngine:
             return cached
 
         if cached_only:
-            if cached and cached.get("items"):
+            if cached and cached.get("items") and self._payload_matches_broker(cached):
                 cached["market_open"] = market_open
                 cached["cache_pending"] = True
                 cached["cache_stale"] = True
                 cached["error"] = (
-                    f"Showing cached rotation data from {cached.get('cache_marker') or 'the prior session'} "
+                    f"Showing cached {self._broker_label()} rotation data from {cached.get('cache_marker') or 'the prior session'} "
                     "while the latest session cache warms in the background."
                 )
                 self.start_daily_market_history_cache(force=False)
@@ -3028,15 +3049,15 @@ class MarketEngine:
                 benchmark_symbol,
                 cache_marker,
                 market_open,
-                message="Relative rotation cache is warming in the background. Please wait a moment.",
+                message=f"{self._broker_label()} relative rotation cache is warming in the background. Please wait a moment.",
             )
 
-        if cached and cached.get("items"):
+        if cached and cached.get("items") and self._payload_matches_broker(cached):
             cached["market_open"] = market_open
             cached["cache_pending"] = True
             cached["cache_stale"] = True
             cached["error"] = (
-                f"Showing cached rotation data from {cached.get('cache_marker') or 'the prior session'} "
+                f"Showing cached {self._broker_label()} rotation data from {cached.get('cache_marker') or 'the prior session'} "
                 "while the latest session cache warms in the background."
             )
             self.start_daily_market_history_cache(force=False)
