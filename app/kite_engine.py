@@ -281,7 +281,14 @@ class DhanClient:
     def _candles_from_dhan_arrays(self, data):
         if not isinstance(data, dict):
             return []
-        timestamps = data.get("timestamp") or []
+        timestamps = (
+            data.get("timestamp")
+            or data.get("start_Time")
+            or data.get("start_time")
+            or data.get("startTime")
+            or data.get("time")
+            or []
+        )
         opens = data.get("open") or []
         highs = data.get("high") or []
         lows = data.get("low") or []

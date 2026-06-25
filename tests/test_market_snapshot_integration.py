@@ -458,6 +458,25 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertEqual(len(candles), 1)
         self.assertEqual(candles[0]["volume"], "12345.0")
 
+    def test_dhan_historical_parser_accepts_start_time_volume_arrays(self):
+        from app.kite_engine import DhanClient
+
+        client = DhanClient("client", "token", http_session=FakeSession(FakeResponse({})))
+        candles = client._candles_from_dhan_response(
+            {
+                "open": [3750.0, 3757.85],
+                "high": [3750.0, 3757.90],
+                "low": [3746.1, 3746.10],
+                "close": [3751.25, 3751.25],
+                "volume": [166, 53629],
+                "start_Time": [1328845020, 1328845500],
+            }
+        )
+
+        self.assertEqual(len(candles), 2)
+        self.assertEqual(candles[0]["volume"], 166)
+        self.assertEqual(candles[1]["volume"], 53629)
+
     def test_dhan_quote_rate_limit_sets_cooldown(self):
         engine = MarketEngine(redis_client=None)
         engine.broker = "dhan"
