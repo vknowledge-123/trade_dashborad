@@ -2,6 +2,7 @@ import csv
 import io
 import json
 import math
+import os
 import re
 import struct
 import threading
@@ -42,6 +43,13 @@ ACCELERATION_SCANNER_MIN_GAIN_PERCENT = 0.5
 ACCELERATION_TIMEFRAMES = {1, 5, 15}
 ACCELERATION_VOLUME_SMA_SESSIONS = 5
 NSE_INTRADAY_SESSION_MINUTES = 375
+ACCELERATION_VOLUME_DEBUG = os.getenv("ACCELERATION_VOLUME_DEBUG", "0") == "1"
+ACCELERATION_VOLUME_DEBUG_LIMIT = int(os.getenv("ACCELERATION_VOLUME_DEBUG_LIMIT", "10"))
+ACCELERATION_VOLUME_DEBUG_SYMBOLS = {
+    symbol.strip().upper()
+    for symbol in os.getenv("ACCELERATION_VOLUME_DEBUG_SYMBOLS", "").split(",")
+    if symbol.strip()
+}
 HTTP_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                   "(KHTML, like Gecko) Chrome/135.0 Safari/537.36",
@@ -764,6 +772,13 @@ class MarketEngine:
             if volume not in (None, 0):
                 return volume
         return None
+
+    def _debug_acceleration_volume(self, symbol, candles, volumes, reason):
+        print("[accel-volume-debug]", reason)
+        print(symbol)
+        print(len(candles or []))
+        print(candles)
+        print(volumes)
 
     def _float_or_none(self, value):
         if value in (None, ""):
@@ -3082,6 +3097,7 @@ class MarketEngine:
         to_date = self._session_end_dt(session_window[-1])
         processed = 0
         updated = 0
+        debug_failures = 0
         for symbol in symbols:
             processed += 1
             self._update_history_cache_status(
@@ -3102,6 +3118,18 @@ class MarketEngine:
             candles = self._fetch_recent_day_candles(token, from_date, to_date, limit=ACCELERATION_VOLUME_SMA_SESSIONS)
             volumes = [volume for volume in (self._candle_volume(candle) for candle in candles) if volume not in (None, 0)]
             if len(volumes) < ACCELERATION_VOLUME_SMA_SESSIONS:
+                if (
+                    ACCELERATION_VOLUME_DEBUG
+                    or symbol in ACCELERATION_VOLUME_DEBUG_SYMBOLS
+                    or debug_failures < ACCELERATION_VOLUME_DEBUG_LIMIT
+                ):
+                    debug_failures += 1
+                    self._debug_acceleration_volume(
+                        symbol,
+                        candles,
+                        volumes,
+                        f"skipped volume SMA: need {ACCELERATION_VOLUME_SMA_SESSIONS} volumes, got {len(volumes)}",
+                    )
                 continue
             volume_sum = sum(volumes)
             volume_sma = volume_sum / NSE_INTRADAY_SESSION_MINUTES
@@ -3115,6 +3143,8 @@ class MarketEngine:
                 "updated_at": self._utc_now(),
             }
             updated += 1
+            if ACCELERATION_VOLUME_DEBUG or symbol in ACCELERATION_VOLUME_DEBUG_SYMBOLS:
+                self._debug_acceleration_volume(symbol, candles, volumes, "cached volume SMA")
 
         if updated:
             self._save_acceleration_volume_sma_cache()
@@ -3154,6 +3184,7 @@ class MarketEngine:
         prev_close_cache_dirty = False
         badges_dirty = False
         volume_dirty = False
+        debug_failures = 0
 
         for symbol in symbols:
             processed += 1
@@ -3183,6 +3214,13 @@ class MarketEngine:
             token = self.symbol_to_token.get(symbol)
             candles = self._fetch_recent_day_candles(token, from_date, to_date, limit=ACCELERATION_VOLUME_SMA_SESSIONS)
             if not candles:
+                if (
+                    ACCELERATION_VOLUME_DEBUG
+                    or symbol in ACCELERATION_VOLUME_DEBUG_SYMBOLS
+                    or debug_failures < ACCELERATION_VOLUME_DEBUG_LIMIT
+                ):
+                    debug_failures += 1
+                    self._debug_acceleration_volume(symbol, candles, [], "skipped volume SMA: no candles")
                 continue
 
             latest_close = candles[-1].get("close")
@@ -3226,6 +3264,20 @@ class MarketEngine:
                 }
                 volume_dirty = True
                 volume_updated += 1
+                if ACCELERATION_VOLUME_DEBUG or symbol in ACCELERATION_VOLUME_DEBUG_SYMBOLS:
+                    self._debug_acceleration_volume(symbol, candles, volumes, "cached volume SMA")
+            elif (
+                ACCELERATION_VOLUME_DEBUG
+                or symbol in ACCELERATION_VOLUME_DEBUG_SYMBOLS
+                or debug_failures < ACCELERATION_VOLUME_DEBUG_LIMIT
+            ):
+                debug_failures += 1
+                self._debug_acceleration_volume(
+                    symbol,
+                    candles,
+                    volumes,
+                    f"skipped volume SMA: need {ACCELERATION_VOLUME_SMA_SESSIONS} volumes, got {len(volumes)}",
+                )
 
         if prev_close_cache_dirty:
             self._save_previous_close_cache()
