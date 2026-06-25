@@ -36,7 +36,7 @@
         <div class="rrg-actions">
           <span class="pill neutral" id="rrg-trail-pill">{{ rrg_payload.trail_points if rrg_payload.trail_points else 14 }} session trail</span>
           {% if admin %}
-            <button class="btn rrg-cache" id="rrg-cache" type="button">Cache Data</button>
+            <button class="btn rrg-cache" id="rrg-cache" type="button">Premarket Sync</button>
           {% endif %}
           <button class="btn btn-ghost rrg-refresh" id="rrg-refresh" type="button">Refresh</button>
         </div>
@@ -679,7 +679,7 @@
     cacheMeta.textContent = metaParts.join(" / ");
     if (cacheButton) {
       cacheButton.disabled = Boolean(status.is_running);
-      cacheButton.textContent = status.is_running ? "Caching..." : "Cache Data";
+      cacheButton.textContent = status.is_running ? "Caching..." : "Premarket Sync";
     }
   };
 

@@ -519,8 +519,6 @@ def dashboard(request: Request):
     guest_trial = None
     if not user and not admin:
         guest_trial = guest_dashboard_status(request)
-    if engine.kite:
-        engine.start_daily_market_history_cache(force=False)
     snapshot = engine.get_snapshot()
     trial = trial_status(user) if user else None
 
@@ -551,7 +549,7 @@ def relative_rotation(request: Request):
             "user": user,
             "admin": admin,
             "public_mode": True if not user and not admin else False,
-            "rrg_payload": engine.get_relative_rotation_graph(cached_only=True),
+            "rrg_payload": engine.get_relative_rotation_graph(cached_only=True, auto_start=False),
             "history_cache_status": history_cache_status,
         },
     )

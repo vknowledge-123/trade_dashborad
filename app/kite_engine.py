@@ -227,7 +227,13 @@ class DhanClient:
         highs = data.get("high") or []
         lows = data.get("low") or []
         closes = data.get("close") or []
-        volumes = data.get("volume") or []
+        volumes = (
+            data.get("volume")
+            or data.get("volumes")
+            or data.get("Volume")
+            or data.get("VOLUME")
+            or []
+        )
         candles = []
         total = min(len(timestamps), len(opens), len(highs), len(lows), len(closes))
         for idx in range(total):
@@ -734,7 +740,10 @@ class MarketEngine:
         try:
             return int(value)
         except (TypeError, ValueError):
-            return None
+            try:
+                return int(float(value))
+            except (TypeError, ValueError):
+                return None
 
     def _extract_volume(self, payload, fallback=None):
         fallback_volume = self._coerce_volume(fallback)
@@ -746,6 +755,15 @@ class MarketEngine:
                 return fallback_volume
             return volume
         return fallback_volume
+
+    def _candle_volume(self, candle):
+        if not isinstance(candle, dict):
+            return None
+        for key in ("volume", "volumes", "Volume", "VOLUME", "volume_traded", "total_volume"):
+            volume = self._coerce_volume(candle.get(key))
+            if volume not in (None, 0):
+                return volume
+        return None
 
     def _float_or_none(self, value):
         if value in (None, ""):
@@ -3082,11 +3100,7 @@ class MarketEngine:
                 continue
             token = self.symbol_to_token.get(symbol)
             candles = self._fetch_recent_day_candles(token, from_date, to_date, limit=ACCELERATION_VOLUME_SMA_SESSIONS)
-            volumes = [
-                self._coerce_volume(candle.get("volume"))
-                for candle in candles
-                if self._coerce_volume(candle.get("volume")) not in (None, 0)
-            ]
+            volumes = [volume for volume in (self._candle_volume(candle) for candle in candles) if volume not in (None, 0)]
             if len(volumes) < ACCELERATION_VOLUME_SMA_SESSIONS:
                 continue
             volume_sum = sum(volumes)
@@ -3191,9 +3205,12 @@ class MarketEngine:
                     badge_updated += 1
 
             volumes = [
-                self._coerce_volume(candle.get("volume"))
-                for candle in candles[-ACCELERATION_VOLUME_SMA_SESSIONS:]
-                if self._coerce_volume(candle.get("volume")) not in (None, 0)
+                volume
+                for volume in (
+                    self._candle_volume(candle)
+                    for candle in candles[-ACCELERATION_VOLUME_SMA_SESSIONS:]
+                )
+                if volume not in (None, 0)
             ]
             if len(volumes) >= ACCELERATION_VOLUME_SMA_SESSIONS:
                 volume_sum = sum(volumes)
@@ -3501,7 +3518,7 @@ class MarketEngine:
             "y_domain": [round(min(all_y) - padding, 2), round(max(all_y) + padding, 2)],
         }
 
-    def get_relative_rotation_graph(self, benchmark_symbol=RRG_BENCHMARK_SYMBOL, cached_only=False):
+    def get_relative_rotation_graph(self, benchmark_symbol=RRG_BENCHMARK_SYMBOL, cached_only=False, auto_start=False):
         market_open = self._is_market_open()
         cache_marker = self._completed_session_cache_marker()
         cached = self._cached_relative_rotation_graph()
@@ -3518,16 +3535,16 @@ class MarketEngine:
                 cached["cache_stale"] = True
                 cached["error"] = (
                     f"Showing cached {self._broker_label()} rotation data from {cached.get('cache_marker') or 'the prior session'} "
-                    "while the latest session cache warms in the background."
+                    "until the shared premarket sync is refreshed."
                 )
-                self.start_daily_market_history_cache(force=False)
                 return cached
-            self.start_daily_market_history_cache(force=False)
+            if auto_start:
+                self.start_daily_market_history_cache(force=False)
             return self._empty_rrg_payload(
                 benchmark_symbol,
                 cache_marker,
                 market_open,
-                message=f"{self._broker_label()} relative rotation cache is warming in the background. Please wait a moment.",
+                message=f"{self._broker_label()} RRG cache is not ready. Admin can run Premarket Sync.",
             )
 
         if cached and cached.get("items") and self._payload_matches_broker(cached):
@@ -3536,17 +3553,16 @@ class MarketEngine:
             cached["cache_stale"] = True
             cached["error"] = (
                 f"Showing cached {self._broker_label()} rotation data from {cached.get('cache_marker') or 'the prior session'} "
-                "while the latest session cache warms in the background."
+                "until the shared premarket sync is refreshed."
             )
-            self.start_daily_market_history_cache(force=False)
             return cached
 
-        status = self.start_daily_market_history_cache(force=False)
+        status = self.start_daily_market_history_cache(force=False) if auto_start else {}
         return self._empty_rrg_payload(
             benchmark_symbol,
             cache_marker,
             market_open,
-            message=status.get("message") or "Relative rotation cache is warming in the background.",
+            message=status.get("message") or "RRG cache is not ready. Admin can run Premarket Sync.",
         )
 
     def get_snapshot(self):

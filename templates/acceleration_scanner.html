@@ -24,7 +24,7 @@
       </div>
       <div class="status-line">
         {% if admin %}
-          <button class="btn btn-ghost btn-mini" id="accel-cache" type="button">Cache Data</button>
+          <button class="btn btn-ghost btn-mini" id="accel-cache" type="button">Premarket Sync</button>
         {% endif %}
         <span class="pill positive" id="accel-count">{{ scanner.rows|length }}</span>
       </div>
@@ -262,7 +262,7 @@
         cacheButton.textContent = "Caching...";
       } else {
         cacheButton.disabled = false;
-        cacheButton.textContent = "Cache Data";
+        cacheButton.textContent = "Premarket Sync";
       }
     };
     const pollCacheStatus = async () => {
@@ -299,7 +299,7 @@
         }
       } catch (error) {}
       cacheButton.disabled = false;
-      cacheButton.textContent = "Cache Data";
+      cacheButton.textContent = "Premarket Sync";
       if (cacheStatus) cacheStatus.textContent = "Cache request could not start. Please confirm admin login.";
     });
     pollCacheStatus();
