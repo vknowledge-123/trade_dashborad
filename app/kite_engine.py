@@ -225,11 +225,62 @@ class DhanClient:
             "toDate": to_value,
         }
         data = self._post("/charts/historical", payload)
-        if isinstance(data.get("data"), dict):
-            data = data["data"]
-        return self._candles_from_dhan_arrays(data)
+        return self._candles_from_dhan_response(data)
+
+    def _candles_from_dhan_response(self, data):
+        if not isinstance(data, dict):
+            return []
+        payload = data.get("data", data)
+        if isinstance(payload, dict) and isinstance(payload.get("data"), (dict, list)):
+            payload = payload["data"]
+        if isinstance(payload, list):
+            return self._candles_from_dict_rows(payload)
+        if isinstance(payload, dict):
+            for key in ("candles", "CANDLES", "records", "rows"):
+                if isinstance(payload.get(key), list):
+                    return self._candles_from_dict_rows(payload[key])
+            return self._candles_from_dhan_arrays(payload)
+        return []
+
+    def _candles_from_dict_rows(self, rows):
+        candles = []
+        for row in rows or []:
+            if not isinstance(row, dict):
+                continue
+            timestamp = (
+                row.get("timestamp")
+                or row.get("time")
+                or row.get("date")
+                or row.get("datetime")
+            )
+            candle_dt = timestamp
+            if isinstance(timestamp, (int, float)):
+                candle_dt = datetime.fromtimestamp(int(timestamp), tz=IST)
+            candles.append(
+                {
+                    "date": candle_dt,
+                    "open": row.get("open") or row.get("Open") or row.get("OPEN"),
+                    "high": row.get("high") or row.get("High") or row.get("HIGH"),
+                    "low": row.get("low") or row.get("Low") or row.get("LOW"),
+                    "close": row.get("close") or row.get("Close") or row.get("CLOSE"),
+                    "volume": self._first_present(
+                        row,
+                        "volume",
+                        "volumes",
+                        "Volume",
+                        "VOLUME",
+                        "vol",
+                        "VOL",
+                        "volume_traded",
+                        "total_volume",
+                    ),
+                }
+            )
+        return candles
 
     def _candles_from_dhan_arrays(self, data):
+        if not isinstance(data, dict):
+            return []
         timestamps = data.get("timestamp") or []
         opens = data.get("open") or []
         highs = data.get("high") or []
@@ -240,6 +291,10 @@ class DhanClient:
             or data.get("volumes")
             or data.get("Volume")
             or data.get("VOLUME")
+            or data.get("vol")
+            or data.get("VOL")
+            or data.get("volume_traded")
+            or data.get("total_volume")
             or []
         )
         candles = []
@@ -257,6 +312,12 @@ class DhanClient:
                 }
             )
         return candles
+
+    def _first_present(self, payload, *keys):
+        for key in keys:
+            if isinstance(payload, dict) and key in payload and payload.get(key) not in (None, ""):
+                return payload.get(key)
+        return None
 
 
 class MarketEngine:
@@ -779,6 +840,26 @@ class MarketEngine:
         print(len(candles or []))
         print(candles)
         print(volumes)
+        first = (candles or [None])[0]
+        if isinstance(first, dict):
+            print("candle_keys", sorted(first.keys()))
+            print(
+                "volume_candidates",
+                {
+                    key: first.get(key)
+                    for key in (
+                        "volume",
+                        "volumes",
+                        "Volume",
+                        "VOLUME",
+                        "vol",
+                        "VOL",
+                        "volume_traded",
+                        "total_volume",
+                    )
+                    if key in first
+                },
+            )
 
     def _float_or_none(self, value):
         if value in (None, ""):

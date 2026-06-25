@@ -431,6 +431,32 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertEqual(fake_session.last_payload["exchangeSegment"], "NSE_EQ")
         self.assertEqual(fake_session.last_payload["instrument"], "EQUITY")
         self.assertEqual(candles[0]["high"], 101)
+        self.assertEqual(candles[0]["volume"], 1000)
+
+    def test_dhan_historical_parser_accepts_sdk_style_rows_with_volume(self):
+        from app.kite_engine import DhanClient
+
+        client = DhanClient("client", "token", http_session=FakeSession(FakeResponse({})))
+        candles = client._candles_from_dhan_response(
+            {
+                "status": "success",
+                "data": {
+                    "data": [
+                        {
+                            "timestamp": 1778207400,
+                            "open": 100,
+                            "high": 105,
+                            "low": 99,
+                            "close": 103,
+                            "Volume": "12345.0",
+                        }
+                    ]
+                },
+            }
+        )
+
+        self.assertEqual(len(candles), 1)
+        self.assertEqual(candles[0]["volume"], "12345.0")
 
     def test_dhan_quote_rate_limit_sets_cooldown(self):
         engine = MarketEngine(redis_client=None)
