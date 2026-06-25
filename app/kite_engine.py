@@ -857,6 +857,21 @@ class MarketEngine:
         volume_sma = payload.get("volume_sma")
         return volume_sma if volume_sma not in (None, 0) else None
 
+    def _acceleration_volume_sma_count(self):
+        if not self.acceleration_volume_sma_cache:
+            self._restore_acceleration_volume_sma_cache()
+        marker = self._completed_session_cache_marker()
+        count = 0
+        for payload in self.acceleration_volume_sma_cache.values():
+            if (
+                isinstance(payload, dict)
+                and payload.get("cache_marker") == marker
+                and self._payload_matches_broker(payload)
+                and payload.get("volume_sma") not in (None, 0)
+            ):
+                count += 1
+        return count
+
     def get_acceleration_scanner(self, timeframe=1, min_gain=ACCELERATION_SCANNER_MIN_GAIN_PERCENT):
         try:
             timeframe = int(timeframe)
@@ -874,10 +889,16 @@ class MarketEngine:
         with self.lock:
             latest_rows = {symbol: dict(row) for symbol, row in self.latest.items()}
         rows = []
+        current_bucket_count = 0
+        previous_bucket_count = 0
         with self.acceleration_lock:
             for symbol, buckets in self.acceleration_closes.items():
                 current = buckets.get((timeframe, current_bucket))
                 previous = buckets.get((timeframe, previous_bucket))
+                if current:
+                    current_bucket_count += 1
+                if previous:
+                    previous_bucket_count += 1
                 if not current or not previous:
                     continue
                 previous_close = previous.get("close")
@@ -923,17 +944,36 @@ class MarketEngine:
                     }
                 )
         rows.sort(key=lambda item: abs(item["move_percent"]), reverse=True)
+        market_open = self._is_market_open()
+        volume_sma_count = self._acceleration_volume_sma_count()
+        if rows:
+            error = None
+        elif not market_open:
+            error = (
+                "Market is closed. Cache Data prepares previous close and volume SMA baselines, "
+                "but acceleration rows need live market buckets after 9:15."
+            )
+        elif not current_bucket_count or not previous_bucket_count:
+            error = (
+                f"Waiting for live {timeframe}-minute buckets. The scanner needs both previous and current "
+                "bucket prices before rows can appear."
+            )
+        else:
+            error = "No stocks have moved beyond the selected acceleration threshold yet."
         return {
             "rows": rows,
             "timeframe": timeframe,
             "min_gain": min_gain,
             "tracked_count": len(latest_rows),
-            "volume_sma_ready": bool(self.acceleration_volume_sma_cache),
+            "volume_sma_ready": bool(volume_sma_count),
+            "volume_sma_count": volume_sma_count,
+            "current_bucket_count": current_bucket_count,
+            "previous_bucket_count": previous_bucket_count,
             "updated_at": self.last_update or self._utc_now(),
-            "market_open": self._is_market_open(),
+            "market_open": market_open,
             "current_bucket": current_bucket,
             "previous_bucket": previous_bucket,
-            "error": None if rows else "No stocks have moved beyond the selected acceleration threshold yet.",
+            "error": error,
         }
 
     def _cached_snapshot(self):
