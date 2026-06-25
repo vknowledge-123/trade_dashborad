@@ -612,6 +612,30 @@ body::after {
   text-transform: uppercase;
 }
 
+.ohlc-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.ohlc-badge.open-low {
+  color: #dffcf2;
+  border: 1px solid rgba(129, 201, 149, 0.32);
+  background: rgba(129, 201, 149, 0.13);
+}
+
+.ohlc-badge.open-high {
+  color: #ffe3e0;
+  border: 1px solid rgba(242, 139, 130, 0.32);
+  background: rgba(242, 139, 130, 0.13);
+}
+
 /* ─── Color utilities ────────────────────────────────────── */
 .positive { color: var(--positive); }
 .negative { color: var(--negative); }
@@ -1817,6 +1841,7 @@ html {
         </button>
         <a class="nav-link" href="/dashboard">Dashboard</a>
         <a class="nav-link" href="/pdh-pdl-scanner">PDH/PDL</a>
+        <a class="nav-link" href="/acceleration-scanner">Accel</a>
         <a class="nav-link" href="/swing-scanner">Swing</a>
         <a class="nav-link" href="/relative-rotation">RRG</a>
         <a class="nav-link" href="/premium">Premium</a>
@@ -1841,6 +1866,7 @@ html {
         </button>
         <a class="nav-link" href="/dashboard">Dashboard</a>
         <a class="nav-link" href="/pdh-pdl-scanner">PDH/PDL</a>
+        <a class="nav-link" href="/acceleration-scanner">Accel</a>
         <a class="nav-link" href="/swing-scanner">Swing</a>
         <a class="nav-link" href="/relative-rotation">RRG</a>
         <a class="nav-link" href="/premium">Premium</a>
@@ -1865,6 +1891,7 @@ html {
         </button>
         <a class="nav-link" href="/dashboard">Dashboard</a>
         <a class="nav-link" href="/pdh-pdl-scanner">PDH/PDL</a>
+        <a class="nav-link" href="/acceleration-scanner">Accel</a>
         <a class="nav-link" href="/swing-scanner">Swing</a>
         <a class="nav-link" href="/relative-rotation">RRG</a>
         <a class="nav-link" href="/premium">Premium</a>
@@ -2072,9 +2099,14 @@ html {
       const prevBadge = row.previous_day_positive
         ? `<span class="prev-rise-badge">Prev ${formatSignedPercent(row.previous_day_change)}</span>`
         : "";
+      const ohlcBadges = [
+        row.open_equals_low ? '<span class="ohlc-badge open-low">OPEN=LOW</span>' : "",
+        row.open_equals_high ? '<span class="ohlc-badge open-high">OPEN=HIGH</span>' : "",
+      ].filter(Boolean).join("");
       return `
         <span class="cell-symbol-main">${row.symbol} ${fno}</span>
         ${prevBadge ? `<span class="cell-symbol-badges">${prevBadge}</span>` : ""}
+        ${ohlcBadges ? `<span class="cell-symbol-badges">${ohlcBadges}</span>` : ""}
       `;
     };
 
@@ -2219,6 +2251,10 @@ html {
       stocks.forEach((stock) => {
         const sign = stock.change > 0 ? "+" : "";
         const cls = stock.change > 0 ? "positive" : stock.change < 0 ? "negative" : "neutral";
+        const ohlcBadges = [
+          stock.open_equals_low ? '<span class="ohlc-badge open-low">OPEN=LOW</span>' : "",
+          stock.open_equals_high ? '<span class="ohlc-badge open-high">OPEN=HIGH</span>' : "",
+        ].filter(Boolean).join("");
         const row = document.createElement("div");
         row.className = "sector-stock-row";
         row.innerHTML = `
@@ -2227,6 +2263,7 @@ html {
             <span>
               <span class="cell-symbol-main">${stock.symbol}${stock.is_fno ? ' <span class="fno-tag">F&O</span>' : ""}</span>
               ${stock.previous_day_positive ? `<span class="cell-symbol-badges"><span class="prev-rise-badge">Prev ${formatSignedPercent(stock.previous_day_change)}</span></span>` : ""}
+              ${ohlcBadges ? `<span class="cell-symbol-badges">${ohlcBadges}</span>` : ""}
               ${stock.name ? `<span class="sector-stock-name">${stock.name}</span>` : ""}
             </span>
           </span>

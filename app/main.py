@@ -591,6 +591,23 @@ def swing_scanner(request: Request):
     )
 
 
+@app.get("/acceleration-scanner", response_class=HTMLResponse)
+def acceleration_scanner(request: Request):
+    user = current_user(request)
+    admin = current_admin(request)
+    return templates.TemplateResponse(
+        request,
+        "acceleration_scanner.html",
+        {
+            "title": "Acceleration Scanner",
+            "user": user,
+            "admin": admin,
+            "public_mode": True if not user and not admin else False,
+            "scanner": engine.get_acceleration_scanner(timeframe=1, min_gain=0.5),
+        },
+    )
+
+
 @app.get("/api/market-snapshot")
 def market_snapshot(request: Request):
     return JSONResponse(
@@ -659,6 +676,22 @@ def swing_backtest_data(
 ):
     return JSONResponse(
         engine.backtest_swing_symbol(symbol=symbol, sessions=sessions, holding_days=holding_days),
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
+
+
+@app.get("/api/acceleration-scanner")
+def acceleration_scanner_data(
+    request: Request,
+    timeframe: int = 1,
+    min_gain: float = 0.5,
+):
+    return JSONResponse(
+        engine.get_acceleration_scanner(timeframe=timeframe, min_gain=min_gain),
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",

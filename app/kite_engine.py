@@ -28,6 +28,7 @@ PREVIOUS_DAY_LEVELS_CACHE_KEY = "previous_day_levels"
 PDH_PDL_SCANNER_CACHE_KEY = "pdh_pdl_scanner"
 RRG_CACHE_KEY = "relative_rotation_graph"
 SWING_SCANNER_CACHE_KEY = "swing_scanner"
+ACCELERATION_VOLUME_SMA_CACHE_KEY = "acceleration_volume_sma"
 IST = ZoneInfo("Asia/Kolkata")
 LIVE_FEED_STALE_AFTER_SECONDS = 15
 LIVE_FEED_RECONNECT_COOLDOWN_SECONDS = 20
@@ -37,6 +38,10 @@ RRG_LOOKBACK_SESSIONS = 15
 RRG_TRAIL_POINTS = 14
 RRG_NORMALIZATION_WINDOW = 14
 HISTORICAL_DAY_REQUEST_DELAY_SECONDS = 0.35
+ACCELERATION_SCANNER_MIN_GAIN_PERCENT = 0.5
+ACCELERATION_TIMEFRAMES = {1, 5, 15}
+ACCELERATION_VOLUME_SMA_SESSIONS = 5
+NSE_INTRADAY_SESSION_MINUTES = 375
 HTTP_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                   "(KHTML, like Gecko) Chrome/135.0 Safari/537.36",
@@ -321,6 +326,9 @@ class MarketEngine:
             "message": "Scanner cache has not been warmed yet.",
             "error": None,
         }
+        self.acceleration_lock = threading.Lock()
+        self.acceleration_closes = defaultdict(dict)
+        self.acceleration_volume_sma_cache = {}
         self.swing_scanner_lock = threading.Lock()
         self.swing_scanner_thread = None
         self.swing_scanner_status = {
@@ -697,6 +705,7 @@ class MarketEngine:
                     )
                     if row:
                         self.latest[symbol] = row
+                        self._record_acceleration_price(symbol, last_price, cumulative_volume=volume)
                 self.last_update = self._utc_now()
                 self.last_tick_ts = time.time()
                 self.connected = True
@@ -738,10 +747,45 @@ class MarketEngine:
             return volume
         return fallback_volume
 
-    def _build_stock_row(self, symbol, last_price, close, volume=None):
+    def _float_or_none(self, value):
+        if value in (None, ""):
+            return None
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+        return number if math.isfinite(number) else None
+
+    def _ohlc_badges(self, day_open=None, day_high=None, day_low=None):
+        day_open = self._float_or_none(day_open)
+        day_high = self._float_or_none(day_high)
+        day_low = self._float_or_none(day_low)
+        badges = []
+        tolerance = 0.005
+        open_equals_low = (
+            day_open is not None
+            and day_low is not None
+            and abs(day_open - day_low) <= tolerance
+        )
+        open_equals_high = (
+            day_open is not None
+            and day_high is not None
+            and abs(day_open - day_high) <= tolerance
+        )
+        if open_equals_low:
+            badges.append("OPEN=LOW")
+        if open_equals_high:
+            badges.append("OPEN=HIGH")
+        return badges, open_equals_low, open_equals_high
+
+    def _build_stock_row(self, symbol, last_price, close, volume=None, day_open=None, day_high=None, day_low=None):
         if last_price in (None, 0) or close in (None, 0):
             return None
         change = (last_price - close) / close * 100
+        day_open_value = self._float_or_none(day_open)
+        day_high_value = self._float_or_none(day_high)
+        day_low_value = self._float_or_none(day_low)
+        ohlc_badges, open_equals_low, open_equals_high = self._ohlc_badges(day_open, day_high, day_low)
         return {
             "symbol": symbol,
             "name": self.symbol_to_name.get(symbol, symbol),
@@ -750,6 +794,146 @@ class MarketEngine:
             "volume": int(volume) if volume not in (None, "") else None,
             "is_fno": symbol.upper() in self.fno_symbols or self.symbol_to_name.get(symbol, "").upper() in self.fno_symbols,
             "sectors": self.symbol_to_sectors.get(symbol, []),
+            "day_open": round(day_open_value, 2) if day_open_value is not None else None,
+            "day_high": round(day_high_value, 2) if day_high_value is not None else None,
+            "day_low": round(day_low_value, 2) if day_low_value is not None else None,
+            "open_equals_low": open_equals_low,
+            "open_equals_high": open_equals_high,
+            "ohlc_badges": ohlc_badges,
+        }
+
+    def _bucket_start(self, moment, timeframe):
+        timeframe = int(timeframe)
+        minute = (moment.minute // timeframe) * timeframe
+        return moment.replace(minute=minute, second=0, microsecond=0)
+
+    def _record_acceleration_price(self, symbol, price, moment=None, cumulative_volume=None):
+        symbol = (symbol or "").upper()
+        price = self._float_or_none(price)
+        if not symbol or price in (None, 0):
+            return
+        cumulative_volume = self._coerce_volume(cumulative_volume)
+        moment = moment or datetime.now(IST)
+        with self.acceleration_lock:
+            symbol_buckets = self.acceleration_closes[symbol]
+            for timeframe in ACCELERATION_TIMEFRAMES:
+                bucket = self._bucket_start(moment, timeframe).isoformat()
+                key = (timeframe, bucket)
+                current = symbol_buckets.get(key) or {}
+                first_volume = current.get("first_volume")
+                if cumulative_volume is not None and first_volume is None:
+                    first_volume = cumulative_volume
+                current.update(
+                    {
+                        "close": round(price, 2),
+                        "updated_at": moment.isoformat(),
+                    }
+                )
+                if cumulative_volume is not None:
+                    current["first_volume"] = first_volume
+                    current["last_volume"] = cumulative_volume
+                    if first_volume is not None:
+                        current["candle_volume"] = max(0, cumulative_volume - first_volume)
+                symbol_buckets[key] = current
+            if len(symbol_buckets) > 90:
+                keys = sorted(symbol_buckets.keys(), key=lambda item: item[1])
+                for key in keys[:-75]:
+                    symbol_buckets.pop(key, None)
+
+    def _acceleration_volume_sma(self, symbol):
+        symbol = (symbol or "").upper()
+        if not symbol:
+            return None
+        if not self.acceleration_volume_sma_cache:
+            self._restore_acceleration_volume_sma_cache()
+        marker = self._completed_session_cache_marker()
+        payload = self.acceleration_volume_sma_cache.get(symbol)
+        if (
+            not isinstance(payload, dict)
+            or payload.get("cache_marker") != marker
+            or not self._payload_matches_broker(payload)
+        ):
+            return None
+        volume_sma = payload.get("volume_sma")
+        return volume_sma if volume_sma not in (None, 0) else None
+
+    def get_acceleration_scanner(self, timeframe=1, min_gain=ACCELERATION_SCANNER_MIN_GAIN_PERCENT):
+        try:
+            timeframe = int(timeframe)
+        except (TypeError, ValueError):
+            timeframe = 1
+        if timeframe not in ACCELERATION_TIMEFRAMES:
+            timeframe = 1
+        try:
+            min_gain = float(min_gain)
+        except (TypeError, ValueError):
+            min_gain = ACCELERATION_SCANNER_MIN_GAIN_PERCENT
+        now = datetime.now(IST)
+        current_bucket = self._bucket_start(now, timeframe).isoformat()
+        previous_bucket = (self._bucket_start(now, timeframe) - timedelta(minutes=timeframe)).isoformat()
+        with self.lock:
+            latest_rows = {symbol: dict(row) for symbol, row in self.latest.items()}
+        rows = []
+        with self.acceleration_lock:
+            for symbol, buckets in self.acceleration_closes.items():
+                current = buckets.get((timeframe, current_bucket))
+                previous = buckets.get((timeframe, previous_bucket))
+                if not current or not previous:
+                    continue
+                previous_close = previous.get("close")
+                current_close = current.get("close")
+                if previous_close in (None, 0) or current_close in (None, 0):
+                    continue
+                change_percent = ((current_close - previous_close) / previous_close) * 100
+                if abs(change_percent) < min_gain:
+                    continue
+                latest = latest_rows.get(symbol) or {}
+                candle_volume = current.get("candle_volume")
+                if candle_volume is None:
+                    first_volume = current.get("first_volume")
+                    last_volume = current.get("last_volume")
+                    if first_volume is not None and last_volume is not None:
+                        candle_volume = max(0, last_volume - first_volume)
+                volume_sma = self._acceleration_volume_sma(symbol)
+                volume_sma_multiplier = None
+                if candle_volume is not None and volume_sma not in (None, 0):
+                    volume_sma_multiplier = candle_volume / volume_sma
+                turnover = None
+                if candle_volume is not None and current_close not in (None, 0):
+                    turnover = candle_volume * current_close
+                rows.append(
+                    {
+                        "symbol": symbol,
+                        "name": self.symbol_to_name.get(symbol, symbol),
+                        "price": latest.get("price", current_close),
+                        "change": latest.get("change"),
+                        "timeframe": timeframe,
+                        "from_close": round(previous_close, 2),
+                        "to_close": round(current_close, 2),
+                        "direction": "up" if change_percent >= 0 else "down",
+                        "move_percent": round(change_percent, 3),
+                        "gain_percent": round(change_percent, 3),
+                        "volume": latest.get("volume"),
+                        "candle_volume": int(candle_volume) if candle_volume is not None else None,
+                        "volume_sma": round(volume_sma, 2) if volume_sma is not None else None,
+                        "volume_sma_multiplier": round(volume_sma_multiplier, 2) if volume_sma_multiplier is not None else None,
+                        "turnover": round(turnover, 2) if turnover is not None else None,
+                        "is_fno": latest.get("is_fno", symbol in self.fno_symbols),
+                        "updated_at": current.get("updated_at"),
+                    }
+                )
+        rows.sort(key=lambda item: abs(item["move_percent"]), reverse=True)
+        return {
+            "rows": rows,
+            "timeframe": timeframe,
+            "min_gain": min_gain,
+            "tracked_count": len(latest_rows),
+            "volume_sma_ready": bool(self.acceleration_volume_sma_cache),
+            "updated_at": self.last_update or self._utc_now(),
+            "market_open": self._is_market_open(),
+            "current_bucket": current_bucket,
+            "previous_bucket": previous_bucket,
+            "error": None if rows else "No stocks have moved beyond the selected acceleration threshold yet.",
         }
 
     def _cached_snapshot(self):
@@ -835,6 +1019,18 @@ class MarketEngine:
 
     def _cached_sector_breakdowns(self):
         return load_market_cache(SECTOR_BREAKDOWNS_CACHE_KEY)
+
+    def _save_acceleration_volume_sma_cache(self):
+        try:
+            save_market_cache(ACCELERATION_VOLUME_SMA_CACHE_KEY, self.acceleration_volume_sma_cache)
+        except Exception:
+            return
+
+    def _restore_acceleration_volume_sma_cache(self):
+        cached = load_market_cache(ACCELERATION_VOLUME_SMA_CACHE_KEY)
+        if isinstance(cached, dict):
+            self.acceleration_volume_sma_cache = cached
+        return self.acceleration_volume_sma_cache
 
     def _save_previous_close_cache(self):
         try:
@@ -2371,7 +2567,16 @@ class MarketEngine:
         latest_volume = candles[-1].get("volume")
         if latest_close not in (None, 0):
             self._remember_previous_close("symbols", symbol, latest_close)
-        row = self._build_stock_row(symbol, latest_close, prev_close, volume=latest_volume)
+        latest_candle = candles[-1]
+        row = self._build_stock_row(
+            symbol,
+            latest_close,
+            prev_close,
+            volume=latest_volume,
+            day_open=latest_candle.get("open"),
+            day_high=latest_candle.get("high"),
+            day_low=latest_candle.get("low"),
+        )
         latest_dt = candles[-1].get("date")
         return row, latest_dt
 
@@ -2458,21 +2663,32 @@ class MarketEngine:
             base_close = close if close not in (None, 0) else self.rest_prev_close.get(symbol)
             if base_close in (None, 0):
                 base_close = self._cached_previous_close("symbols", symbol)
-            row = self._build_stock_row(symbol, last_price, base_close, volume=volume)
+            row = self._build_stock_row(
+                symbol,
+                last_price,
+                base_close,
+                volume=volume,
+                day_open=ohlc.get("open"),
+                day_high=ohlc.get("high"),
+                day_low=ohlc.get("low"),
+            )
             if row:
                 updated[symbol] = row
-            elif last_price not in (None, 0):
+                self._record_acceleration_price(symbol, last_price, cumulative_volume=volume)
+            elif not market_open and last_price not in (None, 0):
                 missing_history.append((symbol, last_price, volume))
 
-        for symbol, last_price, volume in missing_history:
-            close = self._fetch_prev_close_from_history(self.kite, symbol)
-            if close in (None, 0):
-                continue
-            self.rest_prev_close[symbol] = close
-            prev_cache_updated = self._remember_previous_close("symbols", symbol, close) or prev_cache_updated
-            row = self._build_stock_row(symbol, last_price, close, volume=volume)
-            if row:
-                updated[symbol] = row
+        if not market_open:
+            for symbol, last_price, volume in missing_history:
+                close = self._fetch_prev_close_from_history(self.kite, symbol)
+                if close in (None, 0):
+                    continue
+                self.rest_prev_close[symbol] = close
+                prev_cache_updated = self._remember_previous_close("symbols", symbol, close) or prev_cache_updated
+                row = self._build_stock_row(symbol, last_price, close, volume=volume)
+                if row:
+                    updated[symbol] = row
+                    self._record_acceleration_price(symbol, last_price, cumulative_volume=volume)
 
         if updated:
             with self.lock:
@@ -2670,9 +2886,18 @@ class MarketEngine:
                         self._remember_previous_close("symbols", symbol, close)
                     if base_close in (None, 0):
                         base_close = self._cached_previous_close("symbols", symbol)
-                    row = self._build_stock_row(symbol, last_price, base_close, volume=volume)
+                    row = self._build_stock_row(
+                        symbol,
+                        last_price,
+                        base_close,
+                        volume=volume,
+                        day_open=ohlc.get("open"),
+                        day_high=ohlc.get("high"),
+                        day_low=ohlc.get("low"),
+                    )
                     if row:
                         self.latest[symbol] = row
+                        self._record_acceleration_price(symbol, last_price, cumulative_volume=volume)
                 else:
                     name = self.sector_token_to_name.get(token)
                     if not name:
@@ -2783,6 +3008,208 @@ class MarketEngine:
             self._save_previous_close_cache()
         return {"processed": processed, "total": total, "updated": updated}
 
+    def _warm_acceleration_volume_sma_cache(self, cache_marker, force=False):
+        self._restore_acceleration_volume_sma_cache()
+        symbols = self._symbols_for_badge_warmup()
+        total = len(symbols)
+        if not total:
+            return {"processed": 0, "total": 0, "updated": 0}
+
+        completed_session = datetime.fromisoformat(cache_marker).date()
+        session_window = self._trading_session_window(completed_session, ACCELERATION_VOLUME_SMA_SESSIONS)
+        if len(session_window) < ACCELERATION_VOLUME_SMA_SESSIONS:
+            return {"processed": 0, "total": total, "updated": 0}
+
+        from_date = self._session_start_dt(session_window[0])
+        to_date = self._session_end_dt(session_window[-1])
+        processed = 0
+        updated = 0
+        for symbol in symbols:
+            processed += 1
+            self._update_history_cache_status(
+                processed=processed,
+                total=total + len(self.sector_tokens) + 1,
+                message=f"Caching acceleration volume baselines ({processed}/{total})",
+            )
+            cached = self.acceleration_volume_sma_cache.get(symbol)
+            if (
+                not force
+                and cached
+                and cached.get("cache_marker") == cache_marker
+                and self._payload_matches_broker(cached)
+                and cached.get("volume_sma") not in (None, 0)
+            ):
+                continue
+            token = self.symbol_to_token.get(symbol)
+            candles = self._fetch_recent_day_candles(token, from_date, to_date, limit=ACCELERATION_VOLUME_SMA_SESSIONS)
+            volumes = [
+                self._coerce_volume(candle.get("volume"))
+                for candle in candles
+                if self._coerce_volume(candle.get("volume")) not in (None, 0)
+            ]
+            if len(volumes) < ACCELERATION_VOLUME_SMA_SESSIONS:
+                continue
+            volume_sum = sum(volumes)
+            volume_sma = volume_sum / NSE_INTRADAY_SESSION_MINUTES
+            self.acceleration_volume_sma_cache[symbol] = {
+                "cache_marker": cache_marker,
+                "broker": self._current_broker(),
+                "sessions": ACCELERATION_VOLUME_SMA_SESSIONS,
+                "session_minutes": NSE_INTRADAY_SESSION_MINUTES,
+                "volume_sum": int(volume_sum),
+                "volume_sma": round(volume_sma, 2),
+                "updated_at": self._utc_now(),
+            }
+            updated += 1
+
+        if updated:
+            self._save_acceleration_volume_sma_cache()
+        return {"processed": processed, "total": total, "updated": updated}
+
+    def _warm_market_open_stock_cache(self, cache_marker, force=False):
+        self._restore_previous_day_badges_cache()
+        self._restore_acceleration_volume_sma_cache()
+        symbols = self._symbols_for_badge_warmup()
+        total = len(symbols)
+        if not total:
+            return {
+                "processed": 0,
+                "total": 0,
+                "badge_updated": 0,
+                "volume_updated": 0,
+                "previous_close_updated": 0,
+            }
+
+        completed_session = datetime.fromisoformat(cache_marker).date()
+        session_window = self._trading_session_window(completed_session, ACCELERATION_VOLUME_SMA_SESSIONS)
+        if len(session_window) < ACCELERATION_VOLUME_SMA_SESSIONS:
+            return {
+                "processed": 0,
+                "total": total,
+                "badge_updated": 0,
+                "volume_updated": 0,
+                "previous_close_updated": 0,
+            }
+
+        from_date = self._session_start_dt(session_window[0])
+        to_date = self._session_end_dt(session_window[-1])
+        processed = 0
+        badge_updated = 0
+        volume_updated = 0
+        previous_close_updated = 0
+        prev_close_cache_dirty = False
+        badges_dirty = False
+        volume_dirty = False
+
+        for symbol in symbols:
+            processed += 1
+            self._update_history_cache_status(
+                processed=processed,
+                total=total + len(self.sector_tokens) + 1,
+                message=f"Caching market-open stock data ({processed}/{total})",
+            )
+
+            badge_cached = self.previous_day_badges_cache.get(symbol)
+            volume_cached = self.acceleration_volume_sma_cache.get(symbol)
+            previous_close_cached = self._cached_previous_close("symbols", symbol)
+            stock_cache_ready = (
+                not force
+                and badge_cached
+                and badge_cached.get("cache_marker") == cache_marker
+                and self._payload_matches_broker(badge_cached)
+                and volume_cached
+                and volume_cached.get("cache_marker") == cache_marker
+                and self._payload_matches_broker(volume_cached)
+                and volume_cached.get("volume_sma") not in (None, 0)
+                and previous_close_cached not in (None, 0)
+            )
+            if stock_cache_ready:
+                continue
+
+            token = self.symbol_to_token.get(symbol)
+            candles = self._fetch_recent_day_candles(token, from_date, to_date, limit=ACCELERATION_VOLUME_SMA_SESSIONS)
+            if not candles:
+                continue
+
+            latest_close = candles[-1].get("close")
+            if latest_close not in (None, 0):
+                if self._remember_previous_close("symbols", symbol, latest_close, cache_marker=cache_marker):
+                    prev_close_cache_dirty = True
+                    previous_close_updated += 1
+
+            if len(candles) >= 2:
+                current_close = candles[-1].get("close")
+                prior_close = candles[-2].get("close")
+                if current_close not in (None, 0) and prior_close not in (None, 0):
+                    change = round(((current_close - prior_close) / prior_close) * 100, 2)
+                    self.previous_day_badges_cache[symbol] = {
+                        "cache_marker": cache_marker,
+                        "broker": self._current_broker(),
+                        "change": change,
+                    }
+                    badges_dirty = True
+                    badge_updated += 1
+
+            volumes = [
+                self._coerce_volume(candle.get("volume"))
+                for candle in candles[-ACCELERATION_VOLUME_SMA_SESSIONS:]
+                if self._coerce_volume(candle.get("volume")) not in (None, 0)
+            ]
+            if len(volumes) >= ACCELERATION_VOLUME_SMA_SESSIONS:
+                volume_sum = sum(volumes)
+                volume_sma = volume_sum / NSE_INTRADAY_SESSION_MINUTES
+                self.acceleration_volume_sma_cache[symbol] = {
+                    "cache_marker": cache_marker,
+                    "broker": self._current_broker(),
+                    "sessions": ACCELERATION_VOLUME_SMA_SESSIONS,
+                    "session_minutes": NSE_INTRADAY_SESSION_MINUTES,
+                    "volume_sum": int(volume_sum),
+                    "volume_sma": round(volume_sma, 2),
+                    "updated_at": self._utc_now(),
+                }
+                volume_dirty = True
+                volume_updated += 1
+
+        if prev_close_cache_dirty:
+            self._save_previous_close_cache()
+        if badges_dirty:
+            self._save_previous_day_badges_cache()
+        if volume_dirty:
+            self._save_acceleration_volume_sma_cache()
+        return {
+            "processed": processed,
+            "total": total,
+            "badge_updated": badge_updated,
+            "volume_updated": volume_updated,
+            "previous_close_updated": previous_close_updated,
+        }
+
+    def _market_open_stock_cache_ready(self, cache_marker):
+        self._restore_previous_day_badges_cache()
+        self._restore_acceleration_volume_sma_cache()
+        symbols = self._symbols_for_badge_warmup()
+        if not symbols:
+            return True
+        checked = 0
+        ready = 0
+        for symbol in symbols:
+            checked += 1
+            badge_cached = self.previous_day_badges_cache.get(symbol)
+            volume_cached = self.acceleration_volume_sma_cache.get(symbol)
+            previous_close_cached = self._cached_previous_close("symbols", symbol)
+            if (
+                badge_cached
+                and badge_cached.get("cache_marker") == cache_marker
+                and self._payload_matches_broker(badge_cached)
+                and volume_cached
+                and volume_cached.get("cache_marker") == cache_marker
+                and self._payload_matches_broker(volume_cached)
+                and volume_cached.get("volume_sma") not in (None, 0)
+                and previous_close_cached not in (None, 0)
+            ):
+                ready += 1
+        return checked > 0 and ready >= max(1, int(checked * 0.9))
+
     def _build_rrg_series_map(self, benchmark_symbol, cache_marker):
         if not self.kite:
             return None, {}, f"{self._broker_label()} session is not available for historical index candles."
@@ -2889,9 +3316,10 @@ class MarketEngine:
             message=f"Preparing {self._broker_label()} historical market cache...",
             broker=self._current_broker(),
             error=None,
+            market_open_ready=False,
         )
         try:
-            badge_summary = self._warm_previous_day_badges_cache(cache_marker, force=force)
+            stock_summary = self._warm_market_open_stock_cache(cache_marker, force=force)
             rrg_payload = self._warm_relative_rotation_graph_cache(cache_marker, force=force)
             self._save_previous_close_cache()
             status = "completed" if rrg_payload.get("items") else "warning"
@@ -2901,10 +3329,12 @@ class MarketEngine:
                 processed=total,
                 total=total,
                 message=(
-                    f"Synced {self._broker_label()} history: cached {badge_summary['updated']} badge rows and "
+                    f"Premarket sync ready: cached {stock_summary['previous_close_updated']} previous closes, "
+                    f"{stock_summary['badge_updated']} badge rows, {stock_summary['volume_updated']} volume baselines and "
                     f"{len(rrg_payload.get('items') or [])} RRG sectors for {cache_marker}."
                 ),
                 error=rrg_payload.get("error"),
+                market_open_ready=True,
             )
         except Exception as exc:
             self.last_error = str(exc)
@@ -2921,14 +3351,21 @@ class MarketEngine:
     def start_daily_market_history_cache(self, force=False):
         cache_marker = self._completed_session_cache_marker()
         cached_rrg = self._cached_relative_rotation_graph()
-        if not force and self._cache_payload_matches_marker(cached_rrg, cache_marker) and cached_rrg.get("items"):
+        stock_cache_ready = self._market_open_stock_cache_ready(cache_marker)
+        if (
+            not force
+            and stock_cache_ready
+            and self._cache_payload_matches_marker(cached_rrg, cache_marker)
+            and cached_rrg.get("items")
+        ):
             return self._update_history_cache_status(
                 status="completed",
                 session_marker=cache_marker,
                 broker=self._current_broker(),
                 finished_at=self._utc_now(),
-                message=f"{self._broker_label()} historical market cache for {cache_marker} is already ready.",
+                message=f"{self._broker_label()} premarket cache for {cache_marker} is already ready.",
                 error=None,
+                market_open_ready=True,
             )
         with self.history_cache_lock:
             if self.history_cache_thread and self.history_cache_thread.is_alive():
@@ -2944,6 +3381,7 @@ class MarketEngine:
                     "message": f"Preparing {self._broker_label()} historical market cache...",
                     "broker": self._current_broker(),
                     "error": None,
+                    "market_open_ready": False,
                 }
             )
             thread = threading.Thread(
@@ -3100,7 +3538,15 @@ class MarketEngine:
                     self.last_error = "Live feed stalled, refreshing from API"
                 self._ensure_background_refresh(market_open=True, reason="stale")
             if market_open:
-                if not self.latest:
+                stale_closed_source = self.last_snapshot_source in {
+                    "historical_eod",
+                    "closed_cache",
+                    "closed_cache_rows",
+                    "cache",
+                }
+                if stale_closed_source and time.time() - self.last_rest_refresh_ts > 15:
+                    self._ensure_background_refresh(market_open=True, reason="initial")
+                elif not self.latest:
                     self._ensure_background_refresh(market_open=True, reason="initial")
                 elif not self.connected:
                     self._ensure_background_refresh(market_open=True, reason="reconnect")
@@ -3146,7 +3592,8 @@ class MarketEngine:
         if not self.kite:
             return self._rows_for_symbols_from_cache(symbols)
 
-        if not self._is_market_open():
+        market_open = self._is_market_open()
+        if not market_open:
             cached_rows = self._rows_for_symbols_from_cache(symbols)
             if cached_rows:
                 self.last_snapshot_source = "closed_cache_rows"
@@ -3191,21 +3638,32 @@ class MarketEngine:
             base_close = close if close not in (None, 0) else self.rest_prev_close.get(symbol)
             if base_close in (None, 0):
                 base_close = self._cached_previous_close("symbols", symbol)
-            row = self._build_stock_row(symbol, last_price, base_close, volume=volume)
+            row = self._build_stock_row(
+                symbol,
+                last_price,
+                base_close,
+                volume=volume,
+                day_open=ohlc.get("open"),
+                day_high=ohlc.get("high"),
+                day_low=ohlc.get("low"),
+            )
             if row:
                 rows.append(row)
-            elif last_price not in (None, 0):
+                self._record_acceleration_price(symbol, last_price, cumulative_volume=volume)
+            elif not market_open and last_price not in (None, 0):
                 missing_history.append((symbol, last_price, volume))
 
-        for symbol, last_price, volume in missing_history:
-            close = self._fetch_prev_close_from_history(self.kite, symbol)
-            if close in (None, 0):
-                continue
-            self.rest_prev_close[symbol] = close
-            prev_cache_updated = self._remember_previous_close("symbols", symbol, close) or prev_cache_updated
-            row = self._build_stock_row(symbol, last_price, close, volume=volume)
-            if row:
-                rows.append(row)
+        if not market_open:
+            for symbol, last_price, volume in missing_history:
+                close = self._fetch_prev_close_from_history(self.kite, symbol)
+                if close in (None, 0):
+                    continue
+                self.rest_prev_close[symbol] = close
+                prev_cache_updated = self._remember_previous_close("symbols", symbol, close) or prev_cache_updated
+                row = self._build_stock_row(symbol, last_price, close, volume=volume)
+                if row:
+                    rows.append(row)
+                    self._record_acceleration_price(symbol, last_price, cumulative_volume=volume)
 
         if rows:
             with self.lock:

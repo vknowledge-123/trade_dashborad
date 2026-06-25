@@ -1,0 +1,264 @@
+{% extends "base.html" %}
+{% block content %}
+
+<section class="accel-shell">
+  <div class="accel-header">
+    <div>
+      <div class="panel-sub">Live momentum scanner</div>
+      <h1>Acceleration Scanner</h1>
+      <p class="muted">Finds stocks moving up or down beyond the selected percent from the previous completed live bucket to the current bucket.</p>
+    </div>
+    <div class="status-line">
+      <span class="pill">{{ scanner.tracked_count or 0 }} tracked</span>
+      <span class="pill {{ 'positive' if scanner.market_open else 'neutral' }}">{{ 'Live session' if scanner.market_open else 'Waiting for market' }}</span>
+      <span class="snapshot-updated-at" id="accel-updated-at">{{ scanner.updated_at or '-' }}</span>
+    </div>
+  </div>
+
+  <div class="panel accel-controls">
+    <div class="panel-header">
+      <div>
+        <h3>Scan Controls</h3>
+        <div class="panel-sub">1, 5, or 15 minute acceleration with volume expansion</div>
+      </div>
+      <div class="status-line">
+        {% if admin %}
+          <button class="btn btn-ghost btn-mini" id="accel-cache" type="button">Cache Data</button>
+        {% endif %}
+        <span class="pill positive" id="accel-count">{{ scanner.rows|length }}</span>
+      </div>
+    </div>
+    <div class="accel-filter-grid">
+      <label>
+        Timeframe
+        <select id="accel-timeframe">
+          <option value="1">1 min</option>
+          <option value="5">5 min</option>
+          <option value="15">15 min</option>
+        </select>
+      </label>
+      <label>
+        Min Move %
+        <input id="accel-min-gain" type="number" min="0" step="0.1" value="{{ scanner.min_gain or 0.5 }}" />
+      </label>
+      <button class="btn btn-primary btn-mini" id="accel-apply" type="button">Apply</button>
+    </div>
+  </div>
+
+  {% if scanner.error %}
+    <div class="accel-alert" id="accel-alert">{{ scanner.error }}</div>
+  {% else %}
+    <div class="accel-alert" id="accel-alert" hidden></div>
+  {% endif %}
+
+  <div class="panel">
+    <div class="table accel-table" id="accel-body">
+      <div class="table-row table-head accel-row">
+        <span>Symbol</span>
+        <span>Price</span>
+        <span>From Close</span>
+        <span>To Close</span>
+        <span>Move %</span>
+        <span>Candle Vol</span>
+        <span>Vol x</span>
+        <span>Turnover</span>
+        <span>Chart</span>
+      </div>
+      {% for row in scanner.rows or [] %}
+        <div class="table-row accel-row" data-symbol="{{ row.symbol }}">
+          <span class="cell-symbol">
+            <span class="cell-symbol-main">{{ row.symbol }}{% if row.is_fno %} <span class="fno-tag">F&amp;O</span>{% endif %}</span>
+            <span class="sector-stock-name">{{ row.name }}</span>
+          </span>
+          <span class="mono">{{ row.price }}</span>
+          <span class="mono">{{ row.from_close }}</span>
+          <span class="mono">{{ row.to_close }}</span>
+          <span class="{{ 'positive' if row.move_percent >= 0 else 'negative' }} mono">{{ '+' if row.move_percent >= 0 else '' }}{{ row.move_percent }}%</span>
+          <span class="mono">{{ format_compact_volume(row.candle_volume if row.candle_volume is defined else none) }}</span>
+          <span class="mono">{{ row.volume_sma_multiplier ~ 'x' if row.volume_sma_multiplier else '-' }}</span>
+          <span class="mono">{{ format_compact_volume(row.turnover if row.turnover is defined else none) }}</span>
+          <a class="tv-link" href="https://www.tradingview.com/chart/?symbol=NSE%3A{{ row.symbol | urlencode }}" target="_blank" rel="noopener noreferrer">TradingView</a>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<style>
+.accel-shell {
+  display: grid;
+  gap: 14px;
+}
+.accel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 14px;
+  border: 1px solid rgba(129, 201, 149, 0.18);
+  background: rgba(18, 24, 32, 0.72);
+  border-radius: 12px;
+}
+.accel-header h1 {
+  margin: 0;
+  font-family: 'Syne', sans-serif;
+  font-size: 36px;
+  letter-spacing: 0;
+}
+.accel-controls {
+  display: grid;
+  gap: 10px;
+}
+.accel-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  align-items: end;
+}
+.accel-filter-grid label {
+  display: grid;
+  gap: 6px;
+  color: #8ca5c8;
+  font-size: 12px;
+}
+.accel-filter-grid select,
+.accel-filter-grid input {
+  width: 100%;
+  min-height: 38px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(8,12,24,0.76);
+  color: #e8f0fe;
+  padding: 8px 10px;
+}
+.accel-alert {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 184, 48, 0.22);
+  background: rgba(255, 184, 48, 0.08);
+  color: #ffe9a8;
+  font-size: 13px;
+}
+.accel-row {
+  grid-template-columns: 1.2fr 0.66fr 0.74fr 0.74fr 0.68fr 0.78fr 0.58fr 0.78fr auto;
+}
+@media (max-width: 760px) {
+  .accel-header h1 {
+    font-size: 28px;
+  }
+  .accel-filter-grid {
+    grid-template-columns: 1fr;
+  }
+  .accel-row:not(.table-head) {
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    gap: 7px 10px;
+  }
+  .accel-row:not(.table-head) > span:first-child {
+    grid-column: 1 / -1;
+  }
+  .accel-row:not(.table-head) > .tv-link {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+  .accel-row:not(.table-head) > span:nth-child(2)::before { content: "Price "; color: #6b7fa3; }
+  .accel-row:not(.table-head) > span:nth-child(3)::before { content: "From "; color: #6b7fa3; }
+  .accel-row:not(.table-head) > span:nth-child(4)::before { content: "To "; color: #6b7fa3; }
+  .accel-row:not(.table-head) > span:nth-child(5)::before { content: "Move "; color: #6b7fa3; }
+  .accel-row:not(.table-head) > span:nth-child(6)::before { content: "Vol "; color: #6b7fa3; }
+  .accel-row:not(.table-head) > span:nth-child(7)::before { content: "Vol x "; color: #6b7fa3; }
+  .accel-row:not(.table-head) > span:nth-child(8)::before { content: "Turnover "; color: #6b7fa3; }
+}
+</style>
+
+<script>
+(function () {
+  const body = document.getElementById("accel-body");
+  const count = document.getElementById("accel-count");
+  const updatedAt = document.getElementById("accel-updated-at");
+  const alertBox = document.getElementById("accel-alert");
+  const timeframe = document.getElementById("accel-timeframe");
+  const minGain = document.getElementById("accel-min-gain");
+  const apply = document.getElementById("accel-apply");
+  const cacheButton = document.getElementById("accel-cache");
+  if (!body) return;
+  const head = body.querySelector(".table-head")?.outerHTML || "";
+  const tvUrl = (symbol) => `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(`NSE:${symbol}`)}`;
+  const formatVolume = (value) => {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return "-";
+    if (Math.abs(number) >= 1_000_000) return `${(number / 1_000_000).toFixed(2)}M`;
+    if (Math.abs(number) >= 1_000) return `${(number / 1_000).toFixed(1)}K`;
+    return Math.trunc(number).toString();
+  };
+  const formatSigned = (value) => {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return "-";
+    return `${number >= 0 ? "+" : ""}${number}%`;
+  };
+  const multiplier = (value) => {
+    const number = Number(value);
+    return Number.isFinite(number) ? `${number.toFixed(2)}x` : "-";
+  };
+  const rowHtml = (row) => `
+    <div class="table-row accel-row" data-symbol="${row.symbol}">
+      <span class="cell-symbol">
+        <span class="cell-symbol-main">${row.symbol}${row.is_fno ? ' <span class="fno-tag">F&O</span>' : ""}</span>
+        <span class="sector-stock-name">${row.name || ""}</span>
+      </span>
+      <span class="mono">${row.price ?? "-"}</span>
+      <span class="mono">${row.from_close ?? "-"}</span>
+      <span class="mono">${row.to_close ?? "-"}</span>
+      <span class="${Number(row.move_percent) >= 0 ? "positive" : "negative"} mono">${formatSigned(row.move_percent)}</span>
+      <span class="mono">${formatVolume(row.candle_volume)}</span>
+      <span class="mono">${multiplier(row.volume_sma_multiplier)}</span>
+      <span class="mono">${formatVolume(row.turnover)}</span>
+      <a class="tv-link" href="${tvUrl(row.symbol)}" target="_blank" rel="noopener noreferrer">TradingView</a>
+    </div>
+  `;
+  const load = async () => {
+    const params = new URLSearchParams();
+    params.set("timeframe", timeframe?.value || "1");
+    params.set("min_gain", minGain?.value || "0.5");
+    params.set("ts", Date.now().toString());
+    try {
+      const res = await fetch(`/api/acceleration-scanner?${params.toString()}`, { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json();
+      const rows = data.rows || [];
+      body.innerHTML = head + (rows.length ? rows.map(rowHtml).join("") : '<div class="table-row accel-row"><span>No acceleration matches yet.</span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>');
+      if (count) count.textContent = rows.length;
+      if (updatedAt) updatedAt.textContent = data.updated_at || "-";
+      if (alertBox) {
+        alertBox.hidden = rows.length || !data.error;
+        alertBox.textContent = data.error || "";
+      }
+    } catch (error) {}
+  };
+  [timeframe, minGain].forEach((input) => {
+    if (input) input.addEventListener("change", load);
+  });
+  if (apply) apply.addEventListener("click", load);
+  if (cacheButton) {
+    cacheButton.addEventListener("click", async () => {
+      cacheButton.disabled = true;
+      cacheButton.textContent = "Caching...";
+      try {
+        await fetch("/api/admin/market-history/cache", {
+          method: "POST",
+          headers: { "Cache-Control": "no-cache" },
+        });
+      } catch (error) {}
+      window.setTimeout(() => {
+        cacheButton.disabled = false;
+        cacheButton.textContent = "Cache Data";
+        load();
+      }, 1800);
+    });
+  }
+  setInterval(load, 3000);
+  load();
+})();
+</script>
+
+{% endblock %}
