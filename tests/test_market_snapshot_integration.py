@@ -401,6 +401,39 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         for security_id in expected_ids.values():
             self.assertEqual(engine.dhan_security_to_segment[security_id], "IDX_I")
 
+    def test_dhan_segment_normalizer_matches_working_exporter_inputs(self):
+        engine = MarketEngine(redis_client=None)
+
+        self.assertEqual(engine._normalize_dhan_segment_instrument("NSE", "", "EQUITY"), ("NSE_EQ", "EQUITY"))
+        self.assertEqual(engine._normalize_dhan_segment_instrument("NSE_EQ", "", "EQ"), ("NSE_EQ", "EQUITY"))
+        self.assertEqual(engine._normalize_dhan_segment_instrument("", "1", "EQUITY"), ("NSE_EQ", "EQUITY"))
+        self.assertEqual(engine._normalize_dhan_segment_instrument("IDX", "", "INDEX"), ("IDX_I", "INDEX"))
+        self.assertEqual(engine._normalize_dhan_segment_instrument("FNO", "", "FUTIDX"), ("NSE_FNO", "FUTIDX"))
+
+    def test_dhan_universe_accepts_numeric_nse_equity_segment_code(self):
+        engine = MarketEngine(redis_client=None)
+        engine.nifty500_set = {"RELIANCE"}
+        rows = [
+            {
+                "SEM_EXM_EXCH_ID": "",
+                "SEM_SEGMENT": "1",
+                "SEM_SERIES": "EQ",
+                "SEM_INSTRUMENT_NAME": "EQUITY",
+                "SEM_SMST_SECURITY_ID": "2885",
+                "SEM_TRADING_SYMBOL": "RELIANCE",
+                "SEM_CUSTOM_SYMBOL": "Reliance Industries",
+            }
+        ]
+        engine._dhan_scrip_rows = lambda: rows
+        engine._refresh_sector_memberships = lambda *args, **kwargs: None
+        engine._fetch_sector_quote = lambda *args, **kwargs: ({}, {})
+
+        engine._build_dhan_universe([])
+
+        self.assertEqual(engine.symbol_to_token["RELIANCE"], 2885)
+        self.assertEqual(engine.dhan_security_to_segment[2885], "NSE_EQ")
+        self.assertEqual(engine.dhan_security_to_instrument[2885], "EQUITY")
+
     def test_dhan_historical_daily_payload_matches_sdk_dates_without_future_day(self):
         from app.kite_engine import DhanClient
 

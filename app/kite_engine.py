@@ -443,6 +443,24 @@ class MarketEngine:
                 return str(value).strip()
         return ""
 
+    def _normalize_dhan_segment_instrument(self, exch=None, segment_code=None, instrument=None):
+        exch = self._normalize_symbol(exch)
+        segment_code = self._normalize_symbol(segment_code)
+        instrument = self._normalize_symbol(instrument)
+        if segment_code in {"IDX", "INDEX", "IDX_I", "I", "0"} or instrument == "INDEX":
+            return "IDX_I", "INDEX"
+        if exch in {"NSE", "NSE_EQ"} or segment_code in {"NSE", "NSE_EQ", "E", "1"}:
+            if instrument in {"", "EQUITY", "EQ", "STOCK"}:
+                return "NSE_EQ", "EQUITY"
+        if exch in {"BSE", "BSE_EQ"} or segment_code in {"BSE", "BSE_EQ", "4"}:
+            if instrument in {"", "EQUITY", "EQ", "STOCK"}:
+                return "BSE_EQ", "EQUITY"
+        if exch in {"FNO", "NSE_FNO"} or segment_code in {"FNO", "NSE_FNO", "D", "2"}:
+            return "NSE_FNO", instrument or "FUTIDX"
+        if exch in {"MCX", "MCX_COMM"} or segment_code in {"MCX", "MCX_COMM", "M", "5"}:
+            return "MCX_COMM", instrument or "COMM"
+        return None, None
+
     def _build_dhan_universe(self, sector_names):
         token_to_symbol = {}
         symbol_to_token = {}
@@ -466,18 +484,19 @@ class MarketEngine:
             if not security_id:
                 continue
 
-            if exch == "NSE" and segment_code == "E" and instrument in {"EQUITY", "EQ"} and (not series or series == "EQ"):
+            api_segment, api_instrument = self._normalize_dhan_segment_instrument(exch, segment_code, instrument)
+            if api_segment == "NSE_EQ" and api_instrument == "EQUITY" and (not series or series == "EQ"):
                 if not symbol:
                     continue
                 token = int(float(security_id))
                 token_to_symbol[token] = symbol
                 symbol_to_token[symbol] = token
                 symbol_to_name[symbol] = display_name or symbol
-                security_to_segment[token] = "NSE_EQ"
-                security_to_instrument[token] = "EQUITY"
+                security_to_segment[token] = api_segment
+                security_to_instrument[token] = api_instrument
                 continue
 
-            if segment_code == "I" or instrument == "INDEX":
+            if api_segment == "IDX_I" or instrument == "INDEX":
                 name = self._normalize_symbol(display_name or symbol)
                 token = int(float(security_id))
                 all_index_tokens[name] = token
