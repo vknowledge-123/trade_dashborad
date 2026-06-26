@@ -35,6 +35,16 @@
         </div>
         <div class="rrg-actions">
           <span class="pill neutral" id="rrg-trail-pill">{{ rrg_payload.trail_points if rrg_payload.trail_points else 14 }} session trail</span>
+          <select class="rrg-mode-select" id="rrg-trail-mode" aria-label="Trail display">
+            <option value="short" selected>Short trails</option>
+            <option value="full">Full trails</option>
+            <option value="dots">Dots only</option>
+          </select>
+          <select class="rrg-mode-select" id="rrg-label-mode" aria-label="Label display">
+            <option value="smart" selected>Smart labels</option>
+            <option value="all">All labels</option>
+            <option value="none">No labels</option>
+          </select>
           {% if admin %}
             <button class="btn rrg-cache" id="rrg-cache" type="button">Premarket Sync</button>
           {% endif %}
@@ -206,6 +216,75 @@
   gap: 8px;
 }
 
+.rrg-mode-select {
+  min-height: 36px;
+  max-width: 150px;
+  padding: 8px 28px 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(116, 149, 190, 0.26);
+  background: rgba(10, 17, 31, 0.88);
+  color: #e8f0fe;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.rrg-series {
+  cursor: pointer;
+}
+
+.rrg-series-trail {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.35;
+  opacity: 0.28;
+  transition: opacity 140ms ease, stroke-width 140ms ease;
+}
+
+.rrg-series-history-dot {
+  opacity: 0.16;
+  transition: opacity 140ms ease;
+}
+
+.rrg-series-current {
+  stroke: #07101d;
+  stroke-width: 2.4;
+  filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.12));
+}
+
+.rrg-sector-label {
+  paint-order: stroke;
+  stroke: rgba(7, 13, 24, 0.94);
+  stroke-width: 4;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+.rrg-label-hidden {
+  display: none;
+}
+
+#rrg-chart.rrg-has-focus .rrg-series {
+  opacity: 0.22;
+}
+
+#rrg-chart.rrg-has-focus .rrg-series.is-focus {
+  opacity: 1;
+}
+
+#rrg-chart.rrg-has-focus .rrg-series.is-focus .rrg-series-trail {
+  opacity: 0.92;
+  stroke-width: 2.7;
+}
+
+#rrg-chart.rrg-has-focus .rrg-series.is-focus .rrg-series-history-dot {
+  opacity: 0.54;
+}
+
+#rrg-chart.rrg-has-focus .rrg-series.is-focus .rrg-label-hidden {
+  display: block;
+}
+
 .rrg-admin-status {
   display: grid;
   gap: 4px;
@@ -362,6 +441,13 @@
   border-radius: 14px;
   border: 1px solid rgba(255, 255, 255, 0.07);
   background: rgba(255, 255, 255, 0.04);
+  transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
+}
+
+.rrg-item.is-focus {
+  border-color: rgba(0, 212, 255, 0.42);
+  background: rgba(0, 212, 255, 0.09);
+  transform: translateY(-1px);
 }
 
 .rrg-item-top {
@@ -479,6 +565,11 @@
     flex-wrap: wrap;
   }
 
+  .rrg-mode-select {
+    flex: 1 1 132px;
+    max-width: none;
+  }
+
   .rrg-selector-head {
     align-items: flex-start;
     flex-direction: column;
@@ -548,11 +639,14 @@
   const sectorFilter = document.getElementById("rrg-sector-filter");
   const selectAllButton = document.getElementById("rrg-select-all");
   const selectNoneButton = document.getElementById("rrg-select-none");
+  const trailModeSelect = document.getElementById("rrg-trail-mode");
+  const labelModeSelect = document.getElementById("rrg-label-mode");
   const cacheButton = document.getElementById("rrg-cache");
   const cacheStatusScript = document.getElementById("rrg-cache-initial-status");
   const cacheMessage = document.getElementById("rrg-cache-message");
   const cacheMeta = document.getElementById("rrg-cache-meta");
   const autoRefreshMs = 60000;
+  const modeStorageKey = "rrg_display_modes";
 
   if (!initialScript || !chart || !list) return;
 
@@ -572,6 +666,11 @@
   } catch (error) {
     currentCacheStatus = {};
   }
+  try {
+    const storedModes = JSON.parse(localStorage.getItem(modeStorageKey) || "{}");
+    if (trailModeSelect && ["short", "full", "dots"].includes(storedModes.trail)) trailModeSelect.value = storedModes.trail;
+    if (labelModeSelect && ["smart", "all", "none"].includes(storedModes.label)) labelModeSelect.value = storedModes.label;
+  } catch (error) {}
 
   const formatValue = (value) => {
     const number = Number(value);
@@ -580,6 +679,13 @@
   };
 
   const quadrantClass = (quadrant) => (quadrant || "").toLowerCase();
+  const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  }[char]));
   const storageKey = "rrg_visible_sectors";
 
   const loadSelectedSectors = (items) => {
@@ -626,6 +732,15 @@
     } catch (error) {}
   };
 
+  const saveDisplayModes = () => {
+    try {
+      localStorage.setItem(modeStorageKey, JSON.stringify({
+        trail: trailMode(),
+        label: labelMode(),
+      }));
+    } catch (error) {}
+  };
+
   const resetAutoRefresh = () => {
     if (!currentPayload.market_open) return;
     if (autoRefreshTimer) window.clearInterval(autoRefreshTimer);
@@ -649,8 +764,8 @@
       <div class="rrg-selection-summary">${selectedSummaryText(items.length)}</div>
       ${items.map((item) => `
       <label class="rrg-sector-toggle">
-        <input type="checkbox" value="${item.sector}" ${selectedSectors.has(item.sector) ? "checked" : ""} />
-        <span>${item.sector}</span>
+        <input type="checkbox" value="${escapeHtml(item.sector)}" ${selectedSectors.has(item.sector) ? "checked" : ""} />
+        <span>${escapeHtml(item.sector)}</span>
       </label>
       `).join("")}
     `;
@@ -690,6 +805,60 @@
     return Array.from({ length: count }, (_, index) => Number((min + step * index).toFixed(2)));
   };
 
+  const labelMode = () => labelModeSelect?.value || "smart";
+  const trailMode = () => trailModeSelect?.value || "short";
+
+  const smartLabelSet = (items) => {
+    const mode = labelMode();
+    if (mode === "all") return new Set(items.map((item) => item.sector));
+    if (mode === "none") return new Set();
+    const ranked = [...items].sort((left, right) => {
+      const leftScore = Math.hypot(Number(left.rs_ratio || 100) - 100, Number(left.rs_momentum || 100) - 100);
+      const rightScore = Math.hypot(Number(right.rs_ratio || 100) - 100, Number(right.rs_momentum || 100) - 100);
+      return rightScore - leftScore;
+    });
+    const limit = items.length > 18 ? 8 : items.length > 12 ? 10 : 12;
+    const visible = new Set(ranked.slice(0, limit).map((item) => item.sector));
+    ["Leading", "Weakening", "Lagging", "Improving"].forEach((quadrant) => {
+      const quadrantLeader = ranked.find((item) => item.quadrant === quadrant);
+      if (quadrantLeader) visible.add(quadrantLeader.sector);
+    });
+    return visible;
+  };
+
+  const trailForMode = (trail) => {
+    const points = Array.isArray(trail) ? trail : [];
+    if (trailMode() === "short") return points.slice(-5);
+    return points;
+  };
+
+  const setFocusedSector = (sector) => {
+    const normalized = String(sector || "");
+    const hasFocus = Boolean(normalized);
+    chart.classList.toggle("rrg-has-focus", hasFocus);
+    chart.querySelectorAll(".rrg-series").forEach((node) => {
+      node.classList.toggle("is-focus", hasFocus && node.dataset.sector === normalized);
+    });
+    list.querySelectorAll(".rrg-item").forEach((node) => {
+      node.classList.toggle("is-focus", hasFocus && node.dataset.sector === normalized);
+    });
+  };
+
+  const bindFocusTargets = () => {
+    chart.querySelectorAll(".rrg-series").forEach((node) => {
+      node.addEventListener("mouseenter", () => setFocusedSector(node.dataset.sector));
+      node.addEventListener("mouseleave", () => setFocusedSector(""));
+      node.addEventListener("focus", () => setFocusedSector(node.dataset.sector));
+      node.addEventListener("blur", () => setFocusedSector(""));
+    });
+    list.querySelectorAll(".rrg-item").forEach((node) => {
+      node.addEventListener("mouseenter", () => setFocusedSector(node.dataset.sector));
+      node.addEventListener("mouseleave", () => setFocusedSector(""));
+      node.addEventListener("focus", () => setFocusedSector(node.dataset.sector));
+      node.addEventListener("blur", () => setFocusedSector(""));
+    });
+  };
+
   const renderList = (payload) => {
     const items = payload.items || [];
     itemCount.textContent = `${items.length} sectors`;
@@ -699,13 +868,13 @@
     }
 
     list.innerHTML = items.map((item) => `
-      <div class="rrg-item">
+      <div class="rrg-item" tabindex="0" data-sector="${escapeHtml(item.sector)}">
         <div class="rrg-item-top">
           <div class="rrg-item-name">
             <span class="rrg-item-dot" style="color:${item.color}; background:${item.color};"></span>
-            <span>${item.sector}</span>
+            <span>${escapeHtml(item.sector)}</span>
           </div>
-          <span class="rrg-item-quadrant ${quadrantClass(item.quadrant)}">${item.quadrant}</span>
+          <span class="rrg-item-quadrant ${quadrantClass(item.quadrant)}">${escapeHtml(item.quadrant)}</span>
         </div>
         <div class="rrg-item-stats">
           <div class="rrg-item-stat">
@@ -780,28 +949,32 @@
       `),
     ].join("");
 
+    const visibleLabels = smartLabelSet(items);
+    const showTrails = trailMode() !== "dots";
     const sectorPaths = items.map((item) => {
-      const trail = item.trail || [];
-      const path = trail.map((point, index) => `${index === 0 ? "M" : "L"} ${xScale(point.x)} ${yScale(point.y)}`).join(" ");
-      const latest = trail[trail.length - 1];
+      const fullTrail = item.trail || [];
+      const plottedTrail = trailForMode(fullTrail);
+      const path = plottedTrail.map((point, index) => `${index === 0 ? "M" : "L"} ${xScale(point.x)} ${yScale(point.y)}`).join(" ");
+      const latest = fullTrail[fullTrail.length - 1] || plottedTrail[plottedTrail.length - 1];
       if (!latest) return "";
+      const labelClass = visibleLabels.has(item.sector) ? "" : " rrg-label-hidden";
+      const safeSector = escapeHtml(item.sector);
       return `
-        <path d="${path}" fill="none" stroke="${item.color}" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round" opacity="0.42"></path>
-        ${trail.slice(0, -1).map((point) => `
-          <circle cx="${xScale(point.x)}" cy="${yScale(point.y)}" r="1.8" fill="${item.color}" opacity="0.22"></circle>
-        `).join("")}
-        <circle cx="${xScale(latest.x)}" cy="${yScale(latest.y)}" r="5.5" fill="${item.color}" stroke="#08101d" stroke-width="2"></circle>
-        <text
-          x="${xScale(latest.x) + 10}"
-          y="${yScale(latest.y) - 10}"
-          fill="#f7fbff"
-          font-size="12"
-          font-weight="700"
-          paint-order="stroke"
-          stroke="rgba(8,16,29,0.92)"
-          stroke-width="4"
-          stroke-linejoin="round"
-        >${item.sector}</text>
+        <g class="rrg-series" tabindex="0" data-sector="${safeSector}" aria-label="${safeSector}">
+          ${showTrails && path ? `<path class="rrg-series-trail" d="${path}" stroke="${item.color}"></path>` : ""}
+          ${showTrails ? plottedTrail.slice(0, -1).map((point) => `
+            <circle class="rrg-series-history-dot" cx="${xScale(point.x)}" cy="${yScale(point.y)}" r="1.65" fill="${item.color}"></circle>
+          `).join("") : ""}
+          <circle class="rrg-series-current" cx="${xScale(latest.x)}" cy="${yScale(latest.y)}" r="6" fill="${item.color}"></circle>
+          <text
+            class="rrg-sector-label${labelClass}"
+            x="${xScale(latest.x) + 10}"
+            y="${yScale(latest.y) - 10}"
+            fill="#f7fbff"
+            font-size="12"
+            font-weight="700"
+          >${safeSector}</text>
+        </g>
       `;
     }).join("");
 
@@ -821,6 +994,7 @@
     `;
 
     renderList(payload);
+    bindFocusTargets();
   };
 
   const schedulePendingRefresh = (payload) => {
@@ -936,6 +1110,13 @@
   if (refreshButton) {
     refreshButton.addEventListener("click", fetchRrg);
   }
+  [trailModeSelect, labelModeSelect].forEach((select) => {
+    if (!select) return;
+    select.addEventListener("change", () => {
+      saveDisplayModes();
+      renderChart(filteredPayload(currentPayload));
+    });
+  });
   if (cacheButton) {
     cacheButton.addEventListener("click", startCacheJob);
     if (currentCacheStatus.is_running) {
