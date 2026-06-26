@@ -16,7 +16,8 @@ DB_PATH = Path(
 DEFAULT_COURSE_SETTINGS = {
     "four_month_price": 5000,
     "one_year_price": 10000,
-    "support_text": "Priority support, live Q&A sessions, and direct mentorship guidance with Mentor Amol Charpe.",
+    "support_text": "Priority support, live Q&A sessions, and direct mentorship guidance with Owner Amol Charpe.",
+    "payment_qr_path": "",
 }
 
 
@@ -139,6 +140,7 @@ def init_db():
             four_month_price INTEGER NOT NULL,
             one_year_price INTEGER NOT NULL,
             support_text TEXT NOT NULL,
+            payment_qr_path TEXT,
             updated_at TEXT NOT NULL
         )
         """
@@ -266,10 +268,13 @@ def init_db():
                 four_month_price INTEGER NOT NULL,
                 one_year_price INTEGER NOT NULL,
                 support_text TEXT NOT NULL,
+                payment_qr_path TEXT,
                 updated_at TEXT NOT NULL
             )
             """
         )
+    elif "payment_qr_path" not in course_settings_cols:
+        cur.execute("ALTER TABLE course_settings ADD COLUMN payment_qr_path TEXT")
 
     cur.execute("PRAGMA table_info(academy_videos)")
     academy_video_cols = {row["name"] for row in cur.fetchall()}
@@ -321,14 +326,15 @@ def init_db():
     )
     cur.execute(
         """
-        INSERT INTO course_settings (id, four_month_price, one_year_price, support_text, updated_at)
-        VALUES (1, ?, ?, ?, ?)
+        INSERT INTO course_settings (id, four_month_price, one_year_price, support_text, payment_qr_path, updated_at)
+        VALUES (1, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO NOTHING
         """,
         (
             DEFAULT_COURSE_SETTINGS["four_month_price"],
             DEFAULT_COURSE_SETTINGS["one_year_price"],
             DEFAULT_COURSE_SETTINGS["support_text"],
+            DEFAULT_COURSE_SETTINGS["payment_qr_path"],
             now,
         ),
     )
@@ -665,6 +671,7 @@ def get_course_settings():
         "four_month_price": int(row["four_month_price"]),
         "one_year_price": int(row["one_year_price"]),
         "support_text": row["support_text"],
+        "payment_qr_path": row["payment_qr_path"] if "payment_qr_path" in row.keys() else "",
         "updated_at": row["updated_at"],
     }
 
@@ -684,6 +691,30 @@ def update_course_settings(four_month_price, one_year_price, support_text):
             updated_at = excluded.updated_at
         """,
         (int(four_month_price), int(one_year_price), support_text.strip(), now),
+    )
+    _commit_with_retry(conn)
+    conn.close()
+
+
+def update_course_payment_qr(payment_qr_path):
+    conn = get_conn()
+    cur = conn.cursor()
+    now = utcnow().isoformat(timespec="seconds")
+    cur.execute(
+        """
+        INSERT INTO course_settings (id, four_month_price, one_year_price, support_text, payment_qr_path, updated_at)
+        VALUES (1, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            payment_qr_path = excluded.payment_qr_path,
+            updated_at = excluded.updated_at
+        """,
+        (
+            DEFAULT_COURSE_SETTINGS["four_month_price"],
+            DEFAULT_COURSE_SETTINGS["one_year_price"],
+            DEFAULT_COURSE_SETTINGS["support_text"],
+            str(payment_qr_path or ""),
+            now,
+        ),
     )
     _commit_with_retry(conn)
     conn.close()

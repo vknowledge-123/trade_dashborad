@@ -4,11 +4,11 @@
 <section class="premium-hero panel">
   <div class="premium-copy">
     <span class="premium-kicker">Academy + Premium Subscription</span>
-    <h1>Full Stock Market Course with Mentors Amol Charpe and Ravinder Jadhav</h1>
+    <h1>Full Stock Market Course With Owner Amol Charpe</h1>
     <p>
       A complete 20-hour trading program covering SL hunting, operator concepts, liquidity zones,
       pyramiding, risk management, detailed premium strategy in equity cash, Nifty, and Banknifty,
-      price action, technical indicators, trading psychology, and live Q&amp;A support. Amol Charpe
+      price action, technical indicators, trading psychology, and live Q&amp;A support. Owner Amol Charpe
       is an Urban Pro Excellence Award winner.
     </p>
     <div class="premium-actions">
@@ -32,6 +32,15 @@
         Your free guest dashboard week is complete. Register now to continue with premium and academy access.
       </div>
     {% endif %}
+    {% if course_settings.get("payment_qr_path") %}
+      <div class="payment-qr-card">
+        <div>
+          <div class="payment-qr-title">Scan And Pay</div>
+          <p>Use Google Pay, Paytm, PhonePe, or any UPI app. Share payment confirmation on WhatsApp for license activation.</p>
+        </div>
+        <img src="{{ course_settings['payment_qr_path'] }}" alt="UPI payment QR code" />
+      </div>
+    {% endif %}
   </div>
   <div class="premium-pricing">
     <div class="plan-card spotlight">
@@ -49,7 +58,7 @@
       <div class="plan-tag mentorship-tag">1:1 Mentorship</div>
       <h3>One To One Live Mentorship</h3>
       <div class="plan-price">₹15,000</div>
-      <p>Learn directly from Mentor Amol Charpe with personal guidance, live doubt solving, and direct mentorship support.</p>
+      <p>Learn directly from Owner Amol Charpe with personal guidance, live doubt solving, and direct mentorship support.</p>
     </div>
   </div>
 </section>
@@ -87,7 +96,7 @@
       <div class="support-point">Structured lessons with YouTube private class links.</div>
       <div class="support-point">Designed for users who want strategy, execution, and mentorship together.</div>
       <div class="support-point">Ideal path after your free dashboard exploration period ends.</div>
-      <div class="support-point">Learn with Mentors Amol Charpe and Ravinder Jadhav through practical guidance and live support.</div>
+      <div class="support-point">Learn with Owner Amol Charpe through practical guidance and live support.</div>
       <div class="support-point">Call/WhatsApp 7747966806 for premium plan details, payment confirmation, and license key support.</div>
       <div class="support-point">Upgrade further with one-to-one live mentorship for ₹15,000 and learn directly from the mentor.</div>
     </div>
@@ -167,6 +176,36 @@
   gap: 10px;
   flex-wrap: wrap;
   margin-top: 14px;
+}
+.payment-qr-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px;
+  align-items: center;
+  gap: 16px;
+  margin-top: 18px;
+  padding: 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(138, 180, 248, 0.22);
+  background: rgba(138, 180, 248, 0.08);
+}
+.payment-qr-title {
+  font-size: 14px;
+  font-weight: 800;
+  color: #eef6ff;
+}
+.payment-qr-card p {
+  margin-top: 6px;
+  color: #aebcd2;
+  line-height: 1.5;
+}
+.payment-qr-card img {
+  width: 150px;
+  height: 150px;
+  object-fit: contain;
+  justify-self: end;
+  border-radius: 12px;
+  background: #fff;
+  padding: 8px;
 }
 .premium-pricing {
   display: grid;
@@ -260,6 +299,12 @@
   .premium-grid,
   .topic-grid {
     grid-template-columns: 1fr;
+  }
+  .payment-qr-card {
+    grid-template-columns: 1fr;
+  }
+  .payment-qr-card img {
+    justify-self: start;
   }
 }
 </style>

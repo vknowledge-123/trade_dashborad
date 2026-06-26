@@ -232,6 +232,31 @@
 
   <div class="panel panel-wide panel-accent">
     <div class="panel-header">
+      <h3>Payment QR Code</h3>
+      <span class="pill">UPI apps</span>
+    </div>
+    <form class="inquiry" method="post" action="/admin/course/payment-qr" enctype="multipart/form-data">
+      <label>
+        Upload QR Image
+        <input type="file" name="payment_qr" accept="image/png,image/jpeg,image/webp" required />
+      </label>
+      <button class="btn btn-primary" type="submit">Upload Payment QR</button>
+    </form>
+    {% if course_settings and course_settings.get("payment_qr_path") %}
+      <div class="payment-qr-preview">
+        <img src="{{ course_settings['payment_qr_path'] }}" alt="Current payment QR code" />
+        <div>
+          <strong>Current QR is active</strong>
+          <p class="muted">Displayed on Premium and Academy pages for Google Pay, Paytm, and other UPI apps.</p>
+        </div>
+      </div>
+    {% else %}
+      <p class="muted">No payment QR uploaded yet.</p>
+    {% endif %}
+  </div>
+
+  <div class="panel panel-wide panel-accent">
+    <div class="panel-header">
       <h3>Academy Videos</h3>
       <span class="pill">YouTube private links</span>
     </div>
@@ -541,11 +566,33 @@
   background: rgba(0, 229, 160, 0.08);
   color: #eafff7;
 }
+.payment-qr-preview {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 14px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+}
+.payment-qr-preview img {
+  width: 108px;
+  height: 108px;
+  object-fit: contain;
+  border-radius: 10px;
+  background: #fff;
+  padding: 6px;
+}
 
 @media (max-width: 900px) {
   .course-settings-grid,
   .academy-video-grid {
     grid-template-columns: 1fr;
+  }
+  .payment-qr-preview {
+    align-items: flex-start;
+    flex-direction: column;
   }
   .academy-video-head,
   .academy-license-head {

@@ -1,12 +1,13 @@
 from datetime import datetime, timedelta, timezone
 import io
 import math
+from pathlib import Path
 import threading
 
 import pyotp
 import qrcode
 
-from fastapi import FastAPI, Form, Request
+from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
@@ -38,6 +39,7 @@ from app.db import (
     create_inquiry,
     get_course_settings,
     update_course_settings,
+    update_course_payment_qr,
     add_academy_video,
     delete_academy_video,
     get_academy_videos,
@@ -1273,6 +1275,39 @@ def admin_course_settings(
 
     update_course_settings(four_month_price, one_year_price, support_text)
     return RedirectResponse(url="/admin", status_code=302)
+
+
+@app.post("/admin/course/payment-qr")
+async def admin_course_payment_qr(
+    request: Request,
+    payment_qr: UploadFile = File(...),
+):
+    admin = require_admin(request)
+    if not admin:
+        return RedirectResponse(url="/admin/login", status_code=302)
+
+    content_type = (payment_qr.content_type or "").lower()
+    allowed_types = {
+        "image/png": ".png",
+        "image/jpeg": ".jpg",
+        "image/jpg": ".jpg",
+        "image/webp": ".webp",
+    }
+    suffix = allowed_types.get(content_type)
+    if not suffix:
+        return RedirectResponse(url="/admin?payment_qr=invalid", status_code=302)
+
+    data = await payment_qr.read()
+    if not data or len(data) > 3 * 1024 * 1024:
+        return RedirectResponse(url="/admin?payment_qr=invalid", status_code=302)
+
+    upload_dir = Path("static") / "uploads" / "payments"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"payment-qr-{int(datetime.now(timezone.utc).timestamp())}{suffix}"
+    target = upload_dir / filename
+    target.write_bytes(data)
+    update_course_payment_qr(f"/static/uploads/payments/{filename}")
+    return RedirectResponse(url="/admin?payment_qr=uploaded", status_code=302)
 
 
 @app.post("/admin/academy/videos")

@@ -5,10 +5,10 @@
   <div class="panel academy-header">
     <div>
       <span class="premium-kicker">Academy Access</span>
-      <h1>Premium Classes With Mentors Amol Charpe and Ravinder Jadhav</h1>
+      <h1>Premium Classes With Owner Amol Charpe</h1>
       <p>
         Enter your license key to unlock every class link. Once activated, all current academy
-        lessons become available for your account until the license expires. Amol Charpe is an
+        lessons become available for your account until the license expires. Owner Amol Charpe is an
         Urban Pro Excellence Award winner.
       </p>
     </div>
@@ -95,8 +95,17 @@
         <div class="academy-mentor-card">
           <div class="academy-mentor-title">One To One Live Mentorship</div>
           <div class="academy-mentor-price">Rs 15,000</div>
-          <p>Learn directly from Mentors Amol Charpe and Ravinder Jadhav with focused one-to-one live mentorship and direct support.</p>
+          <p>Learn directly from Owner Amol Charpe with focused one-to-one live mentorship and direct support.</p>
         </div>
+        {% if course_settings.get("payment_qr_path") %}
+          <div class="academy-payment-card">
+            <div>
+              <div class="academy-support-title">Scan And Pay</div>
+              <p>Use Google Pay, Paytm, PhonePe, or any UPI app. Share payment confirmation on WhatsApp for license activation.</p>
+            </div>
+            <img src="{{ course_settings['payment_qr_path'] }}" alt="UPI payment QR code" />
+          </div>
+        {% endif %}
         <a class="btn btn-ghost" href="/premium">View Premium Plans</a>
       </div>
     </div>
@@ -267,6 +276,29 @@
   margin: 0;
   color: #ffe7b3;
 }
+.academy-payment-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 138px;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 14px;
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(138, 180, 248, 0.22);
+  background: rgba(138, 180, 248, 0.08);
+}
+.academy-payment-card p {
+  color: #d7e6fb;
+}
+.academy-payment-card img {
+  width: 138px;
+  height: 138px;
+  object-fit: contain;
+  justify-self: end;
+  border-radius: 12px;
+  background: #fff;
+  padding: 8px;
+}
 
 @media (max-width: 900px) {
   .academy-header,
@@ -276,6 +308,12 @@
   .academy-video-card {
     flex-direction: column;
     align-items: flex-start;
+  }
+  .academy-payment-card {
+    grid-template-columns: 1fr;
+  }
+  .academy-payment-card img {
+    justify-self: start;
   }
 }
 </style>
