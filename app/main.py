@@ -6,6 +6,7 @@ import threading
 
 import pyotp
 import qrcode
+from PIL import Image, UnidentifiedImageError
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.staticfiles import StaticFiles
@@ -1287,25 +1288,31 @@ async def admin_course_payment_qr(
         return RedirectResponse(url="/admin/login", status_code=302)
 
     content_type = (payment_qr.content_type or "").lower()
-    allowed_types = {
-        "image/png": ".png",
-        "image/jpeg": ".jpg",
-        "image/jpg": ".jpg",
-        "image/webp": ".webp",
-    }
-    suffix = allowed_types.get(content_type)
-    if not suffix:
+    allowed_types = {"image/png", "image/jpeg", "image/jpg", "image/webp"}
+    if content_type not in allowed_types:
         return RedirectResponse(url="/admin?payment_qr=invalid", status_code=302)
 
     data = await payment_qr.read()
     if not data or len(data) > 3 * 1024 * 1024:
         return RedirectResponse(url="/admin?payment_qr=invalid", status_code=302)
 
+    try:
+        with Image.open(io.BytesIO(data)) as image:
+            image.load()
+            image = image.convert("RGB")
+            if max(image.size) > 900:
+                image.thumbnail((900, 900), Image.Resampling.NEAREST)
+            output = io.BytesIO()
+            image.save(output, format="PNG", optimize=True, compress_level=9)
+            optimized = output.getvalue()
+    except (UnidentifiedImageError, OSError, ValueError):
+        return RedirectResponse(url="/admin?payment_qr=invalid", status_code=302)
+
     upload_dir = Path("static") / "uploads" / "payments"
     upload_dir.mkdir(parents=True, exist_ok=True)
-    filename = f"payment-qr-{int(datetime.now(timezone.utc).timestamp())}{suffix}"
+    filename = f"payment-qr-{int(datetime.now(timezone.utc).timestamp())}.png"
     target = upload_dir / filename
-    target.write_bytes(data)
+    target.write_bytes(optimized)
     update_course_payment_qr(f"/static/uploads/payments/{filename}")
     return RedirectResponse(url="/admin?payment_qr=uploaded", status_code=302)
 

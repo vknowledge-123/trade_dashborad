@@ -1888,6 +1888,89 @@ h3,
   color: #9aa9bd;
   font-weight: 700;
 }
+
+.payment-qr-trigger {
+  display: grid;
+  gap: 7px;
+  justify-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #a8c7fa;
+  font: inherit;
+  cursor: pointer;
+}
+
+.payment-qr-trigger span {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.payment-qr-modal[hidden] {
+  display: none;
+}
+
+.payment-qr-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1800;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+}
+
+.payment-qr-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(3, 7, 18, 0.78);
+  backdrop-filter: blur(8px);
+  cursor: pointer;
+}
+
+.payment-qr-dialog {
+  position: relative;
+  z-index: 1;
+  width: min(560px, calc(100vw - 28px));
+  padding: 18px;
+  border-radius: 16px;
+  border: 1px solid rgba(232, 234, 237, 0.14);
+  background: #121820;
+  box-shadow: var(--shadow-lg);
+}
+
+.payment-qr-dialog img {
+  display: block;
+  width: min(500px, calc(100vw - 72px));
+  height: min(500px, calc(100vw - 72px));
+  object-fit: contain;
+  margin: 0 auto;
+  border-radius: 14px;
+  background: #fff;
+  padding: 12px;
+}
+
+.payment-qr-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(0, 0, 0, 0.58);
+  color: #fff;
+  font-size: 18px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.payment-qr-caption {
+  margin-top: 12px;
+  text-align: center;
+  color: #cbd7ea;
+  font-size: 13px;
+}
   </style>
 </head>
 <body data-public="{{ 1 if public_mode is defined and public_mode else 0 }}">
@@ -2073,13 +2156,43 @@ h3,
   const calcUsedRisk = document.getElementById("calc-used-risk");
   const calcNote = document.getElementById("calc-note");
   const syncModalScrollLock = () => {
+    const hasOpenQrModal = Boolean(document.querySelector("[data-payment-qr-modal]:not([hidden])"));
     const hasOpenModal = Boolean(
       (calcModal && !calcModal.hidden) ||
-      (sectorModal && !sectorModal.hidden)
+      (sectorModal && !sectorModal.hidden) ||
+      hasOpenQrModal
     );
     document.body.classList.toggle("modal-open", hasOpenModal);
   };
   syncModalScrollLock();
+
+  document.addEventListener("click", (event) => {
+    const openButton = event.target.closest("[data-payment-qr-open]");
+    const closeButton = event.target.closest("[data-payment-qr-close]");
+    if (openButton) {
+      const scope = openButton.closest(".payment-qr-card, .academy-payment-card, section, body");
+      const modal = scope?.querySelector("[data-payment-qr-modal]");
+      if (modal) {
+        modal.hidden = false;
+        syncModalScrollLock();
+      }
+    }
+    if (closeButton) {
+      const modal = closeButton.closest("[data-payment-qr-modal]");
+      if (modal) {
+        modal.hidden = true;
+        syncModalScrollLock();
+      }
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    document.querySelectorAll("[data-payment-qr-modal]:not([hidden])").forEach((modal) => {
+      modal.hidden = true;
+    });
+    syncModalScrollLock();
+  });
 
   const closeQuantityCalculator = () => {
     if (!calcModal) return;

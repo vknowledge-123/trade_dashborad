@@ -103,7 +103,18 @@
               <div class="academy-support-title">Scan And Pay</div>
               <p>Use Google Pay, Paytm, PhonePe, or any UPI app. Share payment confirmation on WhatsApp for license activation.</p>
             </div>
-            <img src="{{ course_settings['payment_qr_path'] }}" alt="UPI payment QR code" />
+            <button class="payment-qr-trigger" type="button" data-payment-qr-open aria-label="Open larger payment QR code">
+              <img src="{{ course_settings['payment_qr_path'] }}" alt="UPI payment QR code" loading="lazy" decoding="async" />
+              <span>Click to expand</span>
+            </button>
+          </div>
+          <div class="payment-qr-modal" data-payment-qr-modal hidden>
+            <button class="payment-qr-backdrop" type="button" data-payment-qr-close aria-label="Close payment QR"></button>
+            <div class="payment-qr-dialog" role="dialog" aria-modal="true" aria-label="Expanded UPI payment QR code">
+              <button class="payment-qr-close" type="button" data-payment-qr-close aria-label="Close payment QR">x</button>
+              <img src="{{ course_settings['payment_qr_path'] }}" alt="Expanded UPI payment QR code" loading="lazy" decoding="async" />
+              <div class="payment-qr-caption">Scan with Google Pay, Paytm, PhonePe, or any UPI app.</div>
+            </div>
           </div>
         {% endif %}
         <a class="btn btn-ghost" href="/premium">View Premium Plans</a>
@@ -290,7 +301,7 @@
 .academy-payment-card p {
   color: #d7e6fb;
 }
-.academy-payment-card img {
+.academy-payment-card .payment-qr-trigger img {
   width: 138px;
   height: 138px;
   object-fit: contain;
@@ -312,7 +323,7 @@
   .academy-payment-card {
     grid-template-columns: 1fr;
   }
-  .academy-payment-card img {
+  .academy-payment-card .payment-qr-trigger img {
     justify-self: start;
   }
 }
