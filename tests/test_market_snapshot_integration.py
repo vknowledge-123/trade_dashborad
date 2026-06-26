@@ -434,6 +434,34 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertEqual(engine.dhan_security_to_segment[2885], "NSE_EQ")
         self.assertEqual(engine.dhan_security_to_instrument[2885], "EQUITY")
 
+    def test_acceleration_volume_baseline_looks_back_to_find_five_sessions(self):
+        engine = MarketEngine(redis_client=None)
+        engine.symbol_to_token = {"360ONE": 1}
+        engine.nifty500_set = {"360ONE"}
+        engine._completed_session_cache_marker = lambda: "2026-06-25"
+        candles = [
+            {"date": "2026-06-18", "close": 1120.0, "volume": 700000},
+            {"date": "2026-06-19", "close": 1145.1, "volume": 1587197},
+            {"date": "2026-06-22", "close": 1139.2, "volume": 496298},
+            {"date": "2026-06-23", "close": 1116.9, "volume": 385961},
+            {"date": "2026-06-24", "close": 1099.9, "volume": 561423},
+        ]
+        requested = []
+        def fake_fetch(token, from_date, to_date, limit=None):
+            requested.append(limit)
+            return candles[-limit:] if limit else candles
+        engine._fetch_recent_day_candles = fake_fetch
+
+        summary = engine._warm_market_open_stock_cache("2026-06-25", force=True)
+
+        self.assertEqual(summary["volume_updated"], 1)
+        self.assertIn(10, requested)
+        cached = engine.acceleration_volume_sma_cache["360ONE"]
+        self.assertEqual(cached["sessions"], 5)
+        self.assertEqual(cached["lookback_sessions"], 10)
+        self.assertEqual(cached["session_minutes"], 5 * 375)
+        self.assertEqual(cached["volume_sma"], round(sum(c["volume"] for c in candles) / (5 * 375), 2))
+
     def test_dhan_historical_daily_payload_matches_sdk_dates_without_future_day(self):
         from app.kite_engine import DhanClient
 

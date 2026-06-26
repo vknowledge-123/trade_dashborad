@@ -52,9 +52,6 @@
     <div class="accel-alert" id="accel-alert" hidden></div>
   {% endif %}
   <div class="accel-cache-status" id="accel-cache-status" hidden></div>
-  {% if admin %}
-    <div class="accel-debug-panel" id="accel-volume-debug" hidden></div>
-  {% endif %}
 
   <div class="panel">
     <div class="table accel-table" id="accel-body">
@@ -153,36 +150,6 @@
   color: #b8f1cf;
   font-size: 13px;
 }
-.accel-debug-panel {
-  display: grid;
-  gap: 10px;
-  padding: 12px;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 184, 48, 0.22);
-  background: rgba(8, 12, 24, 0.76);
-  color: #d7e3f8;
-  font-size: 12px;
-}
-.accel-debug-panel h3 {
-  margin: 0;
-  font-size: 14px;
-}
-.accel-debug-card {
-  display: grid;
-  gap: 6px;
-  padding: 10px;
-  border-radius: 8px;
-  border: 1px solid rgba(255,255,255,0.08);
-  background: rgba(255,255,255,0.035);
-}
-.accel-debug-card pre {
-  margin: 0;
-  max-height: 220px;
-  overflow: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
-  color: #aebbd4;
-}
 .accel-row {
   grid-template-columns: 1.2fr 0.66fr 0.74fr 0.74fr 0.68fr 0.78fr 0.58fr 0.78fr auto;
 }
@@ -222,7 +189,6 @@
   const alertBox = document.getElementById("accel-alert");
   const volumeStatus = document.getElementById("accel-volume-status");
   const cacheStatus = document.getElementById("accel-cache-status");
-  const volumeDebug = document.getElementById("accel-volume-debug");
   const timeframe = document.getElementById("accel-timeframe");
   const minGain = document.getElementById("accel-min-gain");
   const apply = document.getElementById("accel-apply");
@@ -245,34 +211,6 @@
   const multiplier = (value) => {
     const number = Number(value);
     return Number.isFinite(number) ? `${number.toFixed(2)}x` : "-";
-  };
-  const escapeHtml = (value) => String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-  const renderVolumeDebug = (samples) => {
-    if (!volumeDebug) return;
-    const rows = Array.isArray(samples) ? samples : [];
-    volumeDebug.hidden = !rows.length;
-    if (!rows.length) {
-      volumeDebug.innerHTML = "";
-      return;
-    }
-    volumeDebug.innerHTML = `
-      <h3>Volume Baseline Debug</h3>
-      ${rows.map((sample) => `
-        <div class="accel-debug-card">
-          <strong>${escapeHtml(sample.symbol)} · ${escapeHtml(sample.reason)}</strong>
-          <div>candles: <span class="mono">${escapeHtml(sample.candle_count)}</span></div>
-          <div>keys: <span class="mono">${escapeHtml((sample.candle_keys || []).join(", "))}</span></div>
-          <div>parsed volumes: <span class="mono">${escapeHtml(JSON.stringify(sample.volumes || []))}</span></div>
-          <div>volume candidates: <span class="mono">${escapeHtml(JSON.stringify(sample.volume_candidates || {}))}</span></div>
-          <pre>${escapeHtml(JSON.stringify(sample.candles || [], null, 2))}</pre>
-        </div>
-      `).join("")}
-    `;
   };
   const rowHtml = (row) => `
     <div class="table-row accel-row" data-symbol="${row.symbol}">
@@ -319,7 +257,6 @@
       if (!cacheStatus || !status) return;
       cacheStatus.hidden = false;
       cacheStatus.textContent = status.message || "Cache job updated.";
-      renderVolumeDebug(status.volume_debug_samples || []);
       if (status.is_running) {
         cacheButton.disabled = true;
         cacheButton.textContent = "Caching...";
