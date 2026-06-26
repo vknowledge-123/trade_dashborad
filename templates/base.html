@@ -2170,8 +2170,14 @@ h3,
     const openButton = event.target.closest("[data-payment-qr-open]");
     const closeButton = event.target.closest("[data-payment-qr-close]");
     if (openButton) {
-      const scope = openButton.closest(".payment-qr-card, .academy-payment-card, section, body");
-      const modal = scope?.querySelector("[data-payment-qr-modal]");
+      const card = openButton.closest(".payment-qr-card, .academy-payment-card");
+      let modal = null;
+      if (card && card.nextElementSibling?.matches("[data-payment-qr-modal]")) {
+        modal = card.nextElementSibling;
+      } else {
+        const scope = openButton.closest("section, main, body");
+        modal = scope?.querySelector("[data-payment-qr-modal]");
+      }
       if (modal) {
         modal.hidden = false;
         syncModalScrollLock();
