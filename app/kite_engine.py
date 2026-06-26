@@ -35,6 +35,7 @@ LIVE_FEED_RECONNECT_COOLDOWN_SECONDS = 20
 SECTOR_SNAPSHOT_REFRESH_SECONDS = 5
 RRG_BENCHMARK_SYMBOL = "NIFTY 50"
 RRG_LOOKBACK_SESSIONS = 15
+RRG_FETCH_SESSIONS = 30
 RRG_TRAIL_POINTS = 14
 RRG_NORMALIZATION_WINDOW = 14
 HISTORICAL_DAY_REQUEST_DELAY_SECONDS = 0.35
@@ -499,6 +500,12 @@ class MarketEngine:
                     sector_tokens[name] = token
 
         for name, security_id in DHAN_SECTOR_SECURITY_IDS.items():
+            if name == RRG_BENCHMARK_SYMBOL:
+                token = int(security_id)
+                all_index_tokens[name] = token
+                security_to_segment[token] = "IDX_I"
+                security_to_instrument[token] = "INDEX"
+                continue
             if name in sector_names and name not in sector_tokens:
                 token = int(security_id)
                 sector_tokens[name] = token
@@ -3367,7 +3374,7 @@ class MarketEngine:
         if not benchmark_token:
             return None, {}, f"Benchmark token for {benchmark_symbol} is not available."
 
-        session_window = self._trading_session_window(datetime.fromisoformat(cache_marker).date(), RRG_LOOKBACK_SESSIONS)
+        session_window = self._trading_session_window(datetime.fromisoformat(cache_marker).date(), RRG_FETCH_SESSIONS)
         if len(session_window) < RRG_LOOKBACK_SESSIONS:
             return None, {}, "Not enough completed trading sessions are available yet."
 

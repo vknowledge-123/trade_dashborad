@@ -401,6 +401,18 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         for security_id in expected_ids.values():
             self.assertEqual(engine.dhan_security_to_segment[security_id], "IDX_I")
 
+    def test_dhan_universe_always_adds_rrg_benchmark_fallback(self):
+        engine = MarketEngine(redis_client=None)
+        engine._dhan_scrip_rows = lambda: []
+        engine._refresh_sector_memberships = lambda *args, **kwargs: None
+        engine._fetch_sector_quote = lambda *args, **kwargs: ({}, {})
+
+        engine._build_dhan_universe(["NIFTY IT"])
+
+        self.assertEqual(engine.index_tokens["NIFTY 50"], 13)
+        self.assertEqual(engine.dhan_security_to_segment[13], "IDX_I")
+        self.assertEqual(engine.dhan_security_to_instrument[13], "INDEX")
+
     def test_dhan_segment_normalizer_matches_working_exporter_inputs(self):
         engine = MarketEngine(redis_client=None)
 
@@ -735,6 +747,30 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertIn("trail", payload["items"][0])
         self.assertIn("quadrant", payload["items"][0])
         self.assertTrue(all("x" in point and "y" in point for point in payload["items"][0]["trail"]))
+
+    def test_rrg_history_fetch_uses_wider_window_than_chart_lookback(self):
+        engine = MarketEngine(redis_client=None)
+        engine.kite = object()
+        engine.index_tokens = {"NIFTY 50": 13}
+        engine.sector_tokens = {"NIFTY IT": 29}
+        requested_windows = []
+        sessions = [datetime(2026, 5, day).date() for day in range(1, 31)]
+        engine._trading_session_window = lambda end_date, sessions_count: sessions[-sessions_count:]
+        engine._session_start_dt = lambda session_date: session_date
+        engine._session_end_dt = lambda session_date: session_date
+
+        def fake_series(token, from_date, to_date):
+            requested_windows.append((from_date, to_date))
+            return [(f"2026-05-{day:02d}", 100 + day + token / 1000) for day in range(1, 31)]
+
+        engine._fetch_rrg_price_series = fake_series
+
+        benchmark, components, error = engine._build_rrg_series_map("NIFTY 50", "2026-05-30")
+
+        self.assertIsNone(error)
+        self.assertEqual(len(benchmark), 30)
+        self.assertIn("NIFTY IT", components)
+        self.assertEqual(requested_windows[0][0], sessions[0])
 
     def test_relative_rotation_uses_cached_same_session_payload(self):
         engine = MarketEngine(redis_client=None)
