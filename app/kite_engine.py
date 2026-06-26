@@ -8,7 +8,7 @@ import struct
 import threading
 import time
 from collections import defaultdict
-from datetime import datetime, timedelta, time as dtime, timezone
+from datetime import date, datetime, timedelta, time as dtime, timezone
 from urllib.parse import urljoin
 from zoneinfo import ZoneInfo
 
@@ -395,6 +395,7 @@ class MarketEngine:
             "broker": self._current_broker(),
             "message": "No market history cache job has been started yet.",
             "error": None,
+            "volume_debug_samples": [],
         }
         self.badge_warm_lock = threading.Lock()
         self.badge_warm_thread = None
@@ -886,6 +887,49 @@ class MarketEngine:
                     if key in first
                 },
             )
+
+    def _acceleration_volume_debug_sample(self, symbol, candles, volumes, reason):
+        candles = candles or []
+        first = candles[0] if candles else None
+        candle_keys = sorted(first.keys()) if isinstance(first, dict) else []
+        volume_candidates = {}
+        if isinstance(first, dict):
+            volume_candidates = {
+                key: first.get(key)
+                for key in (
+                    "volume",
+                    "volumes",
+                    "Volume",
+                    "VOLUME",
+                    "vol",
+                    "VOL",
+                    "volume_traded",
+                    "total_volume",
+                )
+                if key in first
+            }
+
+        def safe_value(value):
+            if isinstance(value, (datetime, date)):
+                return value.isoformat()
+            return value
+
+        compact_candles = []
+        for candle in candles[:ACCELERATION_VOLUME_SMA_SESSIONS]:
+            if not isinstance(candle, dict):
+                compact_candles.append(str(candle))
+                continue
+            compact_candles.append({key: safe_value(value) for key, value in candle.items()})
+
+        return {
+            "symbol": symbol,
+            "reason": reason,
+            "candle_count": len(candles),
+            "candle_keys": candle_keys,
+            "volume_candidates": volume_candidates,
+            "volumes": volumes,
+            "candles": compact_candles,
+        }
 
     def _float_or_none(self, value):
         if value in (None, ""):
@@ -3205,6 +3249,7 @@ class MarketEngine:
         processed = 0
         updated = 0
         debug_failures = 0
+        volume_debug_samples = []
         for symbol in symbols:
             processed += 1
             self._update_history_cache_status(
@@ -3237,6 +3282,15 @@ class MarketEngine:
                         volumes,
                         f"skipped volume SMA: need {ACCELERATION_VOLUME_SMA_SESSIONS} volumes, got {len(volumes)}",
                     )
+                    if len(volume_debug_samples) < ACCELERATION_VOLUME_DEBUG_LIMIT:
+                        volume_debug_samples.append(
+                            self._acceleration_volume_debug_sample(
+                                symbol,
+                                candles,
+                                volumes,
+                                f"skipped volume SMA: need {ACCELERATION_VOLUME_SMA_SESSIONS} volumes, got {len(volumes)}",
+                            )
+                        )
                 continue
             volume_sum = sum(volumes)
             volume_sma = volume_sum / NSE_INTRADAY_SESSION_MINUTES
@@ -3255,7 +3309,7 @@ class MarketEngine:
 
         if updated:
             self._save_acceleration_volume_sma_cache()
-        return {"processed": processed, "total": total, "updated": updated}
+        return {"processed": processed, "total": total, "updated": updated, "volume_debug_samples": volume_debug_samples}
 
     def _warm_market_open_stock_cache(self, cache_marker, force=False):
         self._restore_previous_day_badges_cache()
@@ -3292,6 +3346,7 @@ class MarketEngine:
         badges_dirty = False
         volume_dirty = False
         debug_failures = 0
+        volume_debug_samples = []
 
         for symbol in symbols:
             processed += 1
@@ -3321,13 +3376,19 @@ class MarketEngine:
             token = self.symbol_to_token.get(symbol)
             candles = self._fetch_recent_day_candles(token, from_date, to_date, limit=ACCELERATION_VOLUME_SMA_SESSIONS)
             if not candles:
+                reason = "skipped volume SMA: no candles"
                 if (
                     ACCELERATION_VOLUME_DEBUG
                     or symbol in ACCELERATION_VOLUME_DEBUG_SYMBOLS
                     or debug_failures < ACCELERATION_VOLUME_DEBUG_LIMIT
                 ):
                     debug_failures += 1
-                    self._debug_acceleration_volume(symbol, candles, [], "skipped volume SMA: no candles")
+                    self._debug_acceleration_volume(symbol, candles, [], reason)
+                    if len(volume_debug_samples) < ACCELERATION_VOLUME_DEBUG_LIMIT:
+                        volume_debug_samples.append(
+                            self._acceleration_volume_debug_sample(symbol, candles, [], reason)
+                        )
+                        self._update_history_cache_status(volume_debug_samples=volume_debug_samples)
                 continue
 
             latest_close = candles[-1].get("close")
@@ -3379,12 +3440,13 @@ class MarketEngine:
                 or debug_failures < ACCELERATION_VOLUME_DEBUG_LIMIT
             ):
                 debug_failures += 1
-                self._debug_acceleration_volume(
-                    symbol,
-                    candles,
-                    volumes,
-                    f"skipped volume SMA: need {ACCELERATION_VOLUME_SMA_SESSIONS} volumes, got {len(volumes)}",
-                )
+                reason = f"skipped volume SMA: need {ACCELERATION_VOLUME_SMA_SESSIONS} volumes, got {len(volumes)}"
+                self._debug_acceleration_volume(symbol, candles, volumes, reason)
+                if len(volume_debug_samples) < ACCELERATION_VOLUME_DEBUG_LIMIT:
+                    volume_debug_samples.append(
+                        self._acceleration_volume_debug_sample(symbol, candles, volumes, reason)
+                    )
+                    self._update_history_cache_status(volume_debug_samples=volume_debug_samples)
 
         if prev_close_cache_dirty:
             self._save_previous_close_cache()
@@ -3398,6 +3460,7 @@ class MarketEngine:
             "badge_updated": badge_updated,
             "volume_updated": volume_updated,
             "previous_close_updated": previous_close_updated,
+            "volume_debug_samples": volume_debug_samples,
         }
 
     def _market_open_stock_cache_ready(self, cache_marker):
@@ -3533,6 +3596,7 @@ class MarketEngine:
             broker=self._current_broker(),
             error=None,
             market_open_ready=False,
+            volume_debug_samples=[],
         )
         try:
             stock_summary = self._warm_market_open_stock_cache(cache_marker, force=force)
@@ -3551,6 +3615,7 @@ class MarketEngine:
                 ),
                 error=rrg_payload.get("error"),
                 market_open_ready=True,
+                volume_debug_samples=stock_summary.get("volume_debug_samples") or [],
             )
         except Exception as exc:
             self.last_error = str(exc)
@@ -3598,6 +3663,7 @@ class MarketEngine:
                     "broker": self._current_broker(),
                     "error": None,
                     "market_open_ready": False,
+                    "volume_debug_samples": [],
                 }
             )
             thread = threading.Thread(
