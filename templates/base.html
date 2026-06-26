@@ -7,7 +7,7 @@
   <title>{{ title if title else "Trade Dashboard" }}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&family=Syne:wght@600;700;800&family=Playfair+Display:wght@600;700;800&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
   <style>
 /* ─── Design Tokens ─────────────────────────────────────── */
 :root {
@@ -185,8 +185,8 @@ body::after {
   font-size: 17px;
   font-weight: 800;
   color: #fff;
-  font-family: 'Syne', sans-serif;
-  letter-spacing: -1px;
+  font-family: 'Inter', system-ui, sans-serif;
+  letter-spacing: 0;
 }
 
 .brand-text {
@@ -846,7 +846,7 @@ body::after {
 }
 
 .promo-content h3 {
-  font-family: 'Syne', sans-serif;
+  font-family: 'Inter', system-ui, sans-serif;
   font-size: clamp(16px, 2vw, 20px);
   font-weight: 700;
   margin-bottom: 6px;
@@ -919,7 +919,7 @@ body::after {
 }
 
 .hero-copy h1 {
-  font-family: 'Syne', sans-serif;
+  font-family: 'Inter', system-ui, sans-serif;
   font-size: clamp(28px, 4vw, 48px);
   font-weight: 800;
   line-height: 1.12;
@@ -946,7 +946,7 @@ body::after {
 .stat-value {
   font-size: 26px;
   font-weight: 800;
-  font-family: 'Syne', sans-serif;
+  font-family: 'Inter', system-ui, sans-serif;
   background: linear-gradient(135deg, #fff, var(--cyan));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -968,7 +968,7 @@ body::after {
   backdrop-filter: blur(16px);
 }
 .card-header {
-  font-family: 'Syne', sans-serif;
+  font-family: 'Inter', system-ui, sans-serif;
   font-weight: 700;
   font-size: 14px;
   color: var(--muted);
@@ -1049,7 +1049,7 @@ body {
 .feature:hover::before { opacity: 1; }
 
 .feature h3 {
-  font-family: 'Syne', sans-serif;
+  font-family: 'Inter', system-ui, sans-serif;
   font-weight: 700;
   font-size: 15px;
   margin-bottom: 8px;
@@ -1088,7 +1088,7 @@ body {
 }
 
 .auth-card h2 {
-  font-family: 'Playfair Display', serif;
+  font-family: 'Inter', system-ui, sans-serif;
   font-weight: 700;
   font-size: clamp(22px, 2.2vw, 28px);
   line-height: 1.15;
@@ -1804,6 +1804,89 @@ html {
     max-width: 100%;
     white-space: normal;
   }
+}
+
+/* Professional finance UI baseline */
+body,
+button,
+input,
+select,
+textarea {
+  font-family: 'Inter', Arial, system-ui, sans-serif !important;
+  letter-spacing: 0;
+}
+
+h1,
+h2,
+h3,
+h4,
+.brand-name,
+.panel-header h3,
+.dash-hero h1,
+.hero-copy h1,
+.premium-copy h1,
+.academy-header h1,
+.rrg-hero h1,
+.swing-header h1,
+.scanner-header h1,
+.admin-hero h1,
+.svc-hero-center h1 {
+  font-family: 'Inter', Arial, system-ui, sans-serif !important;
+  letter-spacing: 0 !important;
+  line-height: 1.18;
+}
+
+h1,
+.hero-copy h1,
+.premium-copy h1,
+.academy-header h1,
+.rrg-hero h1,
+.swing-header h1,
+.scanner-header h1,
+.admin-hero h1,
+.svc-hero-center h1 {
+  font-weight: 750 !important;
+  color: #eef3fb;
+}
+
+h2,
+h3,
+.panel-header h3 {
+  font-weight: 700 !important;
+  color: #eef3fb;
+}
+
+.page {
+  padding-top: 12px;
+}
+
+.panel {
+  border-radius: 12px;
+}
+
+.panel-header {
+  margin-bottom: 14px;
+}
+
+.panel-sub,
+.muted {
+  color: #93a4bc !important;
+}
+
+.table-row,
+.sector-stock-row,
+.scanner-row,
+.scanner-distance-row,
+.swing-row,
+.backtest-row,
+.accel-row {
+  font-size: 13px;
+}
+
+.table-head,
+.sector-stock-head {
+  color: #9aa9bd;
+  font-weight: 700;
 }
   </style>
 </head>

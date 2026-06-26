@@ -19,24 +19,17 @@
           </div>
         {% else %}
           <div class="trial-chip premium-stage">
-            <span class="trial-cta">Your first week is complete. Join premium now.</span>
-            Unlock academy access, premium strategy, live Q&amp;A, and direct mentor support with Mentors Amol Charpe and Ravinder Jadhav.
-            <a href="/premium" class="trial-link">View premium plans</a>
+            <span class="trial-cta">Your dashboard access period is complete.</span>
+            Register or contact support to continue platform access.
           </div>
         {% endif %}
       {% elif trial %}
         <div class="trial-chip {{ 'active' if trial.active else 'expired' }}">
           {% if trial.active %}
             Platform trial · {{ trial.remaining_days }} days left (ends {{ trial.end_date }})
-            <a href="/premium" class="trial-link">Explore premium</a>
           {% else %}
-            Your 1-week platform trial is complete. Join premium to continue with academy access and mentor support.
-            <a href="/premium" class="trial-link">Join premium</a>
+            Your 1-week platform trial is complete. Contact support to continue platform access.
           {% endif %}
-        </div>
-      {% else %}
-        <div class="trial-chip active">
-          <span class="trial-cta">Premium members get Academy access, live Q&amp;A, and direct mentor support from Mentors Amol Charpe and Ravinder Jadhav.</span>
         </div>
       {% endif %}
       <div class="status-line">
@@ -54,27 +47,6 @@
       </div>
     </div>
   </section>
-
-  <div class="promo-strip promo-rich">
-    <div class="promo-strip-label">
-      <span class="promo-dot"></span>
-      <span>Academy</span>
-    </div>
-    <div class="promo-copy">
-      <div class="promo-title">Premium trading academy</div>
-      <div class="promo-strip-text">
-        Learn SL hunting, operator concepts, liquidity zones, pyramiding, and premium equity, Nifty, and Banknifty strategy with Mentors Amol Charpe and Ravinder Jadhav.
-      </div>
-      <div class="promo-meta" aria-label="Premium plan highlights">
-        <span>20-hour course</span>
-        <span>Trading psychology</span>
-        <span>Technical indicators</span>
-        <span>Live Q&amp;A support</span>
-        <span>Urban Pro Excellence Award winner</span>
-      </div>
-    </div>
-    <a href="/premium" class="promo-strip-cta">View Premium</a>
-  </div>
 
   <section class="dash-grid">
     <div class="panel panel-gainers">
