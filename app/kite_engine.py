@@ -2087,6 +2087,62 @@ class MarketEngine:
         rs = avg_gain / avg_loss
         return 100.0 - (100.0 / (1.0 + rs))
 
+    def _swing_staircase_pattern(self, candles, lookback=8):
+        recent = candles[-lookback:] if len(candles) >= lookback else candles[:]
+        if len(recent) < 5:
+            return {
+                "is_valid": False,
+                "score": 0.0,
+                "label": "Staircase forming",
+                "higher_low_count": 0,
+                "higher_close_count": 0,
+            }
+        higher_lows = sum(1 for previous, current in zip(recent[:-1], recent[1:]) if current["low"] >= previous["low"])
+        higher_closes = sum(1 for previous, current in zip(recent[:-1], recent[1:]) if current["close"] >= previous["close"])
+        tight_pullbacks = 0
+        for previous, current in zip(recent[:-1], recent[1:]):
+            previous_range = max(previous["high"] - previous["low"], 0.01)
+            pullback_depth = (previous["close"] - current["low"]) / previous_range
+            if pullback_depth <= 0.75:
+                tight_pullbacks += 1
+        total_steps = max(len(recent) - 1, 1)
+        structure_ratio = (higher_lows + higher_closes + tight_pullbacks) / (total_steps * 3)
+        is_valid = higher_lows >= max(3, total_steps - 3) and higher_closes >= max(3, total_steps - 4)
+        label = "Staircase confirmed" if is_valid else "Staircase forming"
+        return {
+            "is_valid": is_valid,
+            "score": round(structure_ratio * 100, 1),
+            "label": label,
+            "higher_low_count": higher_lows,
+            "higher_close_count": higher_closes,
+        }
+
+    def _swing_price_volume_growth(self, candles):
+        if len(candles) < 6:
+            return {
+                "is_valid": False,
+                "price_growth_pct": 0.0,
+                "volume_growth_pct": 0.0,
+                "volume_ratio": 0.0,
+                "label": "Price-volume pending",
+            }
+        current = candles[-1]
+        previous = candles[-2]
+        prior_volumes = [item["volume"] for item in candles[-6:-1] if item.get("volume")]
+        avg_volume_5 = sum(prior_volumes) / len(prior_volumes) if prior_volumes else 0.0
+        price_growth_pct = ((current["close"] - previous["close"]) / previous["close"]) * 100 if previous["close"] else 0.0
+        volume_growth_pct = ((current["volume"] - previous["volume"]) / previous["volume"]) * 100 if previous["volume"] else 0.0
+        volume_ratio = (current["volume"] / avg_volume_5) if avg_volume_5 else 0.0
+        is_valid = current["close"] > previous["close"] and current["volume"] > previous["volume"] and volume_ratio >= 1.05
+        label = "Price-volume growth" if is_valid else "Price-volume not confirmed"
+        return {
+            "is_valid": is_valid,
+            "price_growth_pct": round(price_growth_pct, 2),
+            "volume_growth_pct": round(volume_growth_pct, 2),
+            "volume_ratio": round(volume_ratio, 2) if volume_ratio else 0.0,
+            "label": label,
+        }
+
     def _swing_signal_for_candles(self, symbol, candles):
         candles = self._clean_daily_candles(candles)
         if len(candles) < 35:
@@ -2109,6 +2165,8 @@ class MarketEngine:
         prev_close = previous["close"]
         avg_volume = self._sma(volumes, min(20, len(volumes))) or 0
         volume_ratio = (current["volume"] / avg_volume) if avg_volume else 0
+        staircase = self._swing_staircase_pattern(candles)
+        price_volume = self._swing_price_volume_growth(candles)
         price = current["close"]
         score = 42.0
         scan_state = "WATCH_RECLAIM"
@@ -2127,6 +2185,18 @@ class MarketEngine:
         if volume_ratio >= 1.15:
             score += 6
             notes.append("Volume is expanding versus 20-day average.")
+        if staircase["is_valid"]:
+            score += 12
+            notes.append("Daily staircase pattern is confirmed with higher lows and improving closes.")
+        else:
+            score -= 8
+            notes.append("Daily staircase structure is still forming.")
+        if price_volume["is_valid"]:
+            score += 12
+            notes.append("Daily candle confirms price and volume growth together.")
+        else:
+            score -= 10
+            notes.append("Price-volume growth is not confirmed on the latest daily candle.")
 
         range_20 = max(recent_high - recent_low, 0.01)
         controlled_retracement = price >= recent_low + range_20 * 0.30 and price <= recent_high - range_20 * 0.05
@@ -2185,6 +2255,10 @@ class MarketEngine:
             score -= 6
             notes.append("Nearest resistance zone is close, so scan quality is capped.")
 
+        if scan_state == "BULLISH_SCAN" and (not staircase["is_valid"] or not price_volume["is_valid"]):
+            scan_state = "WATCH_RECLAIM"
+            setup = "Bullish watch: structure confirmation pending"
+            score = min(score, 61.0)
         rating = "Strong Bullish" if score >= 75 and scan_state == "BULLISH_SCAN" else "Bullish" if score >= 62 and scan_state == "BULLISH_SCAN" else "Watch"
         return {
             "symbol": symbol,
@@ -2202,6 +2276,14 @@ class MarketEngine:
             "rsi": round(rsi, 2),
             "atr": round(atr, 2),
             "volume_ratio": round(volume_ratio, 2) if volume_ratio else None,
+            "staircase_pattern": staircase["label"],
+            "staircase_score": staircase["score"],
+            "higher_low_count": staircase["higher_low_count"],
+            "higher_close_count": staircase["higher_close_count"],
+            "price_growth_pct": price_volume["price_growth_pct"],
+            "volume_growth_pct": price_volume["volume_growth_pct"],
+            "daily_volume_ratio": price_volume["volume_ratio"],
+            "price_volume_pattern": price_volume["label"],
             "support_zone": f"{support_zone_low:.2f} - {support_zone_high:.2f}",
             "resistance_zone": f"{resistance_zone_low:.2f} - {resistance_zone_high:.2f}",
             "support_zone_low": round(support_zone_low, 2),

@@ -6,7 +6,7 @@
     <div>
       <div class="panel-sub">Daily timeframe scanner</div>
       <h1>Swing Trading Scanner</h1>
-      <p class="muted">Daily bullish scan using RSI 40-60, liquidity sweep, reclaim, support zone, resistance zone, and heuristic score.</p>
+      <p class="muted">Daily bullish scan using RSI 40-60, liquidity sweep, reclaim, staircase structure, price-volume growth, support zone, resistance zone, and heuristic score.</p>
     </div>
     <div class="status-line">
       <span class="pill">{{ scanner.tracked_count or 0 }} stocks</span>
@@ -51,6 +51,8 @@
         <span>Score</span>
         <span>Price</span>
         <span>RSI</span>
+        <span>Pattern</span>
+        <span>Vol Growth</span>
         <span>Setup</span>
         <span>Liquidity</span>
         <span>Support Zone</span>
@@ -67,6 +69,14 @@
           <span class="mono">{{ row.score }}</span>
           <span class="mono">{{ row.price }}</span>
           <span class="mono">{{ row.rsi }}</span>
+          <span>
+            <span class="swing-stack-main">{{ row.staircase_pattern or '-' }}</span>
+            <span class="sector-stock-name">HL {{ row.higher_low_count or 0 }} / HC {{ row.higher_close_count or 0 }}</span>
+          </span>
+          <span>
+            <span class="swing-stack-main">{{ row.price_growth_pct or 0 }}%</span>
+            <span class="sector-stock-name">Vol {{ row.volume_growth_pct or 0 }}% · {{ row.daily_volume_ratio or '-' }}x</span>
+          </span>
           <span>{{ row.setup }}</span>
           <span>
             <span class="swing-stack-main">{{ row.liquidity_pattern }}</span>
@@ -80,7 +90,7 @@
       {% if not scanner.filtered_rows %}
         <div class="table-row swing-row swing-empty-row">
           <span>No swing candidates match the current filter yet.</span>
-          <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+          <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
         </div>
       {% endif %}
     </div>
@@ -97,6 +107,8 @@
       <div class="swing-notes">
         <div><strong>RSI:</strong> only daily RSI 40-60 stocks are considered, so the scan focuses on accumulation/retracement zones instead of overbought moves.</div>
         <div><strong>Liquidity:</strong> looks for PDL sweep reclaim, 20-day swing-low sweep reclaim, previous close reclaim, or PDH resistance reclaim.</div>
+        <div><strong>Staircase:</strong> bullish scans need daily higher-low structure with improving closes, so random one-day spikes stay as watch items.</div>
+        <div><strong>Price-volume:</strong> latest daily close and volume must grow together, with volume above the recent baseline.</div>
         <div><strong>Zones:</strong> scanner displays support and resistance zones, not entry calls or exit-price calls.</div>
       </div>
     </div>
@@ -218,7 +230,7 @@
   padding: 8px 10px;
 }
 .swing-row {
-  grid-template-columns: 1.05fr 0.85fr 0.5fr 0.65fr 0.5fr 1.15fr 1fr 0.9fr 0.9fr auto;
+  grid-template-columns: 1.05fr 0.85fr 0.5fr 0.65fr 0.5fr 1fr 0.9fr 1.1fr 1fr 0.9fr 0.9fr auto;
 }
 .swing-empty-row {
   color: #9fb2d0;
@@ -261,8 +273,8 @@
 }
 @media (max-width: 1100px) {
   .swing-row {
-    grid-template-columns: minmax(160px, 1.1fr) 0.85fr 0.55fr 0.7fr 0.55fr 1fr 1fr 0.9fr 0.9fr auto;
-    min-width: 1120px;
+    grid-template-columns: minmax(160px, 1.1fr) 0.85fr 0.55fr 0.7fr 0.55fr 1fr 0.9fr 1fr 1fr 0.9fr 0.9fr auto;
+    min-width: 1320px;
   }
   .swing-table {
     overflow-x: auto;
@@ -299,8 +311,10 @@
   .swing-row:not(.table-head) > span:nth-child(3)::before { content: "Score "; color: #6b7fa3; }
   .swing-row:not(.table-head) > span:nth-child(4)::before { content: "Price "; color: #6b7fa3; }
   .swing-row:not(.table-head) > span:nth-child(5)::before { content: "RSI "; color: #6b7fa3; }
-  .swing-row:not(.table-head) > span:nth-child(8)::before { content: "Support "; color: #6b7fa3; }
-  .swing-row:not(.table-head) > span:nth-child(9)::before { content: "Resistance "; color: #6b7fa3; }
+  .swing-row:not(.table-head) > span:nth-child(6)::before { content: "Pattern "; color: #6b7fa3; }
+  .swing-row:not(.table-head) > span:nth-child(7)::before { content: "Volume "; color: #6b7fa3; }
+  .swing-row:not(.table-head) > span:nth-child(10)::before { content: "Support "; color: #6b7fa3; }
+  .swing-row:not(.table-head) > span:nth-child(11)::before { content: "Resistance "; color: #6b7fa3; }
 }
 </style>
 
@@ -334,6 +348,8 @@
       <span class="mono">${row.score ?? "-"}</span>
       <span class="mono">${row.price ?? "-"}</span>
       <span class="mono">${row.rsi ?? "-"}</span>
+      <span><span class="swing-stack-main">${row.staircase_pattern || "-"}</span><span class="sector-stock-name">HL ${row.higher_low_count ?? 0} / HC ${row.higher_close_count ?? 0}</span></span>
+      <span><span class="swing-stack-main">${row.price_growth_pct ?? 0}%</span><span class="sector-stock-name">Vol ${row.volume_growth_pct ?? 0}% · ${row.daily_volume_ratio ?? "-"}x</span></span>
       <span>${row.setup || "-"}</span>
       <span><span class="swing-stack-main">${row.liquidity_pattern || "-"}</span><span class="sector-stock-name">Reclaimed ${row.reclaimed_level ?? "-"}</span></span>
       <span class="mono">${row.support_zone ?? "-"}</span>
@@ -352,7 +368,7 @@
       if (!response.ok) return;
       const data = await response.json();
       const rows = data.filtered_rows || [];
-      body.innerHTML = tableHead + (rows.length ? rows.map(rowHtml).join("") : '<div class="table-row swing-row swing-empty-row"><span>No bullish scan candidates match the current filter yet.</span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>');
+      body.innerHTML = tableHead + (rows.length ? rows.map(rowHtml).join("") : '<div class="table-row swing-row swing-empty-row"><span>No bullish scan candidates match the current filter yet.</span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>');
       if (count) count.textContent = `${rows.length} / ${data.total_rows ?? (data.rows || []).length ?? 0}`;
       if (updatedAt) updatedAt.textContent = data.updated_at || "-";
       if (alertBox) {

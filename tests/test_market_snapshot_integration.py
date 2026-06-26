@@ -147,6 +147,53 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertEqual(row["change"], 1.35)
         self.assertEqual(latest_dt, "2026-05-09")
 
+    def test_swing_staircase_pattern_requires_higher_low_structure(self):
+        engine = MarketEngine(redis_client=None)
+        candles = []
+        price = 100.0
+        for index in range(8):
+            close = price + (0.4 if index % 2 == 0 else -0.1)
+            candles.append(
+                {
+                    "date": f"2026-06-{index + 1:02d}",
+                    "open": price,
+                    "high": max(price, close) + 0.4,
+                    "low": min(price, close) - 0.15 + index * 0.04,
+                    "close": close,
+                    "volume": 100000 + index * 1000,
+                }
+            )
+            price = close
+
+        pattern = engine._swing_staircase_pattern(candles)
+
+        self.assertTrue(pattern["is_valid"])
+        self.assertEqual(pattern["label"], "Staircase confirmed")
+
+    def test_swing_price_volume_growth_requires_close_and_volume_expansion(self):
+        engine = MarketEngine(redis_client=None)
+        candles = [
+            {
+                "date": f"2026-06-{index + 1:02d}",
+                "open": 100 + index,
+                "high": 101 + index,
+                "low": 99 + index,
+                "close": 100 + index,
+                "volume": 100000,
+            }
+            for index in range(6)
+        ]
+        candles[-2]["close"] = 105.0
+        candles[-2]["volume"] = 100000
+        candles[-1]["close"] = 106.0
+        candles[-1]["volume"] = 135000
+
+        growth = engine._swing_price_volume_growth(candles)
+
+        self.assertTrue(growth["is_valid"])
+        self.assertEqual(growth["label"], "Price-volume growth")
+        self.assertGreater(growth["volume_ratio"], 1.05)
+
     def test_rest_snapshot_uses_quote_volume_field(self):
         engine = MarketEngine(redis_client=None)
         engine.kite = object()
