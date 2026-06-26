@@ -39,6 +39,7 @@ RRG_FETCH_SESSIONS = 30
 RRG_TRAIL_POINTS = 14
 RRG_NORMALIZATION_WINDOW = 14
 HISTORICAL_DAY_REQUEST_DELAY_SECONDS = 0.35
+SWING_SCANNER_CACHE_VERSION = 2
 ACCELERATION_SCANNER_MIN_GAIN_PERCENT = 0.5
 ACCELERATION_TIMEFRAMES = {1, 5, 15}
 ACCELERATION_VOLUME_SMA_SESSIONS = 5
@@ -1999,10 +2000,18 @@ class MarketEngine:
 
     def _save_swing_scanner_cache(self, payload):
         if payload:
+            payload = dict(payload)
+            payload["cache_version"] = SWING_SCANNER_CACHE_VERSION
             save_market_cache(SWING_SCANNER_CACHE_KEY, payload)
 
+    def _is_valid_swing_scanner_cache(self, payload):
+        return bool(payload) and payload.get("cache_version") == SWING_SCANNER_CACHE_VERSION
+
     def _cached_swing_scanner_payload(self):
-        return load_market_cache(SWING_SCANNER_CACHE_KEY)
+        payload = load_market_cache(SWING_SCANNER_CACHE_KEY)
+        if not self._is_valid_swing_scanner_cache(payload):
+            return None
+        return payload
 
     def _swing_status_payload(self):
         status = dict(self.swing_scanner_status)
@@ -2307,6 +2316,7 @@ class MarketEngine:
                 "updated_at": self._utc_now(),
                 "market_open": self._is_market_open(),
                 "cache_marker": self._completed_session_cache_marker(),
+                "cache_version": SWING_SCANNER_CACHE_VERSION,
                 "error": "Broker is not authenticated yet. Add Kite/Dhan credentials, then refresh the swing scanner.",
             }
         if not tracked:
@@ -2318,6 +2328,7 @@ class MarketEngine:
                 "updated_at": self._utc_now(),
                 "market_open": self._is_market_open(),
                 "cache_marker": self._completed_session_cache_marker(),
+                "cache_version": SWING_SCANNER_CACHE_VERSION,
                 "error": "Broker universe is still loading. Wait a minute after authentication, then refresh the swing scanner.",
             }
         rows = []
@@ -2338,6 +2349,7 @@ class MarketEngine:
             "updated_at": self._utc_now(),
             "market_open": self._is_market_open(),
             "cache_marker": self._completed_session_cache_marker(),
+            "cache_version": SWING_SCANNER_CACHE_VERSION,
             "error": None if rows else (self.last_error or "Swing scanner data is warming or broker history is unavailable."),
         }
 
@@ -2397,6 +2409,13 @@ class MarketEngine:
             min_score = 0
         rows = []
         for row in filtered.get("rows") or []:
+            row = dict(row)
+            has_structure_fields = bool(row.get("staircase_pattern")) and row.get("daily_volume_ratio") is not None
+            if not has_structure_fields and (row.get("scan_state") or "").upper() == "BULLISH_SCAN":
+                row["scan_state"] = "WATCH_RECLAIM"
+                row["rating"] = "Watch"
+                row["setup"] = "Bullish watch: structure confirmation pending"
+                row["score"] = min(float(row.get("score") or 0), 61.0)
             if (row.get("score") or 0) < min_score:
                 continue
             row_state = (row.get("scan_state") or "").upper()
@@ -2412,6 +2431,8 @@ class MarketEngine:
 
     def get_swing_scanner(self, side="long", min_score=0, cached_only=True):
         cached = self._cached_swing_scanner_payload()
+        if cached and not self._is_valid_swing_scanner_cache(cached):
+            cached = None
         cache_marker = self._completed_session_cache_marker()
         if cached and cached.get("cache_marker") == cache_marker:
             payload = dict(cached)

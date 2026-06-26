@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 _TMP_DIR = tempfile.TemporaryDirectory()
 os.environ["TRADE_DASHBOARD_DB_PATH"] = os.path.join(_TMP_DIR.name, "test_trade_dashboard.db")
 
-from app.kite_engine import MarketEngine
+from app.kite_engine import MarketEngine, SWING_SCANNER_CACHE_VERSION
 import app.main as main_module
 
 main_module.init_db()
@@ -193,6 +193,51 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertTrue(growth["is_valid"])
         self.assertEqual(growth["label"], "Price-volume growth")
         self.assertGreater(growth["volume_ratio"], 1.05)
+
+    def test_old_swing_cache_is_ignored_after_strategy_version_change(self):
+        engine = MarketEngine(redis_client=None)
+        engine._completed_session_cache_marker = lambda: "2026-06-26"
+        engine._cached_swing_scanner_payload = lambda: {
+            "cache_marker": "2026-06-26",
+            "cache_version": SWING_SCANNER_CACHE_VERSION - 1,
+            "rows": [{"symbol": "TITAN", "scan_state": "BULLISH_SCAN", "score": 90}],
+        }
+        engine._build_swing_scanner_payload = lambda: {
+            "cache_marker": "2026-06-26",
+            "rows": [
+                {
+                    "symbol": "TITAN",
+                    "scan_state": "BULLISH_SCAN",
+                    "score": 82,
+                    "staircase_pattern": "Staircase confirmed",
+                    "daily_volume_ratio": 1.2,
+                }
+            ],
+        }
+
+        payload = engine.get_swing_scanner(cached_only=True)
+
+        self.assertEqual(payload["rows"][0]["score"], 82)
+        self.assertEqual(payload["filtered_rows"][0]["staircase_pattern"], "Staircase confirmed")
+
+    def test_swing_filter_downgrades_rows_without_structure_fields(self):
+        engine = MarketEngine(redis_client=None)
+        payload = {
+            "rows": [
+                {
+                    "symbol": "TITAN",
+                    "scan_state": "BULLISH_SCAN",
+                    "score": 87,
+                    "setup": "Bullish scan: PDL sweep reclaim",
+                }
+            ]
+        }
+
+        filtered = engine._filter_swing_rows(payload, min_score=0)
+
+        self.assertEqual(filtered["filtered_rows"][0]["scan_state"], "WATCH_RECLAIM")
+        self.assertLessEqual(filtered["filtered_rows"][0]["score"], 61)
+        self.assertEqual(filtered["filtered_rows"][0]["setup"], "Bullish watch: structure confirmation pending")
 
     def test_rest_snapshot_uses_quote_volume_field(self):
         engine = MarketEngine(redis_client=None)
