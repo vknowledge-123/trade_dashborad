@@ -1031,7 +1031,7 @@ class MarketEngine:
                 ACCELERATION_HITS_CACHE_KEY,
                 {
                     "cache_marker": day_key,
-                    "broker": self.active_broker,
+                    "broker": self._current_broker(),
                     "hits": list(self.acceleration_hits.get(day_key, [])),
                 },
             )
@@ -1230,12 +1230,13 @@ class MarketEngine:
         side = (side or "").strip().upper()
         if side not in {"BUY", "SELL"}:
             return {"ok": False, "error": "Order side must be BUY or SELL."}
-        if self.active_broker not in {"dhan", "kite"} or not self.kite:
+        active_broker = self._current_broker()
+        if active_broker not in {"dhan", "kite"} or not self.kite:
             return {"ok": False, "error": "Order placement requires an authenticated Dhan or Kite broker."}
         token = self.symbol_to_token.get(symbol)
         if not token:
             return {"ok": False, "error": f"{symbol} is not available in broker universe yet."}
-        if self.active_broker == "dhan":
+        if active_broker == "dhan":
             segment = self.dhan_security_to_segment.get(int(token), "NSE_EQ")
             instrument = self.dhan_security_to_instrument.get(int(token), "EQUITY")
             if segment != "NSE_EQ" or instrument != "EQUITY":
@@ -1258,7 +1259,7 @@ class MarketEngine:
             return {"ok": False, "error": f"Capital {capital:.2f} is lower than {symbol} price {price:.2f}."}
         correlation_id = f"ACC{side[:1]}{symbol}{int(time.time())}"[:30]
         try:
-            if self.active_broker == "dhan":
+            if active_broker == "dhan":
                 response = self.kite.place_market_order(
                     security_id=token,
                     transaction_type=side,
@@ -1297,7 +1298,7 @@ class MarketEngine:
             "price": round(price, 2),
             "capital": round(capital, 2),
             "product_type": broker_product,
-            "broker": self.active_broker,
+            "broker": active_broker,
             "order_id": order_id,
             "response": response,
         }

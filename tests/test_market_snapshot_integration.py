@@ -568,7 +568,7 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
 
     def test_acceleration_scanner_keeps_intraday_hits_after_current_move_fades(self):
         engine = MarketEngine(redis_client=None)
-        engine.active_broker = "kite"
+        engine.broker = "kite"
         engine._restore_acceleration_hits_cache = lambda: None
         engine._save_acceleration_hits_cache = lambda: None
         engine.latest = {"INFY": {"symbol": "INFY", "price": 101.0, "change": 1.0, "volume": 1000}}
@@ -599,7 +599,7 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
 
     def test_acceleration_scanner_keeps_repeated_hits_for_same_stock(self):
         engine = MarketEngine(redis_client=None)
-        engine.active_broker = "kite"
+        engine.broker = "kite"
         engine._restore_acceleration_hits_cache = lambda: None
         engine._save_acceleration_hits_cache = lambda: None
         now = datetime.now(IST)
@@ -687,7 +687,7 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
 
         fake_session = FakeSession(FakeResponse({"status": "success", "orderId": "OID456"}))
         engine = MarketEngine(redis_client=None)
-        engine.active_broker = "dhan"
+        engine.broker = "dhan"
         engine.kite = DhanClient("client-1", "token", http_session=fake_session)
         engine.symbol_to_token = {"INFY": 1594}
         engine.dhan_security_to_segment = {1594: "NSE_EQ"}
@@ -713,7 +713,7 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
 
         fake_kite = FakeKiteOrder()
         engine = MarketEngine(redis_client=None)
-        engine.active_broker = "kite"
+        engine.broker = "kite"
         engine.kite = fake_kite
         engine.symbol_to_token = {"INFY": 1594}
         engine.latest = {"INFY": {"price": 500.0}}
