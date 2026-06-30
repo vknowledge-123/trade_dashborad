@@ -6,7 +6,7 @@
     <div>
       <div class="panel-sub">Live momentum scanner</div>
       <h1>Acceleration Scanner</h1>
-      <p class="muted">Finds stocks moving up or down beyond the selected percent from the previous completed live bucket to the current bucket.</p>
+      <p class="muted">Finds stocks moving up or down beyond the selected percent and keeps every qualifying hit visible for the full trading day.</p>
     </div>
     <div class="status-line">
       <span class="pill">{{ scanner.tracked_count or 0 }} tracked</span>
@@ -29,7 +29,7 @@
         <span class="pill positive" id="accel-count">{{ scanner.rows|length }}</span>
       </div>
     </div>
-    <div class="accel-filter-grid">
+    <div class="accel-filter-grid" data-admin="{{ 1 if admin else 0 }}">
       <label>
         Timeframe
         <select id="accel-timeframe">
@@ -42,6 +42,12 @@
         Min Move %
         <input id="accel-min-gain" type="number" min="0" step="0.1" value="{{ scanner.min_gain or 0.5 }}" />
       </label>
+      {% if admin %}
+        <label>
+          Per Trade Capital
+          <input id="accel-trade-capital" type="number" min="1" step="100" value="10000" />
+        </label>
+      {% endif %}
       <button class="btn btn-primary btn-mini" id="accel-apply" type="button">Apply</button>
     </div>
   </div>
@@ -52,9 +58,12 @@
     <div class="accel-alert" id="accel-alert" hidden></div>
   {% endif %}
   <div class="accel-cache-status" id="accel-cache-status" hidden></div>
+  {% if admin %}
+    <div class="accel-order-status" id="accel-order-status" hidden></div>
+  {% endif %}
 
   <div class="panel">
-    <div class="table accel-table" id="accel-body">
+    <div class="table accel-table" id="accel-body" data-admin="{{ 1 if admin else 0 }}">
       <div class="table-row table-head accel-row">
         <span>Symbol</span>
         <span>Price</span>
@@ -64,6 +73,9 @@
         <span>Candle Vol</span>
         <span>Vol x</span>
         <span>Turnover</span>
+        <span>Time</span>
+        <span>Hits</span>
+        {% if admin %}<span>Trade</span>{% endif %}
         <span>Chart</span>
       </div>
       {% for row in scanner.rows or [] %}
@@ -79,6 +91,14 @@
           <span class="mono">{{ format_compact_volume(row.candle_volume if row.candle_volume is defined else none) }}</span>
           <span class="mono">{{ row.volume_sma_multiplier ~ 'x' if row.volume_sma_multiplier else '-' }}</span>
           <span class="mono">{{ format_compact_volume(row.turnover if row.turnover is defined else none) }}</span>
+          <span class="mono">{{ row.appearance_time_display or '-' }}</span>
+          <span class="mono">{{ row.repeat_count or 1 }}</span>
+          {% if admin %}
+            <span class="accel-trade-actions">
+              <button class="btn btn-primary btn-mini accel-order-btn" type="button" data-side="BUY" data-symbol="{{ row.symbol }}" data-price="{{ row.price }}">Buy</button>
+              <button class="btn btn-ghost btn-mini accel-order-btn sell" type="button" data-side="SELL" data-symbol="{{ row.symbol }}" data-price="{{ row.price }}">Sell</button>
+            </span>
+          {% endif %}
           <a class="tv-link" href="https://www.tradingview.com/chart/?symbol=NSE%3A{{ row.symbol | urlencode }}" target="_blank" rel="noopener noreferrer">TradingView</a>
         </div>
       {% endfor %}
@@ -118,6 +138,9 @@
   gap: 10px;
   align-items: end;
 }
+.accel-filter-grid[data-admin="1"] {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
 .accel-filter-grid label {
   display: grid;
   gap: 6px;
@@ -150,8 +173,32 @@
   color: #b8f1cf;
   font-size: 13px;
 }
+.accel-order-status {
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(138, 180, 248, 0.22);
+  background: rgba(138, 180, 248, 0.08);
+  color: #d8e7ff;
+  font-size: 13px;
+}
 .accel-row {
-  grid-template-columns: 1.2fr 0.66fr 0.74fr 0.74fr 0.68fr 0.78fr 0.58fr 0.78fr auto;
+  grid-template-columns: 1.2fr 0.62fr 0.7fr 0.7fr 0.64fr 0.72fr 0.54fr 0.72fr 0.82fr 0.45fr auto;
+}
+.accel-table[data-admin="1"] .accel-row {
+  grid-template-columns: 1.12fr 0.58fr 0.64fr 0.64fr 0.6fr 0.68fr 0.52fr 0.68fr 0.76fr 0.42fr 1.04fr auto;
+}
+.accel-trade-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.accel-order-btn {
+  min-width: 54px;
+  padding: 7px 10px;
+}
+.accel-order-btn.sell {
+  border-color: rgba(242, 139, 130, 0.28);
+  color: #ffd2ce;
 }
 @media (max-width: 760px) {
   .accel-header h1 {
@@ -178,6 +225,9 @@
   .accel-row:not(.table-head) > span:nth-child(6)::before { content: "Vol "; color: #6b7fa3; }
   .accel-row:not(.table-head) > span:nth-child(7)::before { content: "Vol x "; color: #6b7fa3; }
   .accel-row:not(.table-head) > span:nth-child(8)::before { content: "Turnover "; color: #6b7fa3; }
+  .accel-row:not(.table-head) > span:nth-child(9)::before { content: "Time "; color: #6b7fa3; }
+  .accel-row:not(.table-head) > span:nth-child(10)::before { content: "Hits "; color: #6b7fa3; }
+  .accel-table[data-admin="1"] .accel-row:not(.table-head) > span:nth-child(11)::before { content: "Trade "; color: #6b7fa3; }
 }
 </style>
 
@@ -191,9 +241,20 @@
   const cacheStatus = document.getElementById("accel-cache-status");
   const timeframe = document.getElementById("accel-timeframe");
   const minGain = document.getElementById("accel-min-gain");
+  const tradeCapital = document.getElementById("accel-trade-capital");
+  const orderStatus = document.getElementById("accel-order-status");
   const apply = document.getElementById("accel-apply");
   const cacheButton = document.getElementById("accel-cache");
   if (!body) return;
+  const isAdmin = body.dataset.admin === "1";
+  const capitalKey = "accel_per_trade_capital";
+  if (tradeCapital) {
+    const storedCapital = localStorage.getItem(capitalKey);
+    if (storedCapital) tradeCapital.value = storedCapital;
+    tradeCapital.addEventListener("change", () => {
+      localStorage.setItem(capitalKey, tradeCapital.value || "10000");
+    });
+  }
   const head = body.querySelector(".table-head")?.outerHTML || "";
   const tvUrl = (symbol) => `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(`NSE:${symbol}`)}`;
   const formatVolume = (value) => {
@@ -225,9 +286,63 @@
       <span class="mono">${formatVolume(row.candle_volume)}</span>
       <span class="mono">${multiplier(row.volume_sma_multiplier)}</span>
       <span class="mono">${formatVolume(row.turnover)}</span>
+      <span class="mono">${row.appearance_time_display || "-"}</span>
+      <span class="mono">${row.repeat_count || 1}</span>
+      ${isAdmin ? `
+        <span class="accel-trade-actions">
+          <button class="btn btn-primary btn-mini accel-order-btn" type="button" data-side="BUY" data-symbol="${row.symbol}" data-price="${row.price ?? ""}">Buy</button>
+          <button class="btn btn-ghost btn-mini accel-order-btn sell" type="button" data-side="SELL" data-symbol="${row.symbol}" data-price="${row.price ?? ""}">Sell</button>
+        </span>
+      ` : ""}
       <a class="tv-link" href="${tvUrl(row.symbol)}" target="_blank" rel="noopener noreferrer">TradingView</a>
     </div>
   `;
+  const setOrderStatus = (message, isError = false) => {
+    if (!orderStatus) return;
+    orderStatus.hidden = false;
+    orderStatus.textContent = message;
+    orderStatus.style.borderColor = isError ? "rgba(242, 139, 130, 0.32)" : "rgba(138, 180, 248, 0.22)";
+    orderStatus.style.background = isError ? "rgba(242, 139, 130, 0.10)" : "rgba(138, 180, 248, 0.08)";
+    orderStatus.style.color = isError ? "#ffd2ce" : "#d8e7ff";
+  };
+  const placeOrder = async (button) => {
+    const symbol = button.dataset.symbol;
+    const side = button.dataset.side;
+    const price = Number(button.dataset.price);
+    const capital = Number(tradeCapital?.value || 10000);
+    if (!symbol || !side || !Number.isFinite(capital) || capital <= 0) {
+      setOrderStatus("Enter a valid per trade capital before placing order.", true);
+      return;
+    }
+    const estimatedQty = Number.isFinite(price) && price > 0 ? Math.floor(capital / price) : null;
+    if (estimatedQty !== null && estimatedQty <= 0) {
+      setOrderStatus(`Capital is lower than ${symbol} price. Quantity would be zero.`, true);
+      return;
+    }
+    const qtyText = estimatedQty ? ` around ${estimatedQty} qty` : "";
+    if (!window.confirm(`${side} ${symbol}${qtyText} as Dhan CNC market order?`)) return;
+    button.disabled = true;
+    const originalText = button.textContent;
+    button.textContent = "Sending...";
+    try {
+      const response = await fetch("/api/admin/acceleration-order", {
+        method: "POST",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json", "Cache-Control": "no-cache" },
+        body: JSON.stringify({ symbol, side, capital, price }),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error || "Order failed.");
+      }
+      setOrderStatus(`${payload.side} ${payload.symbol} placed: ${payload.quantity} qty CNC market order${payload.order_id ? `, order ${payload.order_id}` : ""}.`);
+    } catch (error) {
+      setOrderStatus(error.message || "Order failed.", true);
+    } finally {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
+  };
   const load = async () => {
     const params = new URLSearchParams();
     params.set("timeframe", timeframe?.value || "1");
@@ -238,7 +353,8 @@
       if (!res.ok) return;
       const data = await res.json();
       const rows = data.rows || [];
-      body.innerHTML = head + (rows.length ? rows.map(rowHtml).join("") : '<div class="table-row accel-row"><span>No acceleration matches yet.</span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>');
+      const emptyCells = isAdmin ? "<span></span>".repeat(11) : "<span></span>".repeat(10);
+      body.innerHTML = head + (rows.length ? rows.map(rowHtml).join("") : `<div class="table-row accel-row"><span>No acceleration matches yet.</span>${emptyCells}</div>`);
       if (count) count.textContent = rows.length;
       if (updatedAt) updatedAt.textContent = data.updated_at || "-";
       if (volumeStatus) volumeStatus.textContent = `${data.volume_sma_count || 0} vol SMA`;
@@ -252,6 +368,10 @@
     if (input) input.addEventListener("change", load);
   });
   if (apply) apply.addEventListener("click", load);
+  body.addEventListener("click", (event) => {
+    const button = event.target.closest(".accel-order-btn");
+    if (button && isAdmin) placeOrder(button);
+  });
   if (cacheButton) {
     const renderCacheStatus = (status) => {
       if (!cacheStatus || !status) return;

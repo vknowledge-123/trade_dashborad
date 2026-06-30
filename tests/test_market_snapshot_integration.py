@@ -2,7 +2,7 @@ import os
 import tempfile
 import time
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 _TMP_DIR = tempfile.TemporaryDirectory()
 os.environ["TRADE_DASHBOARD_DB_PATH"] = os.path.join(_TMP_DIR.name, "test_trade_dashboard.db")
 
-from app.kite_engine import MarketEngine, SWING_SCANNER_CACHE_VERSION
+from app.kite_engine import IST, MarketEngine, SWING_SCANNER_CACHE_VERSION
 import app.main as main_module
 
 main_module.init_db()
@@ -566,6 +566,73 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertEqual(cached["session_minutes"], 5 * 375)
         self.assertEqual(cached["volume_sma"], round(sum(c["volume"] for c in candles) / (5 * 375), 2))
 
+    def test_acceleration_scanner_keeps_intraday_hits_after_current_move_fades(self):
+        engine = MarketEngine(redis_client=None)
+        engine.active_broker = "kite"
+        engine._restore_acceleration_hits_cache = lambda: None
+        engine._save_acceleration_hits_cache = lambda: None
+        engine.latest = {"INFY": {"symbol": "INFY", "price": 101.0, "change": 1.0, "volume": 1000}}
+        now = datetime.now(IST)
+        current_bucket = engine._bucket_start(now, 1).isoformat()
+        previous_bucket = (engine._bucket_start(now, 1) - timedelta(minutes=1)).isoformat()
+        engine.acceleration_closes["INFY"][(1, previous_bucket)] = {
+            "close": 100.0,
+            "updated_at": previous_bucket,
+        }
+        engine.acceleration_closes["INFY"][(1, current_bucket)] = {
+            "close": 101.0,
+            "updated_at": current_bucket,
+            "candle_volume": 10000,
+        }
+
+        first_payload = engine.get_acceleration_scanner(timeframe=1, min_gain=0.5)
+        self.assertEqual(len(first_payload["rows"]), 1)
+        self.assertEqual(first_payload["rows"][0]["symbol"], "INFY")
+
+        engine.acceleration_closes["INFY"][(1, current_bucket)]["close"] = 100.1
+        faded_payload = engine.get_acceleration_scanner(timeframe=1, min_gain=0.5)
+
+        self.assertEqual(len(faded_payload["rows"]), 1)
+        self.assertEqual(faded_payload["rows"][0]["symbol"], "INFY")
+        self.assertEqual(faded_payload["rows"][0]["move_percent"], 1.0)
+        self.assertEqual(faded_payload["persisted_count"], 1)
+
+    def test_acceleration_scanner_keeps_repeated_hits_for_same_stock(self):
+        engine = MarketEngine(redis_client=None)
+        engine.active_broker = "kite"
+        engine._restore_acceleration_hits_cache = lambda: None
+        engine._save_acceleration_hits_cache = lambda: None
+        now = datetime.now(IST)
+        first = {
+            "symbol": "INFY",
+            "name": "Infosys",
+            "timeframe": 1,
+            "current_bucket": "2026-06-30T09:16:00+05:30",
+            "previous_bucket": "2026-06-30T09:15:00+05:30",
+            "direction": "up",
+            "move_percent": 0.7,
+            "from_close": 100,
+            "to_close": 100.7,
+        }
+        second = dict(first)
+        second.update(
+            {
+                "current_bucket": "2026-06-30T09:18:00+05:30",
+                "previous_bucket": "2026-06-30T09:17:00+05:30",
+                "move_percent": 1.2,
+                "to_close": 101.2,
+            }
+        )
+
+        engine._remember_acceleration_hit(first, min_gain=0.5, now=now)
+        engine._remember_acceleration_hit(second, min_gain=0.5, now=now + timedelta(minutes=2))
+        rows = engine._acceleration_hits_for_day(timeframe=1, min_gain=0.5, now=now)
+
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["move_percent"], 1.2)
+        self.assertEqual(rows[0]["repeat_count"], 2)
+        self.assertEqual(rows[1]["repeat_count"], 2)
+
     def test_dhan_historical_daily_payload_matches_sdk_dates_without_future_day(self):
         from app.kite_engine import DhanClient
 
@@ -597,6 +664,42 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertEqual(fake_session.last_payload["instrument"], "EQUITY")
         self.assertEqual(candles[0]["high"], 101)
         self.assertEqual(candles[0]["volume"], 1000)
+
+    def test_dhan_market_order_payload_uses_cnc_market_order(self):
+        from app.kite_engine import DhanClient
+
+        fake_session = FakeSession(FakeResponse({"status": "success", "orderId": "OID123"}))
+        client = DhanClient("client-1", "token", http_session=fake_session)
+
+        response = client.place_market_order("1594", "BUY", 20, correlation_id="TESTORDER")
+
+        self.assertEqual(response["orderId"], "OID123")
+        self.assertEqual(fake_session.last_payload["transactionType"], "BUY")
+        self.assertEqual(fake_session.last_payload["exchangeSegment"], "NSE_EQ")
+        self.assertEqual(fake_session.last_payload["productType"], "CNC")
+        self.assertEqual(fake_session.last_payload["orderType"], "MARKET")
+        self.assertEqual(fake_session.last_payload["validity"], "DAY")
+        self.assertEqual(fake_session.last_payload["securityId"], "1594")
+        self.assertEqual(fake_session.last_payload["quantity"], 20)
+
+    def test_acceleration_order_computes_quantity_from_capital_and_ltp(self):
+        from app.kite_engine import DhanClient
+
+        fake_session = FakeSession(FakeResponse({"status": "success", "orderId": "OID456"}))
+        engine = MarketEngine(redis_client=None)
+        engine.active_broker = "dhan"
+        engine.kite = DhanClient("client-1", "token", http_session=fake_session)
+        engine.symbol_to_token = {"INFY": 1594}
+        engine.dhan_security_to_segment = {1594: "NSE_EQ"}
+        engine.dhan_security_to_instrument = {1594: "EQUITY"}
+        engine.latest = {"INFY": {"price": 500.0}}
+
+        result = engine.place_acceleration_market_order("INFY", "BUY", per_trade_capital=10000)
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["quantity"], 20)
+        self.assertEqual(result["order_id"], "OID456")
+        self.assertEqual(fake_session.last_payload["quantity"], 20)
 
     def test_dhan_historical_parser_accepts_sdk_style_rows_with_volume(self):
         from app.kite_engine import DhanClient

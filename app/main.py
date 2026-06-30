@@ -8,7 +8,7 @@ import pyotp
 import qrcode
 from PIL import Image, UnidentifiedImageError
 
-from fastapi import FastAPI, File, Form, Request, UploadFile
+from fastapi import Body, FastAPI, File, Form, Request, UploadFile
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
@@ -693,6 +693,31 @@ def acceleration_scanner_data(
 ):
     return JSONResponse(
         engine.get_acceleration_scanner(timeframe=timeframe, min_gain=min_gain),
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
+
+
+@app.post("/api/admin/acceleration-order")
+def admin_acceleration_order(
+    request: Request,
+    payload: dict = Body(...),
+):
+    admin = require_admin(request)
+    if not admin:
+        return JSONResponse({"ok": False, "error": "Admin authentication required."}, status_code=403)
+    result = engine.place_acceleration_market_order(
+        symbol=payload.get("symbol"),
+        side=payload.get("side"),
+        per_trade_capital=payload.get("capital", 10000),
+        client_price=payload.get("price"),
+    )
+    return JSONResponse(
+        result,
+        status_code=200 if result.get("ok") else 400,
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",

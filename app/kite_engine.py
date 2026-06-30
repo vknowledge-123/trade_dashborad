@@ -29,6 +29,7 @@ PDH_PDL_SCANNER_CACHE_KEY = "pdh_pdl_scanner"
 RRG_CACHE_KEY = "relative_rotation_graph"
 SWING_SCANNER_CACHE_KEY = "swing_scanner"
 ACCELERATION_VOLUME_SMA_CACHE_KEY = "acceleration_volume_sma"
+ACCELERATION_HITS_CACHE_KEY = "acceleration_hits"
 IST = ZoneInfo("Asia/Kolkata")
 LIVE_FEED_STALE_AFTER_SECONDS = 15
 LIVE_FEED_RECONNECT_COOLDOWN_SECONDS = 20
@@ -202,6 +203,33 @@ class DhanClient:
     def marketfeed_ohlc(self, securities):
         data = self._post("/marketfeed/ohlc", securities).get("data") or {}
         return data.get("data") if isinstance(data.get("data"), dict) else data
+
+    def place_market_order(self, security_id, transaction_type, quantity, exchange_segment="NSE_EQ", product_type="CNC", correlation_id=""):
+        transaction_type = str(transaction_type or "").upper()
+        if transaction_type not in {"BUY", "SELL"}:
+            raise ValueError("transaction_type must be BUY or SELL")
+        quantity = int(quantity or 0)
+        if quantity <= 0:
+            raise ValueError("quantity must be greater than zero")
+        payload = {
+            "dhanClientId": str(self.client_id),
+            "correlationId": str(correlation_id or "")[:30],
+            "transactionType": transaction_type,
+            "exchangeSegment": exchange_segment,
+            "productType": product_type,
+            "orderType": "MARKET",
+            "validity": "DAY",
+            "securityId": str(security_id),
+            "quantity": quantity,
+            "disclosedQuantity": 0,
+            "price": 0,
+            "triggerPrice": 0,
+            "afterMarketOrder": False,
+            "amoTime": "",
+            "boProfitValue": 0,
+            "boStopLossValue": 0,
+        }
+        return self._post("/orders", payload)
 
     def historical_data(self, security_id, from_date, to_date, interval):
         from_value = from_date.date().isoformat() if hasattr(from_date, "date") else str(from_date)
@@ -405,6 +433,7 @@ class MarketEngine:
         }
         self.acceleration_lock = threading.Lock()
         self.acceleration_closes = defaultdict(dict)
+        self.acceleration_hits = defaultdict(list)
         self.acceleration_volume_sma_cache = {}
         self.swing_scanner_lock = threading.Lock()
         self.swing_scanner_thread = None
@@ -986,6 +1015,103 @@ class MarketEngine:
                 count += 1
         return count
 
+    def _acceleration_hit_day_key(self, moment=None):
+        moment = moment or datetime.now(IST)
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=IST)
+        return moment.astimezone(IST).date().isoformat()
+
+    def _acceleration_event_id(self, symbol, timeframe, current_bucket, direction):
+        return f"{symbol}:{int(timeframe)}:{current_bucket}:{direction}"
+
+    def _save_acceleration_hits_cache(self):
+        try:
+            day_key = self._acceleration_hit_day_key()
+            save_market_cache(
+                ACCELERATION_HITS_CACHE_KEY,
+                {
+                    "cache_marker": day_key,
+                    "broker": self.active_broker,
+                    "hits": list(self.acceleration_hits.get(day_key, [])),
+                },
+            )
+        except Exception:
+            return
+
+    def _restore_acceleration_hits_cache(self):
+        if self.acceleration_hits:
+            return
+        cached = load_market_cache(ACCELERATION_HITS_CACHE_KEY)
+        if not isinstance(cached, dict):
+            return
+        day_key = self._acceleration_hit_day_key()
+        if cached.get("cache_marker") != day_key or not self._payload_matches_broker(cached):
+            return
+        hits = cached.get("hits")
+        if isinstance(hits, list):
+            self.acceleration_hits[day_key] = [dict(item) for item in hits if isinstance(item, dict)]
+
+    def _remember_acceleration_hit(self, row, min_gain, now=None):
+        now = now or datetime.now(IST)
+        day_key = self._acceleration_hit_day_key(now)
+        self._restore_acceleration_hits_cache()
+        event_id = self._acceleration_event_id(
+            row.get("symbol"),
+            row.get("timeframe"),
+            row.get("current_bucket"),
+            row.get("direction"),
+        )
+        stored = dict(row)
+        stored["event_id"] = event_id
+        stored["appearance_time"] = now.isoformat()
+        stored["appearance_time_display"] = now.strftime("%I:%M:%S %p")
+        stored["scan_date"] = day_key
+        stored["threshold_percent"] = round(float(min_gain or 0), 3)
+        stored["repeat_count"] = 1
+        day_hits = self.acceleration_hits[day_key]
+        if not any(item.get("event_id") == event_id for item in day_hits):
+            day_hits.append(stored)
+            self._save_acceleration_hits_cache()
+        for old_key in list(self.acceleration_hits.keys()):
+            if old_key != day_key:
+                self.acceleration_hits.pop(old_key, None)
+        if len(day_hits) > 1200:
+            day_hits.sort(key=lambda item: item.get("appearance_time") or "")
+            del day_hits[:-1000]
+            self._save_acceleration_hits_cache()
+
+    def _acceleration_hits_for_day(self, timeframe=None, min_gain=None, now=None):
+        day_key = self._acceleration_hit_day_key(now)
+        self._restore_acceleration_hits_cache()
+        try:
+            timeframe = int(timeframe) if timeframe is not None else None
+        except (TypeError, ValueError):
+            timeframe = None
+        try:
+            min_gain = float(min_gain) if min_gain is not None else None
+        except (TypeError, ValueError):
+            min_gain = None
+        rows = []
+        for row in self.acceleration_hits.get(day_key, []):
+            if timeframe and int(row.get("timeframe") or 0) != timeframe:
+                continue
+            if min_gain is not None and abs(float(row.get("move_percent") or 0)) < min_gain:
+                continue
+            rows.append(dict(row))
+        rows.sort(
+            key=lambda item: (
+                abs(float(item.get("move_percent") or 0)),
+                item.get("appearance_time") or "",
+            ),
+            reverse=True,
+        )
+        symbol_counts = defaultdict(int)
+        for row in rows:
+            symbol_counts[row.get("symbol")] += 1
+        for row in rows:
+            row["repeat_count"] = symbol_counts.get(row.get("symbol"), 1)
+        return rows
+
     def get_acceleration_scanner(self, timeframe=1, min_gain=ACCELERATION_SCANNER_MIN_GAIN_PERCENT):
         try:
             timeframe = int(timeframe)
@@ -1003,6 +1129,7 @@ class MarketEngine:
         with self.lock:
             latest_rows = {symbol: dict(row) for symbol, row in self.latest.items()}
         rows = []
+        live_rows = []
         current_bucket_count = 0
         previous_bucket_count = 0
         with self.acceleration_lock:
@@ -1055,9 +1182,15 @@ class MarketEngine:
                         "turnover": round(turnover, 2) if turnover is not None else None,
                         "is_fno": latest.get("is_fno", symbol in self.fno_symbols),
                         "updated_at": current.get("updated_at"),
+                        "bucket_start": current_bucket,
+                        "current_bucket": current_bucket,
+                        "previous_bucket": previous_bucket,
                     }
                 )
-        rows.sort(key=lambda item: abs(item["move_percent"]), reverse=True)
+            for row in rows:
+                self._remember_acceleration_hit(row, min_gain, now=now)
+            live_rows = list(rows)
+            rows = self._acceleration_hits_for_day(timeframe=timeframe, min_gain=min_gain, now=now)
         market_open = self._is_market_open()
         volume_sma_count = self._acceleration_volume_sma_count()
         if rows:
@@ -1076,8 +1209,10 @@ class MarketEngine:
             error = "No stocks have moved beyond the selected acceleration threshold yet."
         return {
             "rows": rows,
+            "live_rows": live_rows,
             "timeframe": timeframe,
             "min_gain": min_gain,
+            "persisted_count": len(rows),
             "tracked_count": len(latest_rows),
             "volume_sma_ready": bool(volume_sma_count),
             "volume_sma_count": volume_sma_count,
@@ -1088,6 +1223,67 @@ class MarketEngine:
             "current_bucket": current_bucket,
             "previous_bucket": previous_bucket,
             "error": error,
+        }
+
+    def place_acceleration_market_order(self, symbol, side, per_trade_capital=10000, client_price=None):
+        symbol = (symbol or "").strip().upper()
+        side = (side or "").strip().upper()
+        if side not in {"BUY", "SELL"}:
+            return {"ok": False, "error": "Order side must be BUY or SELL."}
+        if self.active_broker != "dhan" or not isinstance(self.kite, DhanClient):
+            return {"ok": False, "error": "Order placement is available only when active broker is Dhan."}
+        token = self.symbol_to_token.get(symbol)
+        if not token:
+            return {"ok": False, "error": f"{symbol} is not available in Dhan security master yet."}
+        segment = self.dhan_security_to_segment.get(int(token), "NSE_EQ")
+        instrument = self.dhan_security_to_instrument.get(int(token), "EQUITY")
+        if segment != "NSE_EQ" or instrument != "EQUITY":
+            return {"ok": False, "error": f"{symbol} is not an NSE equity instrument."}
+        try:
+            capital = float(per_trade_capital or 0)
+        except (TypeError, ValueError):
+            capital = 0
+        if capital <= 0:
+            return {"ok": False, "error": "Per trade capital must be greater than zero."}
+        with self.lock:
+            latest = dict(self.latest.get(symbol) or {})
+        price = self._float_or_none(latest.get("price"))
+        if price in (None, 0):
+            price = self._float_or_none(client_price)
+        if price in (None, 0):
+            return {"ok": False, "error": f"Live price is not available for {symbol}."}
+        quantity = int(capital // price)
+        if quantity <= 0:
+            return {"ok": False, "error": f"Capital {capital:.2f} is lower than {symbol} price {price:.2f}."}
+        correlation_id = f"ACC{side[:1]}{symbol}{int(time.time())}"[:30]
+        try:
+            response = self.kite.place_market_order(
+                security_id=token,
+                transaction_type=side,
+                quantity=quantity,
+                exchange_segment="NSE_EQ",
+                product_type="CNC",
+                correlation_id=correlation_id,
+            )
+        except Exception as exc:
+            self.last_error = str(exc)
+            return {"ok": False, "error": str(exc)}
+        order_id = None
+        if isinstance(response, dict):
+            order_id = response.get("orderId") or response.get("order_id")
+            data = response.get("data")
+            if isinstance(data, dict):
+                order_id = order_id or data.get("orderId") or data.get("order_id")
+        return {
+            "ok": True,
+            "symbol": symbol,
+            "side": side,
+            "quantity": quantity,
+            "price": round(price, 2),
+            "capital": round(capital, 2),
+            "product_type": "CNC",
+            "order_id": order_id,
+            "response": response,
         }
 
     def _cached_snapshot(self):
