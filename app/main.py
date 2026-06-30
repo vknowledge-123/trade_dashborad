@@ -709,12 +709,15 @@ def admin_acceleration_order(
     admin = require_admin(request)
     if not admin:
         return JSONResponse({"ok": False, "error": "Admin authentication required."}, status_code=403)
-    result = engine.place_acceleration_market_order(
-        symbol=payload.get("symbol"),
-        side=payload.get("side"),
-        per_trade_capital=payload.get("capital", 10000),
-        client_price=payload.get("price"),
-    )
+    try:
+        result = engine.place_acceleration_market_order(
+            symbol=payload.get("symbol"),
+            side=payload.get("side"),
+            per_trade_capital=payload.get("capital", 10000),
+            client_price=payload.get("price"),
+        )
+    except Exception as exc:
+        result = {"ok": False, "error": str(exc) or "Order placement failed."}
     return JSONResponse(
         result,
         status_code=200 if result.get("ok") else 400,

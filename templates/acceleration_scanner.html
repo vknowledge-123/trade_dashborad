@@ -320,7 +320,7 @@
       return;
     }
     const qtyText = estimatedQty ? ` around ${estimatedQty} qty` : "";
-    if (!window.confirm(`${side} ${symbol}${qtyText} as Dhan CNC market order?`)) return;
+    if (!window.confirm(`${side} ${symbol}${qtyText} as intraday market order?`)) return;
     button.disabled = true;
     const originalText = button.textContent;
     button.textContent = "Sending...";
@@ -331,11 +331,17 @@
         headers: { "Content-Type": "application/json", "Cache-Control": "no-cache" },
         body: JSON.stringify({ symbol, side, capital, price }),
       });
-      const payload = await response.json();
+      const text = await response.text();
+      let payload = {};
+      try {
+        payload = text ? JSON.parse(text) : {};
+      } catch (parseError) {
+        payload = { ok: false, error: text || `HTTP ${response.status}` };
+      }
       if (!response.ok || !payload.ok) {
         throw new Error(payload.error || "Order failed.");
       }
-      setOrderStatus(`${payload.side} ${payload.symbol} placed: ${payload.quantity} qty CNC market order${payload.order_id ? `, order ${payload.order_id}` : ""}.`);
+      setOrderStatus(`${payload.side} ${payload.symbol} placed: ${payload.quantity} qty ${payload.product_type || "intraday"} market order${payload.order_id ? `, order ${payload.order_id}` : ""}.`);
     } catch (error) {
       setOrderStatus(error.message || "Order failed.", true);
     } finally {

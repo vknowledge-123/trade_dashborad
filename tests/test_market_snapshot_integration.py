@@ -665,7 +665,7 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertEqual(candles[0]["high"], 101)
         self.assertEqual(candles[0]["volume"], 1000)
 
-    def test_dhan_market_order_payload_uses_cnc_market_order(self):
+    def test_dhan_market_order_payload_uses_intraday_market_order(self):
         from app.kite_engine import DhanClient
 
         fake_session = FakeSession(FakeResponse({"status": "success", "orderId": "OID123"}))
@@ -676,7 +676,7 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertEqual(response["orderId"], "OID123")
         self.assertEqual(fake_session.last_payload["transactionType"], "BUY")
         self.assertEqual(fake_session.last_payload["exchangeSegment"], "NSE_EQ")
-        self.assertEqual(fake_session.last_payload["productType"], "CNC")
+        self.assertEqual(fake_session.last_payload["productType"], "INTRADAY")
         self.assertEqual(fake_session.last_payload["orderType"], "MARKET")
         self.assertEqual(fake_session.last_payload["validity"], "DAY")
         self.assertEqual(fake_session.last_payload["securityId"], "1594")
@@ -699,7 +699,35 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["quantity"], 20)
         self.assertEqual(result["order_id"], "OID456")
+        self.assertEqual(result["product_type"], "INTRADAY")
         self.assertEqual(fake_session.last_payload["quantity"], 20)
+
+    def test_acceleration_order_supports_kite_mis_market_order(self):
+        class FakeKiteOrder:
+            def __init__(self):
+                self.last_payload = None
+
+            def place_order(self, **kwargs):
+                self.last_payload = kwargs
+                return "KITE123"
+
+        fake_kite = FakeKiteOrder()
+        engine = MarketEngine(redis_client=None)
+        engine.active_broker = "kite"
+        engine.kite = fake_kite
+        engine.symbol_to_token = {"INFY": 1594}
+        engine.latest = {"INFY": {"price": 500.0}}
+
+        result = engine.place_acceleration_market_order("INFY", "SELL", per_trade_capital=10000)
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["quantity"], 20)
+        self.assertEqual(result["order_id"], "KITE123")
+        self.assertEqual(result["product_type"], "MIS")
+        self.assertEqual(fake_kite.last_payload["tradingsymbol"], "INFY")
+        self.assertEqual(fake_kite.last_payload["transaction_type"], "SELL")
+        self.assertEqual(fake_kite.last_payload["product"], "MIS")
+        self.assertEqual(fake_kite.last_payload["order_type"], "MARKET")
 
     def test_dhan_historical_parser_accepts_sdk_style_rows_with_volume(self):
         from app.kite_engine import DhanClient

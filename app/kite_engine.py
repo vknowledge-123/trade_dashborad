@@ -204,7 +204,7 @@ class DhanClient:
         data = self._post("/marketfeed/ohlc", securities).get("data") or {}
         return data.get("data") if isinstance(data.get("data"), dict) else data
 
-    def place_market_order(self, security_id, transaction_type, quantity, exchange_segment="NSE_EQ", product_type="CNC", correlation_id=""):
+    def place_market_order(self, security_id, transaction_type, quantity, exchange_segment="NSE_EQ", product_type="INTRADAY", correlation_id=""):
         transaction_type = str(transaction_type or "").upper()
         if transaction_type not in {"BUY", "SELL"}:
             raise ValueError("transaction_type must be BUY or SELL")
@@ -1230,15 +1230,16 @@ class MarketEngine:
         side = (side or "").strip().upper()
         if side not in {"BUY", "SELL"}:
             return {"ok": False, "error": "Order side must be BUY or SELL."}
-        if self.active_broker != "dhan" or not isinstance(self.kite, DhanClient):
-            return {"ok": False, "error": "Order placement is available only when active broker is Dhan."}
+        if self.active_broker not in {"dhan", "kite"} or not self.kite:
+            return {"ok": False, "error": "Order placement requires an authenticated Dhan or Kite broker."}
         token = self.symbol_to_token.get(symbol)
         if not token:
-            return {"ok": False, "error": f"{symbol} is not available in Dhan security master yet."}
-        segment = self.dhan_security_to_segment.get(int(token), "NSE_EQ")
-        instrument = self.dhan_security_to_instrument.get(int(token), "EQUITY")
-        if segment != "NSE_EQ" or instrument != "EQUITY":
-            return {"ok": False, "error": f"{symbol} is not an NSE equity instrument."}
+            return {"ok": False, "error": f"{symbol} is not available in broker universe yet."}
+        if self.active_broker == "dhan":
+            segment = self.dhan_security_to_segment.get(int(token), "NSE_EQ")
+            instrument = self.dhan_security_to_instrument.get(int(token), "EQUITY")
+            if segment != "NSE_EQ" or instrument != "EQUITY":
+                return {"ok": False, "error": f"{symbol} is not an NSE equity instrument."}
         try:
             capital = float(per_trade_capital or 0)
         except (TypeError, ValueError):
@@ -1257,20 +1258,34 @@ class MarketEngine:
             return {"ok": False, "error": f"Capital {capital:.2f} is lower than {symbol} price {price:.2f}."}
         correlation_id = f"ACC{side[:1]}{symbol}{int(time.time())}"[:30]
         try:
-            response = self.kite.place_market_order(
-                security_id=token,
-                transaction_type=side,
-                quantity=quantity,
-                exchange_segment="NSE_EQ",
-                product_type="CNC",
-                correlation_id=correlation_id,
-            )
+            if self.active_broker == "dhan":
+                response = self.kite.place_market_order(
+                    security_id=token,
+                    transaction_type=side,
+                    quantity=quantity,
+                    exchange_segment="NSE_EQ",
+                    product_type="INTRADAY",
+                    correlation_id=correlation_id,
+                )
+                broker_product = "INTRADAY"
+            else:
+                kite_side = "BUY" if side == "BUY" else "SELL"
+                response = self.kite.place_order(
+                    variety="regular",
+                    exchange="NSE",
+                    tradingsymbol=symbol,
+                    transaction_type=kite_side,
+                    quantity=quantity,
+                    product="MIS",
+                    order_type="MARKET",
+                )
+                broker_product = "MIS"
         except Exception as exc:
             self.last_error = str(exc)
             return {"ok": False, "error": str(exc)}
-        order_id = None
+        order_id = response if isinstance(response, str) else None
         if isinstance(response, dict):
-            order_id = response.get("orderId") or response.get("order_id")
+            order_id = response.get("orderId") or response.get("order_id") or response.get("order_id")
             data = response.get("data")
             if isinstance(data, dict):
                 order_id = order_id or data.get("orderId") or data.get("order_id")
@@ -1281,7 +1296,8 @@ class MarketEngine:
             "quantity": quantity,
             "price": round(price, 2),
             "capital": round(capital, 2),
-            "product_type": "CNC",
+            "product_type": broker_product,
+            "broker": self.active_broker,
             "order_id": order_id,
             "response": response,
         }
