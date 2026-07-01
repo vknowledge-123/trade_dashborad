@@ -30,6 +30,7 @@ RRG_CACHE_KEY = "relative_rotation_graph"
 SWING_SCANNER_CACHE_KEY = "swing_scanner"
 ACCELERATION_VOLUME_SMA_CACHE_KEY = "acceleration_volume_sma"
 ACCELERATION_HITS_CACHE_KEY = "acceleration_hits"
+DHAN_SCRIP_MASTER_CACHE_KEY = "dhan_scrip_master"
 IST = ZoneInfo("Asia/Kolkata")
 LIVE_FEED_STALE_AFTER_SECONDS = 15
 LIVE_FEED_RECONNECT_COOLDOWN_SECONDS = 20
@@ -46,6 +47,7 @@ ACCELERATION_TIMEFRAMES = {1, 5, 15}
 ACCELERATION_VOLUME_SMA_SESSIONS = 5
 ACCELERATION_VOLUME_LOOKBACK_SESSIONS = 10
 ACCELERATION_HIT_TTL_SECONDS = 120
+DHAN_SCRIP_MASTER_MAX_CACHE_DAYS = 7
 NSE_INTRADAY_SESSION_MINUTES = 375
 HTTP_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -455,10 +457,32 @@ class MarketEngine:
     def _normalize_symbol(self, value):
         return (value or "").strip().upper()
 
-    def _dhan_scrip_rows(self):
-        response = self.http.get(DHAN_SCRIP_MASTER_URL, timeout=(10, 60))
-        response.raise_for_status()
-        text = response.content.decode("utf-8-sig", errors="ignore")
+    def _dhan_scrip_rows(self, force=False):
+        today = datetime.now(IST).date().isoformat()
+        text = None
+        if not force:
+            cached = load_market_cache(DHAN_SCRIP_MASTER_CACHE_KEY)
+            if isinstance(cached, dict):
+                cache_date = cached.get("cache_date")
+                try:
+                    cache_age = (datetime.fromisoformat(today).date() - datetime.fromisoformat(cache_date).date()).days
+                except (TypeError, ValueError):
+                    cache_age = DHAN_SCRIP_MASTER_MAX_CACHE_DAYS + 1
+                if 0 <= cache_age <= DHAN_SCRIP_MASTER_MAX_CACHE_DAYS:
+                    text = cached.get("csv_text")
+        if not text:
+            response = self.http.get(DHAN_SCRIP_MASTER_URL, timeout=(10, 60))
+            response.raise_for_status()
+            text = response.content.decode("utf-8-sig", errors="ignore")
+            save_market_cache(
+                DHAN_SCRIP_MASTER_CACHE_KEY,
+                {
+                    "cache_date": today,
+                    "broker": "dhan",
+                    "cached_at": self._utc_now(),
+                    "csv_text": text,
+                },
+            )
         return csv.DictReader(io.StringIO(text))
 
     def _row_value(self, row, *keys):
@@ -486,7 +510,7 @@ class MarketEngine:
             return "MCX_COMM", instrument or "COMM"
         return None, None
 
-    def _build_dhan_universe(self, sector_names):
+    def _build_dhan_universe(self, sector_names, warm_dashboard=True):
         token_to_symbol = {}
         symbol_to_token = {}
         symbol_to_name = {}
@@ -559,14 +583,15 @@ class MarketEngine:
             token for symbol, token in symbol_to_token.items()
             if not tracked or symbol in tracked
         ]
-        self._refresh_sector_memberships(force=False)
-        self._restore_previous_close_cache()
+        if warm_dashboard:
+            self._refresh_sector_memberships(force=False)
+            self._restore_previous_close_cache()
 
-        prev, latest = self._fetch_sector_quote(self.kite, list(sector_tokens.keys()))
-        if prev:
-            self.sector_prev_close.update(prev)
-        if latest:
-            self.sector_latest.update(latest)
+            prev, latest = self._fetch_sector_quote(self.kite, list(sector_tokens.keys()))
+            if prev:
+                self.sector_prev_close.update(prev)
+            if latest:
+                self.sector_latest.update(latest)
 
     def _chunked(self, items, size):
         for idx in range(0, len(items), size):
@@ -2792,10 +2817,12 @@ class MarketEngine:
 
     def _run_refresh_job(self, reason, market_open):
         try:
+            self._restore_previous_close_cache()
+            self._refresh_sector_memberships(force=False)
             if market_open:
                 if reason in {"reconnect", "stale", "initial"}:
                     self._restart_live_feed(reason=reason)
-                self._refresh_rest_snapshot(force=reason in {"initial", "reconnect", "stale"})
+                self._refresh_rest_snapshot(force=reason in {"initial", "reconnect", "stale", "startup_snapshot"})
                 self._refresh_sector_snapshot(force=True)
             else:
                 rest_ok = self._refresh_rest_snapshot(force=True)
@@ -2889,9 +2916,9 @@ class MarketEngine:
         elif self.sector_members:
             self.last_membership_refresh_date = today
 
-    def build_universe(self, kite: KiteConnect, sector_names):
+    def build_universe(self, kite: KiteConnect, sector_names, warm_dashboard=True):
         if self.broker == "dhan":
-            return self._build_dhan_universe(sector_names)
+            return self._build_dhan_universe(sector_names, warm_dashboard=warm_dashboard)
 
         instruments = kite.instruments("NSE")
         nse_eq = [i for i in instruments if i.get("instrument_type") == "EQ"]
@@ -2943,14 +2970,15 @@ class MarketEngine:
         self.sector_tokens = index_tokens
         self.sector_token_to_name = {token: name for name, token in index_tokens.items()}
         self.equity_tokens = equity_tokens
-        self._refresh_sector_memberships(force=False)
-        self._restore_previous_close_cache()
+        if warm_dashboard:
+            self._refresh_sector_memberships(force=False)
+            self._restore_previous_close_cache()
 
-        prev_close, latest = self._fetch_sector_quote(kite, list(index_tokens.keys()))
-        if prev_close:
-            self.sector_prev_close.update(prev_close)
-        if latest:
-            self.sector_latest.update(latest)
+            prev_close, latest = self._fetch_sector_quote(kite, list(index_tokens.keys()))
+            if prev_close:
+                self.sector_prev_close.update(prev_close)
+            if latest:
+                self.sector_latest.update(latest)
 
     def _fetch_sector_quote(self, kite: KiteConnect, sector_symbols):
         if not sector_symbols:
@@ -3311,12 +3339,13 @@ class MarketEngine:
                 kite.set_access_token(access_token)
                 kite.set_session_expiry_hook(self._on_session_expiry)
                 self.kite = kite
-                self.build_universe(kite, sector_names)
-                if self._is_market_open():
-                    self._refresh_rest_snapshot(force=True)
-                else:
-                    self._refresh_closed_market_snapshot(force=True)
+                self.build_universe(kite, sector_names, warm_dashboard=False)
+                self._restore_previous_close_cache()
                 self._create_ticker()
+                self._ensure_background_refresh(
+                    market_open=self._is_market_open(),
+                    reason="startup_snapshot",
+                )
                 self.last_error = None
             except Exception as exc:
                 self.last_error = str(exc)
@@ -3332,12 +3361,13 @@ class MarketEngine:
                 self.sector_names = list(sector_names or [])
                 self._close_ticker()
                 self.kite = DhanClient(client_id, access_token)
-                self.build_universe(self.kite, sector_names)
-                if self._is_market_open():
-                    self._refresh_rest_snapshot(force=True)
-                else:
-                    self._refresh_closed_market_snapshot(force=True)
+                self.build_universe(self.kite, sector_names, warm_dashboard=False)
+                self._restore_previous_close_cache()
                 self._create_ticker()
+                self._ensure_background_refresh(
+                    market_open=self._is_market_open(),
+                    reason="startup_snapshot",
+                )
                 self.last_error = None
             except Exception as exc:
                 self.last_error = str(exc)

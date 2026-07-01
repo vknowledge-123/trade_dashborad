@@ -749,6 +749,40 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertIsNone(fake_session.last_payload["boStopLossValue"])
         self.assertNotIn("amoTime", fake_session.last_payload)
 
+    def test_broker_start_prioritizes_websocket_before_dashboard_warmup(self):
+        class FakeKiteConnect:
+            def __init__(self, api_key=None):
+                self.api_key = api_key
+
+            def set_access_token(self, access_token):
+                self.access_token = access_token
+
+            def set_session_expiry_hook(self, hook):
+                self.hook = hook
+
+        engine = MarketEngine(redis_client=None)
+        events = []
+        engine._is_market_open = lambda: True
+        engine.build_universe = lambda *args, **kwargs: events.append(("build", kwargs.get("warm_dashboard")))
+        engine._restore_previous_close_cache = lambda: events.append(("restore_prev_close", None))
+        engine._create_ticker = lambda: events.append(("websocket", None)) or True
+        engine._ensure_background_refresh = lambda **kwargs: events.append(("background", kwargs.get("reason"))) or True
+        engine._refresh_rest_snapshot = lambda *args, **kwargs: self.fail("REST snapshot should run in background after websocket startup")
+        engine._refresh_sector_snapshot = lambda *args, **kwargs: self.fail("Sector snapshot should run in background after websocket startup")
+
+        with patch("app.kite_engine.KiteConnect", FakeKiteConnect):
+            engine.start("api-key", "access-token", ["NIFTY IT"])
+
+        self.assertEqual(
+            events,
+            [
+                ("build", False),
+                ("restore_prev_close", None),
+                ("websocket", None),
+                ("background", "startup_snapshot"),
+            ],
+        )
+
     def test_acceleration_order_computes_quantity_from_capital_and_ltp(self):
         from app.kite_engine import DhanClient
 
