@@ -729,6 +729,26 @@ def admin_acceleration_order(
     )
 
 
+@app.post("/api/acceleration-hit")
+def acceleration_hit_action(
+    request: Request,
+    payload: dict = Body(...),
+):
+    result = engine.update_acceleration_hit(
+        event_id=payload.get("event_id"),
+        action=payload.get("action"),
+    )
+    return JSONResponse(
+        result,
+        status_code=200 if result.get("ok") else 400,
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
+
+
 @app.post("/api/admin/market-history/cache")
 def admin_market_history_cache(request: Request):
     admin = require_admin(request)

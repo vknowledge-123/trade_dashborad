@@ -45,6 +45,7 @@ ACCELERATION_SCANNER_MIN_GAIN_PERCENT = 0.5
 ACCELERATION_TIMEFRAMES = {1, 5, 15}
 ACCELERATION_VOLUME_SMA_SESSIONS = 5
 ACCELERATION_VOLUME_LOOKBACK_SESSIONS = 10
+ACCELERATION_HIT_TTL_SECONDS = 120
 NSE_INTRADAY_SESSION_MINUTES = 375
 HTTP_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -204,7 +205,7 @@ class DhanClient:
         data = self._post("/marketfeed/ohlc", securities).get("data") or {}
         return data.get("data") if isinstance(data.get("data"), dict) else data
 
-    def place_market_order(self, security_id, transaction_type, quantity, exchange_segment="NSE_EQ", product_type="INTRADAY", correlation_id=""):
+    def place_market_order(self, security_id, transaction_type, quantity, exchange_segment="NSE_EQ", product_type="INTRA", correlation_id=""):
         transaction_type = str(transaction_type or "").upper()
         if transaction_type not in {"BUY", "SELL"}:
             raise ValueError("transaction_type must be BUY or SELL")
@@ -1065,6 +1066,10 @@ class MarketEngine:
         stored["event_id"] = event_id
         stored["appearance_time"] = now.isoformat()
         stored["appearance_time_display"] = now.strftime("%I:%M:%S %p")
+        stored["expires_at"] = (now + timedelta(seconds=ACCELERATION_HIT_TTL_SECONDS)).isoformat()
+        stored["ttl_seconds"] = ACCELERATION_HIT_TTL_SECONDS
+        stored["kept"] = False
+        stored["deleted"] = False
         stored["scan_date"] = day_key
         stored["threshold_percent"] = round(float(min_gain or 0), 3)
         stored["repeat_count"] = 1
@@ -1083,6 +1088,7 @@ class MarketEngine:
     def _acceleration_hits_for_day(self, timeframe=None, min_gain=None, now=None):
         day_key = self._acceleration_hit_day_key(now)
         self._restore_acceleration_hits_cache()
+        now = now or datetime.now(IST)
         try:
             timeframe = int(timeframe) if timeframe is not None else None
         except (TypeError, ValueError):
@@ -1093,6 +1099,16 @@ class MarketEngine:
             min_gain = None
         rows = []
         for row in self.acceleration_hits.get(day_key, []):
+            if row.get("deleted"):
+                continue
+            if not row.get("kept"):
+                expires_at = row.get("expires_at")
+                try:
+                    expires_dt = datetime.fromisoformat(expires_at) if expires_at else None
+                except (TypeError, ValueError):
+                    expires_dt = None
+                if expires_dt and expires_dt < now:
+                    continue
             if timeframe and int(row.get("timeframe") or 0) != timeframe:
                 continue
             if min_gain is not None and abs(float(row.get("move_percent") or 0)) < min_gain:
@@ -1111,6 +1127,29 @@ class MarketEngine:
         for row in rows:
             row["repeat_count"] = symbol_counts.get(row.get("symbol"), 1)
         return rows
+
+    def update_acceleration_hit(self, event_id, action):
+        event_id = str(event_id or "")
+        action = str(action or "").lower()
+        if action not in {"keep", "delete"}:
+            return {"ok": False, "error": "Action must be keep or delete."}
+        self._restore_acceleration_hits_cache()
+        day_key = self._acceleration_hit_day_key()
+        with self.acceleration_lock:
+            for row in self.acceleration_hits.get(day_key, []):
+                if row.get("event_id") != event_id:
+                    continue
+                if action == "keep":
+                    row["kept"] = True
+                    row["expires_at"] = None
+                    row["deleted"] = False
+                    message = f"{row.get('symbol', 'Stock')} kept for the day."
+                else:
+                    row["deleted"] = True
+                    message = f"{row.get('symbol', 'Stock')} removed from scanner."
+                self._save_acceleration_hits_cache()
+                return {"ok": True, "event_id": event_id, "action": action, "message": message}
+        return {"ok": False, "error": "Acceleration row was not found or already expired."}
 
     def get_acceleration_scanner(self, timeframe=1, min_gain=ACCELERATION_SCANNER_MIN_GAIN_PERCENT):
         try:
@@ -1265,10 +1304,10 @@ class MarketEngine:
                     transaction_type=side,
                     quantity=quantity,
                     exchange_segment="NSE_EQ",
-                    product_type="INTRADAY",
+                    product_type="INTRA",
                     correlation_id=correlation_id,
                 )
-                broker_product = "INTRADAY"
+                broker_product = "INTRA"
             else:
                 kite_side = "BUY" if side == "BUY" else "SELL"
                 response = self.kite.place_order(

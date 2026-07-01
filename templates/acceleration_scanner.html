@@ -75,6 +75,7 @@
         <span>Turnover</span>
         <span>Time</span>
         <span>Hits</span>
+        <span>Keep</span>
         {% if admin %}<span>Trade</span>{% endif %}
         <span>Chart</span>
       </div>
@@ -93,6 +94,14 @@
           <span class="mono">{{ format_compact_volume(row.turnover if row.turnover is defined else none) }}</span>
           <span class="mono">{{ row.appearance_time_display or '-' }}</span>
           <span class="mono">{{ row.repeat_count or 1 }}</span>
+          <span class="accel-row-actions">
+            {% if row.kept %}
+              <span class="pill positive">Kept</span>
+            {% else %}
+              <button class="btn btn-ghost btn-mini accel-hit-btn" type="button" data-action="keep" data-event-id="{{ row.event_id }}">Keep</button>
+            {% endif %}
+            <button class="btn btn-ghost btn-mini accel-hit-btn delete" type="button" data-action="delete" data-event-id="{{ row.event_id }}">Delete</button>
+          </span>
           {% if admin %}
             <span class="accel-trade-actions">
               <button class="btn btn-primary btn-mini accel-order-btn" type="button" data-side="BUY" data-symbol="{{ row.symbol }}" data-price="{{ row.price }}">Buy</button>
@@ -182,12 +191,13 @@
   font-size: 13px;
 }
 .accel-row {
-  grid-template-columns: 1.2fr 0.62fr 0.7fr 0.7fr 0.64fr 0.72fr 0.54fr 0.72fr 0.82fr 0.45fr auto;
+  grid-template-columns: 1.14fr 0.58fr 0.66fr 0.66fr 0.6fr 0.68fr 0.5fr 0.68fr 0.76fr 0.42fr 0.9fr auto;
 }
 .accel-table[data-admin="1"] .accel-row {
-  grid-template-columns: 1.12fr 0.58fr 0.64fr 0.64fr 0.6fr 0.68fr 0.52fr 0.68fr 0.76fr 0.42fr 1.04fr auto;
+  grid-template-columns: 1.08fr 0.56fr 0.62fr 0.62fr 0.58fr 0.64fr 0.5fr 0.64fr 0.7fr 0.4fr 0.84fr 1fr auto;
 }
-.accel-trade-actions {
+.accel-trade-actions,
+.accel-row-actions {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
@@ -195,6 +205,14 @@
 .accel-order-btn {
   min-width: 54px;
   padding: 7px 10px;
+}
+.accel-hit-btn {
+  min-width: 58px;
+  padding: 7px 10px;
+}
+.accel-hit-btn.delete {
+  border-color: rgba(242, 139, 130, 0.28);
+  color: #ffd2ce;
 }
 .accel-order-btn.sell {
   border-color: rgba(242, 139, 130, 0.28);
@@ -227,7 +245,8 @@
   .accel-row:not(.table-head) > span:nth-child(8)::before { content: "Turnover "; color: #6b7fa3; }
   .accel-row:not(.table-head) > span:nth-child(9)::before { content: "Time "; color: #6b7fa3; }
   .accel-row:not(.table-head) > span:nth-child(10)::before { content: "Hits "; color: #6b7fa3; }
-  .accel-table[data-admin="1"] .accel-row:not(.table-head) > span:nth-child(11)::before { content: "Trade "; color: #6b7fa3; }
+  .accel-row:not(.table-head) > span:nth-child(11)::before { content: "Keep "; color: #6b7fa3; }
+  .accel-table[data-admin="1"] .accel-row:not(.table-head) > span:nth-child(12)::before { content: "Trade "; color: #6b7fa3; }
 }
 </style>
 
@@ -288,6 +307,10 @@
       <span class="mono">${formatVolume(row.turnover)}</span>
       <span class="mono">${row.appearance_time_display || "-"}</span>
       <span class="mono">${row.repeat_count || 1}</span>
+      <span class="accel-row-actions">
+        ${row.kept ? '<span class="pill positive">Kept</span>' : `<button class="btn btn-ghost btn-mini accel-hit-btn" type="button" data-action="keep" data-event-id="${row.event_id || ""}">Keep</button>`}
+        <button class="btn btn-ghost btn-mini accel-hit-btn delete" type="button" data-action="delete" data-event-id="${row.event_id || ""}">Delete</button>
+      </span>
       ${isAdmin ? `
         <span class="accel-trade-actions">
           <button class="btn btn-primary btn-mini accel-order-btn" type="button" data-side="BUY" data-symbol="${row.symbol}" data-price="${row.price ?? ""}">Buy</button>
@@ -349,6 +372,40 @@
       button.textContent = originalText;
     }
   };
+  const updateHit = async (button) => {
+    const eventId = button.dataset.eventId;
+    const action = button.dataset.action;
+    if (!eventId || !action) return;
+    button.disabled = true;
+    try {
+      const response = await fetch("/api/acceleration-hit", {
+        method: "POST",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json", "Cache-Control": "no-cache" },
+        body: JSON.stringify({ event_id: eventId, action }),
+      });
+      const text = await response.text();
+      let payload = {};
+      try {
+        payload = text ? JSON.parse(text) : {};
+      } catch (parseError) {
+        payload = { ok: false, error: text || `HTTP ${response.status}` };
+      }
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error || "Scanner row update failed.");
+      }
+      if (orderStatus) {
+        setOrderStatus(payload.message || "Scanner row updated.");
+      }
+      load();
+    } catch (error) {
+      if (orderStatus) {
+        setOrderStatus(error.message || "Scanner row update failed.", true);
+      }
+    } finally {
+      button.disabled = false;
+    }
+  };
   const load = async () => {
     const params = new URLSearchParams();
     params.set("timeframe", timeframe?.value || "1");
@@ -359,7 +416,7 @@
       if (!res.ok) return;
       const data = await res.json();
       const rows = data.rows || [];
-      const emptyCells = isAdmin ? "<span></span>".repeat(11) : "<span></span>".repeat(10);
+      const emptyCells = isAdmin ? "<span></span>".repeat(12) : "<span></span>".repeat(11);
       body.innerHTML = head + (rows.length ? rows.map(rowHtml).join("") : `<div class="table-row accel-row"><span>No acceleration matches yet.</span>${emptyCells}</div>`);
       if (count) count.textContent = rows.length;
       if (updatedAt) updatedAt.textContent = data.updated_at || "-";
@@ -377,6 +434,8 @@
   body.addEventListener("click", (event) => {
     const button = event.target.closest(".accel-order-btn");
     if (button && isAdmin) placeOrder(button);
+    const hitButton = event.target.closest(".accel-hit-btn");
+    if (hitButton) updateHit(hitButton);
   });
   if (cacheButton) {
     const renderCacheStatus = (status) => {
