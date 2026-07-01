@@ -205,7 +205,7 @@ class DhanClient:
         data = self._post("/marketfeed/ohlc", securities).get("data") or {}
         return data.get("data") if isinstance(data.get("data"), dict) else data
 
-    def place_market_order(self, security_id, transaction_type, quantity, exchange_segment="NSE_EQ", product_type="INTRA", correlation_id=""):
+    def place_market_order(self, security_id, transaction_type, quantity, exchange_segment="NSE_EQ", product_type="INTRADAY", correlation_id=""):
         transaction_type = str(transaction_type or "").upper()
         if transaction_type not in {"BUY", "SELL"}:
             raise ValueError("transaction_type must be BUY or SELL")
@@ -214,7 +214,6 @@ class DhanClient:
             raise ValueError("quantity must be greater than zero")
         payload = {
             "dhanClientId": str(self.client_id),
-            "correlationId": str(correlation_id or "")[:30],
             "transactionType": transaction_type,
             "exchangeSegment": exchange_segment,
             "productType": product_type,
@@ -223,13 +222,14 @@ class DhanClient:
             "securityId": str(security_id),
             "quantity": quantity,
             "disclosedQuantity": 0,
-            "price": 0,
-            "triggerPrice": 0,
+            "price": 0.0,
+            "triggerPrice": 0.0,
             "afterMarketOrder": False,
-            "amoTime": "",
-            "boProfitValue": 0,
-            "boStopLossValue": 0,
+            "boProfitValue": None,
+            "boStopLossValue": None,
         }
+        if correlation_id:
+            payload["correlationId"] = str(correlation_id or "")[:30]
         return self._post("/orders", payload)
 
     def historical_data(self, security_id, from_date, to_date, interval):
@@ -1304,10 +1304,10 @@ class MarketEngine:
                     transaction_type=side,
                     quantity=quantity,
                     exchange_segment="NSE_EQ",
-                    product_type="INTRA",
+                    product_type="INTRADAY",
                     correlation_id=correlation_id,
                 )
-                broker_product = "INTRA"
+                broker_product = "INTRADAY"
             else:
                 kite_side = "BUY" if side == "BUY" else "SELL"
                 response = self.kite.place_order(

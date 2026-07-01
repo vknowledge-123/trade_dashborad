@@ -633,6 +633,65 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertEqual(rows[0]["repeat_count"], 2)
         self.assertEqual(rows[1]["repeat_count"], 2)
 
+    def test_acceleration_hit_expires_after_two_minutes_unless_kept(self):
+        engine = MarketEngine(redis_client=None)
+        engine._restore_acceleration_hits_cache = lambda: None
+        engine._save_acceleration_hits_cache = lambda: None
+        now = datetime.now(IST).replace(hour=10, minute=0, second=0, microsecond=0)
+        row = {
+            "symbol": "INFY",
+            "name": "Infosys",
+            "timeframe": 1,
+            "current_bucket": now.isoformat(),
+            "previous_bucket": (now - timedelta(minutes=1)).isoformat(),
+            "direction": "up",
+            "move_percent": 0.8,
+            "from_close": 100,
+            "to_close": 100.8,
+        }
+
+        engine._remember_acceleration_hit(row, min_gain=0.5, now=now)
+        active_rows = engine._acceleration_hits_for_day(timeframe=1, min_gain=0.5, now=now + timedelta(seconds=119))
+        expired_rows = engine._acceleration_hits_for_day(timeframe=1, min_gain=0.5, now=now + timedelta(seconds=121))
+
+        self.assertEqual(len(active_rows), 1)
+        self.assertEqual(active_rows[0]["ttl_seconds"], 120)
+        self.assertEqual(expired_rows, [])
+
+    def test_acceleration_hit_keep_and_delete_actions(self):
+        engine = MarketEngine(redis_client=None)
+        engine._restore_acceleration_hits_cache = lambda: None
+        engine._save_acceleration_hits_cache = lambda: None
+        now = datetime.now(IST).replace(hour=10, minute=0, second=0, microsecond=0)
+        row = {
+            "symbol": "INFY",
+            "name": "Infosys",
+            "timeframe": 1,
+            "current_bucket": now.isoformat(),
+            "previous_bucket": (now - timedelta(minutes=1)).isoformat(),
+            "direction": "up",
+            "move_percent": 0.8,
+            "from_close": 100,
+            "to_close": 100.8,
+        }
+
+        engine._remember_acceleration_hit(row, min_gain=0.5, now=now)
+        event_id = engine.acceleration_hits[engine._acceleration_hit_day_key(now)][0]["event_id"]
+
+        keep_result = engine.update_acceleration_hit(event_id, "keep")
+        kept_rows = engine._acceleration_hits_for_day(timeframe=1, min_gain=0.5, now=now + timedelta(hours=6))
+
+        self.assertTrue(keep_result["ok"])
+        self.assertEqual(len(kept_rows), 1)
+        self.assertTrue(kept_rows[0]["kept"])
+        self.assertIsNone(kept_rows[0]["expires_at"])
+
+        delete_result = engine.update_acceleration_hit(event_id, "delete")
+        deleted_rows = engine._acceleration_hits_for_day(timeframe=1, min_gain=0.5, now=now + timedelta(hours=6))
+
+        self.assertTrue(delete_result["ok"])
+        self.assertEqual(deleted_rows, [])
+
     def test_dhan_historical_daily_payload_matches_sdk_dates_without_future_day(self):
         from app.kite_engine import DhanClient
 
@@ -679,8 +738,16 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertEqual(fake_session.last_payload["productType"], "INTRADAY")
         self.assertEqual(fake_session.last_payload["orderType"], "MARKET")
         self.assertEqual(fake_session.last_payload["validity"], "DAY")
+        self.assertEqual(fake_session.last_payload["dhanClientId"], "client-1")
         self.assertEqual(fake_session.last_payload["securityId"], "1594")
         self.assertEqual(fake_session.last_payload["quantity"], 20)
+        self.assertEqual(fake_session.last_payload["disclosedQuantity"], 0)
+        self.assertEqual(fake_session.last_payload["price"], 0.0)
+        self.assertEqual(fake_session.last_payload["triggerPrice"], 0.0)
+        self.assertIs(fake_session.last_payload["afterMarketOrder"], False)
+        self.assertIsNone(fake_session.last_payload["boProfitValue"])
+        self.assertIsNone(fake_session.last_payload["boStopLossValue"])
+        self.assertNotIn("amoTime", fake_session.last_payload)
 
     def test_acceleration_order_computes_quantity_from_capital_and_ltp(self):
         from app.kite_engine import DhanClient
