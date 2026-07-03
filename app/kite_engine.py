@@ -1038,7 +1038,7 @@ class MarketEngine:
     def _sector_context_for_symbol(self, symbol, latest=None, rankings=None):
         symbol = str(symbol or "").upper()
         latest = latest or {}
-        sectors = latest.get("sectors") or self.symbol_to_sectors.get(symbol, [])
+        sectors = self._sectors_for_symbol(symbol, latest)
         if not sectors:
             return {
                 "sector": None,
@@ -1068,6 +1068,24 @@ class MarketEngine:
             "sector_count": None,
         }
 
+    def _sectors_for_symbol(self, symbol, row=None):
+        symbol = str(symbol or "").upper()
+        if not symbol:
+            return []
+        row = row or {}
+        sectors = row.get("sectors") if isinstance(row, dict) else None
+        if sectors:
+            return list(sectors)
+        sectors = self.symbol_to_sectors.get(symbol)
+        if sectors:
+            return list(sectors)
+        fallback = [
+            sector
+            for sector, members in FALLBACK_SECTOR_MEMBERS.items()
+            if symbol in members
+        ]
+        return sorted(fallback)
+
     def _sector_rows_from_stock_rows(self, rows_by_symbol=None):
         rows_by_symbol = rows_by_symbol or self.latest
         if not rows_by_symbol:
@@ -1081,7 +1099,7 @@ class MarketEngine:
             change = row.get("change")
             if change is None:
                 continue
-            sectors = row.get("sectors") or self.symbol_to_sectors.get(str(symbol).upper(), [])
+            sectors = self._sectors_for_symbol(symbol, row)
             for sector in sectors:
                 grouped[sector].append(float(change))
         sector_rows = []
@@ -2371,7 +2389,7 @@ class MarketEngine:
     def _sector_rows_from_constituent_changes(self, movers):
         grouped = defaultdict(list)
         for row in movers:
-            for sector in row.get("sectors") or self.symbol_to_sectors.get(row.get("symbol", "").upper(), []):
+            for sector in self._sectors_for_symbol(row.get("symbol"), row):
                 if row.get("change") is not None:
                     grouped[sector].append(float(row.get("change") or 0))
         return [

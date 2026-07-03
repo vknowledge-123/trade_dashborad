@@ -508,6 +508,23 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertEqual(snapshot["sector_gainers"][0]["price"], "-")
         self.assertEqual(snapshot["sector_losers"][0]["sector"], "NIFTY PVT BANK")
 
+    def test_sector_strength_uses_fallback_members_when_membership_cache_is_missing(self):
+        engine = MarketEngine(redis_client=None)
+        engine.latest = {
+            "INFY": {"symbol": "INFY", "price": 1500, "change": 2.0},
+            "TCS": {"symbol": "TCS", "price": 4200, "change": 1.0},
+            "HDFCBANK": {"symbol": "HDFCBANK", "price": 900, "change": -1.0},
+        }
+        engine.sector_latest = {}
+        engine.symbol_to_sectors = {}
+        engine._restore_cached_sector_memberships = lambda: False
+
+        snapshot = engine._build_snapshot(market_open=False)
+
+        self.assertEqual(snapshot["sector_gainers"][0]["sector"], "NIFTY IT")
+        self.assertEqual(snapshot["sector_gainers"][0]["change"], 1.5)
+        self.assertEqual(snapshot["sector_losers"][0]["sector"], "NIFTY BANK")
+
     def test_closed_market_snapshot_uses_constituent_sector_moves_when_sector_quotes_are_zero(self):
         engine = MarketEngine(redis_client=None)
         engine.latest = {
