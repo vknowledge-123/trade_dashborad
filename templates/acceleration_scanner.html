@@ -6,7 +6,7 @@
     <div>
       <div class="panel-sub">Live momentum scanner</div>
       <h1>Acceleration Scanner</h1>
-      <p class="muted">Finds stocks moving up or down beyond the selected percent and keeps every qualifying hit visible for the full trading day.</p>
+      <p class="muted">Finds stocks moving up or down beyond the selected percent, keeps fresh hits for 2 minutes, and lets you keep important rows for the full session.</p>
     </div>
     <div class="status-line">
       <span class="pill">{{ scanner.tracked_count or 0 }} tracked</span>
@@ -50,6 +50,20 @@
       {% endif %}
       <button class="btn btn-primary btn-mini" id="accel-apply" type="button">Apply</button>
     </div>
+    <div class="accel-order-settings">
+      <div>
+        <h4>Limit Order Settings</h4>
+        <p>Buy orders use a limit above LTP. Sell orders use a limit below LTP.</p>
+      </div>
+      <label>
+        Buy Limit Above LTP %
+        <input id="accel-buy-limit-offset" type="number" min="0" step="0.05" value="1" />
+      </label>
+      <label>
+        Sell Limit Below LTP %
+        <input id="accel-sell-limit-offset" type="number" min="0" step="0.05" value="1" />
+      </label>
+    </div>
   </div>
 
   {% if scanner.error %}
@@ -68,6 +82,7 @@
         <span>From Close</span>
         <span>To Close</span>
         <span>Move %</span>
+        <span>Sector</span>
         <span>Candle Vol</span>
         <span>Vol x</span>
         <span>Turnover</span>
@@ -87,6 +102,14 @@
           <span class="mono">{{ row.from_close }}</span>
           <span class="mono">{{ row.to_close }}</span>
           <span class="{{ 'positive' if row.move_percent >= 0 else 'negative' }} mono">{{ '+' if row.move_percent >= 0 else '' }}{{ row.move_percent }}%</span>
+          <span class="sector-meta">
+            <span>{{ row.sector_name or row.sector or '-' }}</span>
+            {% if row.sector_change is not none %}
+              <small class="{{ 'positive' if row.sector_change >= 0 else 'negative' }}">{{ '+' if row.sector_change >= 0 else '' }}{{ row.sector_change }}%{% if row.sector_rank %} - Rank {{ row.sector_rank }}{% endif %}</small>
+            {% else %}
+              <small>-</small>
+            {% endif %}
+          </span>
           <span class="mono">{{ format_compact_volume(row.candle_volume if row.candle_volume is defined else none) }}</span>
           <span class="mono">{{ row.volume_sma_multiplier ~ 'x' if row.volume_sma_multiplier else '-' }}</span>
           <span class="mono">{{ format_compact_volume(row.turnover if row.turnover is defined else none) }}</span>
@@ -155,7 +178,8 @@
   font-size: 12px;
 }
 .accel-filter-grid select,
-.accel-filter-grid input {
+.accel-filter-grid input,
+.accel-order-settings input {
   width: 100%;
   min-height: 38px;
   border-radius: 10px;
@@ -163,6 +187,32 @@
   background: rgba(8,12,24,0.76);
   color: #e8f0fe;
   padding: 8px 10px;
+}
+.accel-order-settings {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.2fr) repeat(2, minmax(140px, 0.6fr));
+  gap: 10px;
+  align-items: end;
+  padding: 10px;
+  border: 1px solid rgba(138, 180, 248, 0.14);
+  border-radius: 12px;
+  background: rgba(138, 180, 248, 0.05);
+}
+.accel-order-settings h4 {
+  margin: 0;
+  color: #e8f0fe;
+  font-size: 14px;
+}
+.accel-order-settings p {
+  margin: 3px 0 0;
+  color: #8ca5c8;
+  font-size: 12px;
+}
+.accel-order-settings label {
+  display: grid;
+  gap: 6px;
+  color: #8ca5c8;
+  font-size: 12px;
 }
 .accel-alert {
   padding: 10px 12px;
@@ -189,10 +239,25 @@
   font-size: 13px;
 }
 .accel-row {
-  grid-template-columns: 1.14fr 0.58fr 0.66fr 0.66fr 0.6fr 0.68fr 0.5fr 0.68fr 0.76fr 0.42fr 0.9fr auto;
+  grid-template-columns: 1.05fr 0.54fr 0.58fr 0.58fr 0.56fr 0.95fr 0.62fr 0.46fr 0.62fr 0.68fr 0.36fr 0.82fr auto;
 }
 .accel-table[data-admin="1"] .accel-row {
-  grid-template-columns: 1.08fr 0.56fr 0.62fr 0.62fr 0.58fr 0.64fr 0.5fr 0.64fr 0.7fr 0.4fr 0.84fr 1fr auto;
+  grid-template-columns: 1fr 0.52fr 0.56fr 0.56fr 0.54fr 0.9fr 0.58fr 0.46fr 0.58fr 0.64fr 0.36fr 0.78fr 0.92fr auto;
+}
+.sector-meta {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.sector-meta span,
+.sector-meta small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sector-meta small {
+  color: #8ca5c8;
+  font-size: 11px;
 }
 .accel-trade-actions,
 .accel-row-actions {
@@ -223,6 +288,9 @@
   .accel-filter-grid {
     grid-template-columns: 1fr;
   }
+  .accel-order-settings {
+    grid-template-columns: 1fr;
+  }
   .accel-row:not(.table-head) {
     grid-template-columns: minmax(0, 1fr) auto !important;
     gap: 7px 10px;
@@ -238,13 +306,14 @@
   .accel-row:not(.table-head) > span:nth-child(3)::before { content: "From "; color: #6b7fa3; }
   .accel-row:not(.table-head) > span:nth-child(4)::before { content: "To "; color: #6b7fa3; }
   .accel-row:not(.table-head) > span:nth-child(5)::before { content: "Move "; color: #6b7fa3; }
-  .accel-row:not(.table-head) > span:nth-child(6)::before { content: "Vol "; color: #6b7fa3; }
-  .accel-row:not(.table-head) > span:nth-child(7)::before { content: "Vol x "; color: #6b7fa3; }
-  .accel-row:not(.table-head) > span:nth-child(8)::before { content: "Turnover "; color: #6b7fa3; }
-  .accel-row:not(.table-head) > span:nth-child(9)::before { content: "Time "; color: #6b7fa3; }
-  .accel-row:not(.table-head) > span:nth-child(10)::before { content: "Hits "; color: #6b7fa3; }
-  .accel-row:not(.table-head) > span:nth-child(11)::before { content: "Keep "; color: #6b7fa3; }
-  .accel-table[data-admin="1"] .accel-row:not(.table-head) > span:nth-child(12)::before { content: "Trade "; color: #6b7fa3; }
+  .accel-row:not(.table-head) > span:nth-child(6)::before { content: "Sector "; color: #6b7fa3; }
+  .accel-row:not(.table-head) > span:nth-child(7)::before { content: "Vol "; color: #6b7fa3; }
+  .accel-row:not(.table-head) > span:nth-child(8)::before { content: "Vol x "; color: #6b7fa3; }
+  .accel-row:not(.table-head) > span:nth-child(9)::before { content: "Turnover "; color: #6b7fa3; }
+  .accel-row:not(.table-head) > span:nth-child(10)::before { content: "Time "; color: #6b7fa3; }
+  .accel-row:not(.table-head) > span:nth-child(11)::before { content: "Hits "; color: #6b7fa3; }
+  .accel-row:not(.table-head) > span:nth-child(12)::before { content: "Keep "; color: #6b7fa3; }
+  .accel-table[data-admin="1"] .accel-row:not(.table-head) > span:nth-child(13)::before { content: "Trade "; color: #6b7fa3; }
 }
 </style>
 
@@ -259,12 +328,16 @@
   const timeframe = document.getElementById("accel-timeframe");
   const minGain = document.getElementById("accel-min-gain");
   const tradeCapital = document.getElementById("accel-trade-capital");
+  const buyLimitOffset = document.getElementById("accel-buy-limit-offset");
+  const sellLimitOffset = document.getElementById("accel-sell-limit-offset");
   const orderStatus = document.getElementById("accel-order-status");
   const apply = document.getElementById("accel-apply");
   const cacheButton = document.getElementById("accel-cache");
   if (!body) return;
   const isAdmin = body.dataset.admin === "1";
   const capitalKey = "accel_per_trade_capital";
+  const buyLimitKey = "accel_buy_limit_offset_pct";
+  const sellLimitKey = "accel_sell_limit_offset_pct";
   if (tradeCapital) {
     const storedCapital = localStorage.getItem(capitalKey);
     if (storedCapital) tradeCapital.value = storedCapital;
@@ -272,6 +345,16 @@
       localStorage.setItem(capitalKey, tradeCapital.value || "10000");
     });
   }
+  const bindStoredInput = (input, key, fallback) => {
+    if (!input) return;
+    const stored = localStorage.getItem(key);
+    if (stored !== null && stored !== "") input.value = stored;
+    input.addEventListener("change", () => {
+      localStorage.setItem(key, input.value || fallback);
+    });
+  };
+  bindStoredInput(buyLimitOffset, buyLimitKey, "1");
+  bindStoredInput(sellLimitOffset, sellLimitKey, "1");
   const head = body.querySelector(".table-head")?.outerHTML || "";
   const tvUrl = (symbol) => `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(`NSE:${symbol}`)}`;
   const formatVolume = (value) => {
@@ -290,6 +373,13 @@
     const number = Number(value);
     return Number.isFinite(number) ? `${number.toFixed(2)}x` : "-";
   };
+  const sectorText = (row) => {
+    const name = row.sector_name || row.sector || "-";
+    const change = Number(row.sector_change);
+    const rank = Number(row.sector_rank);
+    if (!Number.isFinite(change)) return `<span>${name}</span><small>-</small>`;
+    return `<span>${name}</span><small class="${change >= 0 ? "positive" : "negative"}">${change >= 0 ? "+" : ""}${change.toFixed(2)}%${Number.isFinite(rank) ? ` - Rank ${rank}` : ""}</small>`;
+  };
   const rowHtml = (row) => `
     <div class="table-row accel-row" data-symbol="${row.symbol}">
       <span class="cell-symbol">
@@ -300,6 +390,7 @@
       <span class="mono">${row.from_close ?? "-"}</span>
       <span class="mono">${row.to_close ?? "-"}</span>
       <span class="${Number(row.move_percent) >= 0 ? "positive" : "negative"} mono">${formatSigned(row.move_percent)}</span>
+      <span class="sector-meta">${sectorText(row)}</span>
       <span class="mono">${formatVolume(row.candle_volume)}</span>
       <span class="mono">${multiplier(row.volume_sma_multiplier)}</span>
       <span class="mono">${formatVolume(row.turnover)}</span>
@@ -331,8 +422,14 @@
     const side = button.dataset.side;
     const price = Number(button.dataset.price);
     const capital = Number(tradeCapital?.value || 10000);
+    const buyOffset = Number(buyLimitOffset?.value || 1);
+    const sellOffset = Number(sellLimitOffset?.value || 1);
     if (!symbol || !side || !Number.isFinite(capital) || capital <= 0) {
       setOrderStatus("Enter a valid per trade capital before placing order.", true);
+      return;
+    }
+    if (!Number.isFinite(buyOffset) || buyOffset < 0 || !Number.isFinite(sellOffset) || sellOffset < 0) {
+      setOrderStatus("Enter valid buy and sell limit percentages.", true);
       return;
     }
     const estimatedQty = Number.isFinite(price) && price > 0 ? Math.floor(capital / price) : null;
@@ -341,7 +438,12 @@
       return;
     }
     const qtyText = estimatedQty ? ` around ${estimatedQty} qty` : "";
-    if (!window.confirm(`${side} ${symbol}${qtyText} as intraday market order?`)) return;
+    const selectedOffset = side === "BUY" ? buyOffset : sellOffset;
+    const limitMultiplier = side === "BUY" ? 1 + (selectedOffset / 100) : 1 - (selectedOffset / 100);
+    const limitPrice = Number.isFinite(price) && price > 0 ? (price * limitMultiplier).toFixed(2) : null;
+    const directionText = side === "BUY" ? "above" : "below";
+    const limitText = limitPrice ? ` at limit ${limitPrice} (${selectedOffset}% ${directionText})` : ` at ${selectedOffset}% ${directionText} current price`;
+    if (!window.confirm(`${side} ${symbol}${qtyText} as intraday limit order${limitText}?`)) return;
     button.disabled = true;
     const originalText = button.textContent;
     button.textContent = "Sending...";
@@ -350,7 +452,14 @@
         method: "POST",
         cache: "no-store",
         headers: { "Content-Type": "application/json", "Cache-Control": "no-cache" },
-        body: JSON.stringify({ symbol, side, capital, price }),
+        body: JSON.stringify({
+          symbol,
+          side,
+          capital,
+          price,
+          buy_limit_offset_pct: buyOffset,
+          sell_limit_offset_pct: sellOffset,
+        }),
       });
       const text = await response.text();
       let payload = {};
@@ -362,7 +471,7 @@
       if (!response.ok || !payload.ok) {
         throw new Error(payload.error || "Order failed.");
       }
-      setOrderStatus(`${payload.side} ${payload.symbol} placed: ${payload.quantity} qty ${payload.product_type || "intraday"} market order${payload.order_id ? `, order ${payload.order_id}` : ""}.`);
+      setOrderStatus(`${payload.side} ${payload.symbol} placed: ${payload.quantity} qty ${payload.product_type || "intraday"} ${payload.order_type || "LIMIT"} order at ${payload.limit_price ?? limitPrice} (${payload.limit_offset_pct ?? selectedOffset}% ${directionText})${payload.order_id ? `, order ${payload.order_id}` : ""}.`);
     } catch (error) {
       setOrderStatus(error.message || "Order failed.", true);
     } finally {
@@ -414,7 +523,7 @@
       if (!res.ok) return;
       const data = await res.json();
       const rows = data.rows || [];
-      const emptyCells = isAdmin ? "<span></span>".repeat(12) : "<span></span>".repeat(11);
+      const emptyCells = isAdmin ? "<span></span>".repeat(13) : "<span></span>".repeat(12);
       body.innerHTML = head + (rows.length ? rows.map(rowHtml).join("") : `<div class="table-row accel-row"><span>No acceleration matches yet.</span>${emptyCells}</div>`);
       if (count) count.textContent = rows.length;
       if (updatedAt) updatedAt.textContent = data.updated_at || "-";
