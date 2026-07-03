@@ -34,6 +34,7 @@ DHAN_SCRIP_MASTER_CACHE_KEY = "dhan_scrip_master"
 IST = ZoneInfo("Asia/Kolkata")
 LIVE_FEED_STALE_AFTER_SECONDS = 15
 LIVE_FEED_RECONNECT_COOLDOWN_SECONDS = 20
+LIVE_FEED_CONNECT_GRACE_SECONDS = 45
 SECTOR_SNAPSHOT_REFRESH_SECONDS = 5
 RRG_BENCHMARK_SYMBOL = "NIFTY 50"
 RRG_LOOKBACK_SESSIONS = 15
@@ -207,24 +208,30 @@ class DhanClient:
         data = self._post("/marketfeed/ohlc", securities).get("data") or {}
         return data.get("data") if isinstance(data.get("data"), dict) else data
 
-    def place_market_order(self, security_id, transaction_type, quantity, exchange_segment="NSE_EQ", product_type="INTRADAY", correlation_id=""):
+    def place_order(self, security_id, transaction_type, quantity, exchange_segment="NSE_EQ", product_type="INTRADAY", order_type="MARKET", price=0.0, correlation_id=""):
         transaction_type = str(transaction_type or "").upper()
         if transaction_type not in {"BUY", "SELL"}:
             raise ValueError("transaction_type must be BUY or SELL")
         quantity = int(quantity or 0)
         if quantity <= 0:
             raise ValueError("quantity must be greater than zero")
+        order_type = str(order_type or "MARKET").upper()
+        if order_type not in {"MARKET", "LIMIT"}:
+            raise ValueError("order_type must be MARKET or LIMIT")
+        price = float(price or 0)
+        if order_type == "LIMIT" and price <= 0:
+            raise ValueError("price must be greater than zero for LIMIT orders")
         payload = {
             "dhanClientId": str(self.client_id),
             "transactionType": transaction_type,
             "exchangeSegment": exchange_segment,
             "productType": product_type,
-            "orderType": "MARKET",
+            "orderType": order_type,
             "validity": "DAY",
             "securityId": str(security_id),
             "quantity": quantity,
             "disclosedQuantity": 0,
-            "price": 0.0,
+            "price": round(price, 2) if order_type == "LIMIT" else 0.0,
             "triggerPrice": 0.0,
             "afterMarketOrder": False,
             "boProfitValue": None,
@@ -233,6 +240,18 @@ class DhanClient:
         if correlation_id:
             payload["correlationId"] = str(correlation_id or "")[:30]
         return self._post("/orders", payload)
+
+    def place_market_order(self, security_id, transaction_type, quantity, exchange_segment="NSE_EQ", product_type="INTRADAY", correlation_id=""):
+        return self.place_order(
+            security_id=security_id,
+            transaction_type=transaction_type,
+            quantity=quantity,
+            exchange_segment=exchange_segment,
+            product_type=product_type,
+            order_type="MARKET",
+            price=0.0,
+            correlation_id=correlation_id,
+        )
 
     def historical_data(self, security_id, from_date, to_date, interval):
         from_value = from_date.date().isoformat() if hasattr(from_date, "date") else str(from_date)
@@ -392,6 +411,8 @@ class MarketEngine:
         self.last_tick_ts = 0.0
         self.last_connect_ts = 0.0
         self.last_reconnect_attempt_ts = 0.0
+        self.last_ticker_start_ts = 0.0
+        self.websocket_generation = 0
         self.demo_mode = False
         self.demo_snapshot = None
         self.last_sector_quote_ts = 0
@@ -682,10 +703,13 @@ class MarketEngine:
             return False
         activity_ts = self._tracked_feed_activity_ts()
         if not activity_ts:
-            return bool(self.ticker)
+            if not self.ticker:
+                return False
+            return (time.time() - self.last_ticker_start_ts) > LIVE_FEED_CONNECT_GRACE_SECONDS
         return (time.time() - activity_ts) > LIVE_FEED_STALE_AFTER_SECONDS
 
     def _close_ticker(self):
+        self.websocket_generation += 1
         if not self.ticker:
             return
         try:
@@ -707,6 +731,7 @@ class MarketEngine:
     def _create_ticker(self):
         if not self.api_key or not self.access_token:
             return False
+        self.last_ticker_start_ts = time.time()
         if self.broker == "dhan":
             return self._create_dhan_ticker()
         all_tokens, sector_token_list = self._subscribed_tokens()
@@ -736,6 +761,92 @@ class MarketEngine:
         self.ticker.connect(threaded=True)
         return True
 
+    def _sector_rankings(self, include_fallback=True):
+        with self.lock:
+            sector_rows = [dict(row) for row in self.sector_latest.values() if isinstance(row, dict)]
+            latest_rows = {symbol: dict(row) for symbol, row in self.latest.items()}
+        if not sector_rows and include_fallback:
+            sector_rows = self._sector_rows_from_stock_rows(latest_rows)
+        ranked = sorted(
+            [row for row in sector_rows if row.get("change") is not None],
+            key=lambda item: float(item.get("change") or 0),
+            reverse=True,
+        )
+        return {
+            str(row.get("sector") or "").upper(): {
+                "sector": row.get("sector"),
+                "sector_change": round(float(row.get("change") or 0), 2),
+                "sector_rank": idx,
+                "sector_count": len(ranked),
+            }
+            for idx, row in enumerate(ranked, start=1)
+            if row.get("sector")
+        }
+
+    def _sector_context_for_symbol(self, symbol, latest=None, rankings=None):
+        symbol = str(symbol or "").upper()
+        latest = latest or {}
+        sectors = latest.get("sectors") or self.symbol_to_sectors.get(symbol, [])
+        if not sectors:
+            return {
+                "sector": None,
+                "sector_name": None,
+                "sector_change": None,
+                "sector_rank": None,
+                "sector_count": None,
+            }
+        rankings = rankings if rankings is not None else self._sector_rankings()
+        contexts = [rankings.get(str(sector).upper()) for sector in sectors]
+        contexts = [ctx for ctx in contexts if ctx]
+        if contexts:
+            context = sorted(contexts, key=lambda item: item.get("sector_rank") or 9999)[0]
+            return {
+                "sector": context.get("sector"),
+                "sector_name": context.get("sector"),
+                "sector_change": context.get("sector_change"),
+                "sector_rank": context.get("sector_rank"),
+                "sector_count": context.get("sector_count"),
+            }
+        sector_name = sectors[0]
+        return {
+            "sector": sector_name,
+            "sector_name": sector_name,
+            "sector_change": None,
+            "sector_rank": None,
+            "sector_count": None,
+        }
+
+    def _sector_rows_from_stock_rows(self, rows_by_symbol=None):
+        rows_by_symbol = rows_by_symbol or self.latest
+        if not rows_by_symbol:
+            return []
+        if not self.symbol_to_sectors:
+            self._restore_cached_sector_memberships()
+        grouped = defaultdict(list)
+        for symbol, row in rows_by_symbol.items():
+            if not isinstance(row, dict):
+                continue
+            change = row.get("change")
+            if change is None:
+                continue
+            sectors = row.get("sectors") or self.symbol_to_sectors.get(str(symbol).upper(), [])
+            for sector in sectors:
+                grouped[sector].append(float(change))
+        sector_rows = []
+        for sector, changes in grouped.items():
+            if not changes:
+                continue
+            sector_rows.append(
+                {
+                    "sector": sector,
+                    "price": "-",
+                    "change": round(sum(changes) / len(changes), 2),
+                    "rank_source": "constituent_average",
+                    "constituent_count": len(changes),
+                }
+            )
+        return sector_rows
+
     def _create_dhan_ticker(self):
         try:
             import websocket
@@ -755,8 +866,11 @@ class MarketEngine:
             return False
 
         url = DHAN_FEED_URL.format(token=self.access_token, client_id=self.client_id or self.api_key)
+        generation = self.websocket_generation
 
         def on_open(ws):
+            if generation != self.websocket_generation:
+                return
             self.connected = True
             self.last_connect_ts = time.time()
             self.last_error = None
@@ -772,15 +886,21 @@ class MarketEngine:
                 )
 
         def on_message(ws, message):
+            if generation != self.websocket_generation:
+                return
             if isinstance(message, str):
                 return
             self._on_dhan_binary_message(message)
 
         def on_error(ws, error):
+            if generation != self.websocket_generation:
+                return
             self.connected = False
             self.last_error = f"Dhan WebSocket error: {error}"
 
         def on_close(ws, code, reason):
+            if generation != self.websocket_generation:
+                return
             self.connected = False
             self.last_error = f"Dhan WebSocket closed: {code} {reason}"
 
@@ -793,11 +913,24 @@ class MarketEngine:
         )
 
         def run():
-            try:
-                self.ticker.run_forever(ping_interval=20, ping_timeout=10)
-            except Exception as exc:
+            backoff = 2
+            while generation == self.websocket_generation and self.broker == "dhan" and self.access_token:
+                try:
+                    self.last_ticker_start_ts = time.time()
+                    self.ticker.run_forever(ping_interval=20, ping_timeout=10)
+                except Exception as exc:
+                    if generation != self.websocket_generation:
+                        break
+                    self.connected = False
+                    self.last_error = f"Dhan WebSocket stopped: {exc}"
+                if generation != self.websocket_generation or self.broker != "dhan":
+                    break
                 self.connected = False
-                self.last_error = f"Dhan WebSocket stopped: {exc}"
+                self.last_reconnect_attempt_ts = time.time()
+                if self._is_market_open():
+                    self.last_error = "Dhan WebSocket reconnecting"
+                time.sleep(backoff)
+                backoff = min(backoff * 2, 30)
 
         thread = threading.Thread(target=run, daemon=True)
         thread.start()
@@ -1192,6 +1325,7 @@ class MarketEngine:
         previous_bucket = (self._bucket_start(now, timeframe) - timedelta(minutes=timeframe)).isoformat()
         with self.lock:
             latest_rows = {symbol: dict(row) for symbol, row in self.latest.items()}
+        sector_rankings = self._sector_rankings()
         rows = []
         live_rows = []
         current_bucket_count = 0
@@ -1227,6 +1361,7 @@ class MarketEngine:
                 turnover = None
                 if candle_volume is not None and current_close not in (None, 0):
                     turnover = candle_volume * current_close
+                sector_context = self._sector_context_for_symbol(symbol, latest, sector_rankings)
                 rows.append(
                     {
                         "symbol": symbol,
@@ -1249,6 +1384,7 @@ class MarketEngine:
                         "bucket_start": current_bucket,
                         "current_bucket": current_bucket,
                         "previous_bucket": previous_bucket,
+                        **sector_context,
                     }
                 )
             for row in rows:
@@ -1321,18 +1457,22 @@ class MarketEngine:
         quantity = int(capital // price)
         if quantity <= 0:
             return {"ok": False, "error": f"Capital {capital:.2f} is lower than {symbol} price {price:.2f}."}
+        limit_price = round(price * 1.01, 2)
         correlation_id = f"ACC{side[:1]}{symbol}{int(time.time())}"[:30]
         try:
             if active_broker == "dhan":
-                response = self.kite.place_market_order(
+                response = self.kite.place_order(
                     security_id=token,
                     transaction_type=side,
                     quantity=quantity,
                     exchange_segment="NSE_EQ",
                     product_type="INTRADAY",
+                    order_type="LIMIT",
+                    price=limit_price,
                     correlation_id=correlation_id,
                 )
                 broker_product = "INTRADAY"
+                broker_order_type = "LIMIT"
             else:
                 kite_side = "BUY" if side == "BUY" else "SELL"
                 response = self.kite.place_order(
@@ -1342,9 +1482,11 @@ class MarketEngine:
                     transaction_type=kite_side,
                     quantity=quantity,
                     product="MIS",
-                    order_type="MARKET",
+                    order_type="LIMIT",
+                    price=limit_price,
                 )
                 broker_product = "MIS"
+                broker_order_type = "LIMIT"
         except Exception as exc:
             self.last_error = str(exc)
             return {"ok": False, "error": str(exc)}
@@ -1360,8 +1502,10 @@ class MarketEngine:
             "side": side,
             "quantity": quantity,
             "price": round(price, 2),
+            "limit_price": limit_price,
             "capital": round(capital, 2),
             "product_type": broker_product,
+            "order_type": broker_order_type,
             "broker": active_broker,
             "order_id": order_id,
             "response": response,
@@ -1770,6 +1914,31 @@ class MarketEngine:
         if source:
             runtime["snapshot_source"] = source
         return runtime
+
+    def _ensure_snapshot_sector_rows(self, snapshot):
+        if not snapshot or snapshot.get("sector_gainers") or snapshot.get("sector_losers"):
+            return snapshot
+        rows = {}
+        for row in (snapshot.get("gainers") or []) + (snapshot.get("losers") or []):
+            if isinstance(row, dict) and row.get("symbol"):
+                rows[row["symbol"]] = row
+        if not rows:
+            return snapshot
+        sectors = self._sector_rows_from_stock_rows(rows)
+        if not sectors:
+            return snapshot
+        enriched = dict(snapshot)
+        enriched["sectors"] = sectors
+        enriched["sector_gainers"] = sorted(
+            [row for row in sectors if row.get("change", 0) > 0],
+            key=lambda item: item.get("change", 0),
+            reverse=True,
+        )[:10]
+        enriched["sector_losers"] = sorted(
+            [row for row in sectors if row.get("change", 0) < 0],
+            key=lambda item: item.get("change", 0),
+        )[:10]
+        return enriched
 
     def _snapshot_cache_marker(self, snapshot):
         if not snapshot:
@@ -3462,6 +3631,8 @@ class MarketEngine:
         self.last_snapshot_source = "websocket"
 
     def _build_snapshot(self, market_open):
+        if not self.sector_latest and not self.symbol_to_sectors:
+            self._restore_cached_sector_memberships()
         with self.lock:
             movers = list(self.latest.values())
             if self.nifty500_set:
@@ -3469,6 +3640,23 @@ class MarketEngine:
             gainers = [dict(m) for m in sorted([m for m in movers if m["change"] > 0], key=lambda x: x["change"], reverse=True)[:20]]
             losers = [dict(m) for m in sorted([m for m in movers if m["change"] < 0], key=lambda x: x["change"])[:20]]
             sectors = list(self.sector_latest.values())
+            if not sectors:
+                grouped = defaultdict(list)
+                for row in movers:
+                    for sector in row.get("sectors") or self.symbol_to_sectors.get(row.get("symbol", "").upper(), []):
+                        if row.get("change") is not None:
+                            grouped[sector].append(float(row.get("change") or 0))
+                sectors = [
+                    {
+                        "sector": sector,
+                        "price": "-",
+                        "change": round(sum(changes) / len(changes), 2),
+                        "rank_source": "constituent_average",
+                        "constituent_count": len(changes),
+                    }
+                    for sector, changes in grouped.items()
+                    if changes
+                ]
             sector_gainers = sorted([s for s in sectors if s["change"] > 0], key=lambda x: x["change"], reverse=True)[:10]
             sector_losers = sorted([s for s in sectors if s["change"] < 0], key=lambda x: x["change"])[:10]
             snapshot = {
@@ -4070,7 +4258,9 @@ class MarketEngine:
         if not market_open and closed_cache_fresh:
             if self.kite and (not self.latest or not self.sector_latest):
                 self._ensure_background_refresh(market_open=False, reason="closed_market_bootstrap")
-            return self._decorate_snapshot_rows(self._with_runtime_fields(closed_cached, False, "closed_cache"))
+            return self._decorate_snapshot_rows(
+                self._ensure_snapshot_sector_rows(self._with_runtime_fields(closed_cached, False, "closed_cache"))
+            )
 
         if self.kite:
             if self._is_live_feed_stale():
@@ -4105,14 +4295,16 @@ class MarketEngine:
         has_sector_data = any(snapshot.get(key) for key in ("sector_gainers", "sector_losers"))
         if not market_open and closed_cache_fresh:
             if self._stock_row_count(closed_cached) > self._stock_row_count(snapshot):
-                return self._decorate_snapshot_rows(self._with_runtime_fields(closed_cached, False, "closed_cache"))
+                return self._decorate_snapshot_rows(
+                    self._ensure_snapshot_sector_rows(self._with_runtime_fields(closed_cached, False, "closed_cache"))
+                )
         if has_stock_data:
             self._save_snapshot(snapshot)
             if not market_open:
                 self._save_closed_snapshot(snapshot)
             return snapshot
         if not market_open and has_sector_data and cached and any(cached.get(key) for key in ("gainers", "losers")):
-            return self._decorate_snapshot_rows(self._merge_with_cached_snapshot(snapshot, cached))
+            return self._decorate_snapshot_rows(self._ensure_snapshot_sector_rows(self._merge_with_cached_snapshot(snapshot, cached)))
         if has_sector_data and not cached:
             self._save_snapshot(snapshot)
             return snapshot
@@ -4126,7 +4318,7 @@ class MarketEngine:
             cached["error"] = self.last_error
             cached["market_open"] = market_open
             cached["snapshot_source"] = "cache"
-            return self._decorate_snapshot_rows(cached)
+            return self._decorate_snapshot_rows(self._ensure_snapshot_sector_rows(cached))
         return snapshot
 
     def _get_latest_rows_for_symbols(self, symbols):
