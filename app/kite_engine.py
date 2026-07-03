@@ -31,6 +31,7 @@ SWING_SCANNER_CACHE_KEY = "swing_scanner"
 ACCELERATION_VOLUME_SMA_CACHE_KEY = "acceleration_volume_sma"
 ACCELERATION_HITS_CACHE_KEY = "acceleration_hits"
 DHAN_SCRIP_MASTER_CACHE_KEY = "dhan_scrip_master"
+DHAN_UNIVERSE_CACHE_KEY = "dhan_universe"
 IST = ZoneInfo("Asia/Kolkata")
 LIVE_FEED_STALE_AFTER_SECONDS = 45
 LIVE_FEED_RECONNECT_COOLDOWN_SECONDS = 20
@@ -738,6 +739,132 @@ class MarketEngine:
                 self.sector_prev_close.update(prev)
             if latest:
                 self.sector_latest.update(latest)
+        self._save_dhan_universe_cache()
+
+    def _save_dhan_universe_cache(self):
+        if self.broker != "dhan" or not self.symbol_to_token:
+            return
+        try:
+            save_market_cache(
+                DHAN_UNIVERSE_CACHE_KEY,
+                {
+                    "cache_date": datetime.now(IST).date().isoformat(),
+                    "cached_at": self._utc_now(),
+                    "token_to_symbol": {str(token): symbol for token, symbol in self.token_to_symbol.items()},
+                    "symbol_to_token": self.symbol_to_token,
+                    "symbol_to_name": self.symbol_to_name,
+                    "dhan_security_to_segment": {
+                        str(token): segment for token, segment in self.dhan_security_to_segment.items()
+                    },
+                    "dhan_security_to_instrument": {
+                        str(token): instrument for token, instrument in self.dhan_security_to_instrument.items()
+                    },
+                    "index_tokens": self.index_tokens,
+                    "sector_tokens": self.sector_tokens,
+                    "fno_symbols": sorted(self.fno_symbols),
+                },
+            )
+        except Exception:
+            pass
+
+    def _restore_dhan_universe_cache(self, sector_names=None):
+        cached = load_market_cache(DHAN_UNIVERSE_CACHE_KEY)
+        if not isinstance(cached, dict) or not cached.get("symbol_to_token"):
+            return False
+        try:
+            sector_names = list(sector_names or self.sector_names or [])
+            symbol_to_token = {
+                str(symbol).upper(): int(float(token))
+                for symbol, token in (cached.get("symbol_to_token") or {}).items()
+                if token not in (None, "")
+            }
+            token_to_symbol = {
+                int(float(token)): str(symbol).upper()
+                for token, symbol in (cached.get("token_to_symbol") or {}).items()
+                if token not in (None, "")
+            }
+            if not token_to_symbol:
+                token_to_symbol = {token: symbol for symbol, token in symbol_to_token.items()}
+            security_to_segment = {
+                int(float(token)): segment
+                for token, segment in (cached.get("dhan_security_to_segment") or {}).items()
+                if token not in (None, "")
+            }
+            security_to_instrument = {
+                int(float(token)): instrument
+                for token, instrument in (cached.get("dhan_security_to_instrument") or {}).items()
+                if token not in (None, "")
+            }
+            index_tokens = {
+                str(name).upper(): int(float(token))
+                for name, token in (cached.get("index_tokens") or {}).items()
+                if token not in (None, "")
+            }
+            cached_sector_tokens = {
+                str(name).upper(): int(float(token))
+                for name, token in (cached.get("sector_tokens") or {}).items()
+                if token not in (None, "")
+            }
+            sector_tokens = {}
+            for name in sector_names:
+                normalized = str(name).upper()
+                token = cached_sector_tokens.get(normalized) or index_tokens.get(normalized)
+                fallback_token = DHAN_SECTOR_SECURITY_IDS.get(normalized)
+                if token is None and fallback_token:
+                    token = int(fallback_token)
+                if token is not None:
+                    sector_tokens[normalized] = int(token)
+                    index_tokens[normalized] = int(token)
+                    security_to_segment[int(token)] = "IDX_I"
+                    security_to_instrument[int(token)] = "INDEX"
+            benchmark_token = index_tokens.get(RRG_BENCHMARK_SYMBOL) or int(DHAN_SECTOR_SECURITY_IDS[RRG_BENCHMARK_SYMBOL])
+            index_tokens[RRG_BENCHMARK_SYMBOL] = int(benchmark_token)
+            security_to_segment[int(benchmark_token)] = "IDX_I"
+            security_to_instrument[int(benchmark_token)] = "INDEX"
+
+            tracked = set(self.nifty500_set or []) | set(NIFTY_50_SCANNER_STOCKS)
+            self.token_to_symbol = token_to_symbol
+            self.symbol_to_token = symbol_to_token
+            self.symbol_to_name = {
+                str(symbol).upper(): str(name)
+                for symbol, name in (cached.get("symbol_to_name") or {}).items()
+            }
+            self.dhan_symbol_to_security = symbol_to_token
+            self.dhan_security_to_symbol = token_to_symbol
+            self.dhan_security_to_segment = security_to_segment
+            self.dhan_security_to_instrument = security_to_instrument
+            self.index_tokens = index_tokens
+            self.sector_tokens = sector_tokens
+            self.sector_token_to_name = {token: name for name, token in sector_tokens.items()}
+            self.fno_symbols = {str(symbol).upper() for symbol in (cached.get("fno_symbols") or [])} or {
+                s.upper() for s in self.fno_override
+            }
+            self.equity_tokens = [
+                token for symbol, token in symbol_to_token.items()
+                if not tracked or symbol in tracked
+            ]
+            return bool(self.equity_tokens or self.sector_tokens)
+        except Exception:
+            return False
+
+    def _has_dhan_universe_ready(self):
+        return bool(
+            self.symbol_to_token
+            and self.dhan_security_to_segment
+            and (self.equity_tokens or self.sector_tokens)
+        )
+
+    def _refresh_dhan_universe_background(self, sector_names):
+        def run():
+            try:
+                self.build_universe(self.kite, sector_names, warm_dashboard=False)
+                self._restore_previous_close_cache()
+            except Exception as exc:
+                self.last_error = f"Dhan universe refresh failed: {exc}"
+
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+        return thread
 
     def _chunked(self, items, size):
         for idx in range(0, len(items), size):
@@ -3782,9 +3909,15 @@ class MarketEngine:
                 self.sector_names = list(sector_names or [])
                 self._close_ticker()
                 self.kite = DhanClient(client_id, access_token)
-                self.build_universe(self.kite, sector_names, warm_dashboard=False)
-                self._restore_previous_close_cache()
-                self._create_ticker()
+                restored_universe = self._has_dhan_universe_ready() or self._restore_dhan_universe_cache(sector_names)
+                if restored_universe:
+                    self._restore_previous_close_cache()
+                    self._create_ticker()
+                    self._refresh_dhan_universe_background(sector_names)
+                else:
+                    self.build_universe(self.kite, sector_names, warm_dashboard=False)
+                    self._restore_previous_close_cache()
+                    self._create_ticker()
                 self._ensure_background_refresh(
                     market_open=self._is_market_open(),
                     reason="startup_snapshot",
@@ -4696,7 +4829,10 @@ class MarketEngine:
                     payload["constituent_count"] = len(payload["stocks"])
                     return payload
 
-        self._refresh_sector_memberships(force=not bool(self.sector_members))
+        if not self.sector_members.get(sector):
+            self._restore_cached_sector_memberships()
+        if not self.sector_members.get(sector):
+            self._refresh_sector_memberships(force=not bool(self.sector_members))
         symbols = self.sector_members.get(sector, [])
         if not symbols:
             symbols = self._fallback_sector_members(sector)
