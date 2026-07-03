@@ -81,6 +81,20 @@ SECTOR_INDEX_PAGES = {
     "NIFTY OIL AND GAS": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-oil-and-gas-index",
     "NIFTY INDIA MFG": "https://www.niftyindices.com/indices/equity/thematic-indices/nifty-india-manufacturing",
 }
+FALLBACK_SECTOR_MEMBERS = {
+    "NIFTY IT": [
+        "COFORGE",
+        "HCLTECH",
+        "INFY",
+        "LTIM",
+        "MPHASIS",
+        "OFSS",
+        "PERSISTENT",
+        "TCS",
+        "TECHM",
+        "WIPRO",
+    ],
+}
 NSE_TRADING_HOLIDAYS = {
     "2026-01-26",
     "2026-03-03",
@@ -3054,7 +3068,7 @@ class MarketEngine:
     def _fetch_sector_members(self, sector_name, page_url):
         csv_url = self._fetch_sector_constituent_url(page_url)
         if not csv_url:
-            return []
+            return self._fallback_sector_members(sector_name)
         try:
             response = self.http.get(csv_url, timeout=(10, 60))
             response.raise_for_status()
@@ -3068,10 +3082,14 @@ class MarketEngine:
                     continue
                 seen.add(symbol)
                 members.append(symbol)
-            return members
+            return members or self._fallback_sector_members(sector_name)
         except Exception as exc:
             self.last_error = f"Sector constituent load failed for {sector_name}: {exc}"
-            return []
+            return self._fallback_sector_members(sector_name)
+
+    def _fallback_sector_members(self, sector_name):
+        members = FALLBACK_SECTOR_MEMBERS.get(str(sector_name or "").strip().upper(), [])
+        return [symbol for symbol in members if symbol in self.symbol_to_token]
 
     def _refresh_sector_memberships(self, force=False):
         restored_from_cache = False
@@ -3089,6 +3107,15 @@ class MarketEngine:
         symbol_to_sectors = defaultdict(set)
         for sector_name, page_url in SECTOR_INDEX_PAGES.items():
             members = self._fetch_sector_members(sector_name, page_url)
+            if not members:
+                continue
+            sector_members[sector_name] = members
+            for symbol in members:
+                symbol_to_sectors[symbol].add(sector_name)
+        for sector_name, fallback_members in FALLBACK_SECTOR_MEMBERS.items():
+            if sector_members.get(sector_name):
+                continue
+            members = [symbol for symbol in fallback_members if symbol in self.symbol_to_token]
             if not members:
                 continue
             sector_members[sector_name] = members
@@ -4455,6 +4482,14 @@ class MarketEngine:
 
         self._refresh_sector_memberships(force=not bool(self.sector_members))
         symbols = self.sector_members.get(sector, [])
+        if not symbols:
+            symbols = self._fallback_sector_members(sector)
+            if symbols:
+                self.sector_members[sector] = symbols
+                for symbol in symbols:
+                    sectors = set(self.symbol_to_sectors.get(symbol, []))
+                    sectors.add(sector)
+                    self.symbol_to_sectors[symbol] = sorted(sectors)
 
         if not market_open:
             rows = self._rows_for_symbols_from_cache(symbols)
