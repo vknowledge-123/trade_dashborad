@@ -1279,8 +1279,10 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
                     "name": "Infosys",
                     "price": 1500.0,
                     "change": 1.25,
+                    "volume": 1000,
                     "is_fno": True,
                     "sectors": ["NIFTY IT"],
+                    "previous_day_change": -9.0,
                 },
                 "TCS": {
                     "symbol": "TCS",
@@ -1300,6 +1302,8 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertEqual(payload["sector"], "NIFTY IT")
         self.assertEqual(payload["constituent_count"], 2)
         self.assertEqual(payload["stocks"][0]["symbol"], "INFY")
+        self.assertEqual(payload["stocks"][0]["change"], 1.25)
+        self.assertEqual(payload["stocks"][0]["turnover"], 1500000.0)
         self.assertEqual(payload["stocks"][1]["symbol"], "TCS")
 
     def test_nifty_it_breakdown_uses_fallback_members_when_csv_is_unavailable(self):
@@ -1393,8 +1397,11 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         }
         engine._cached_sector_breakdowns = lambda: {
             "NIFTY IT": {
-                "session_marker": "2026-05-21",
-                "stocks": [{"symbol": "OLD", "price": 1, "change": 0}],
+                "session_marker": "2026-05-22",
+                "stocks": [
+                    {"symbol": "INFY", "price": 1, "change": -20},
+                    {"symbol": "TCS", "price": 1, "change": -30},
+                ],
             }
         }
         engine._quote_symbols = lambda *args, **kwargs: self.fail("closed sector breakdown should use shared row cache")
@@ -1402,6 +1409,8 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         payload = engine.get_sector_breakdown("NIFTY IT")
 
         self.assertEqual([row["symbol"] for row in payload["stocks"]], ["INFY", "TCS"])
+        self.assertEqual(payload["stocks"][0]["change"], 1.25)
+        self.assertEqual(payload["stocks"][0]["turnover"], 184500.0)
         self.assertEqual(payload["session_marker"], "2026-05-22")
 
     def test_closed_market_sector_breakdown_can_use_previous_close_cache_without_latest_rows(self):

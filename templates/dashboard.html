@@ -65,6 +65,7 @@
           <span>Symbol</span>
           <span>Price</span>
           <span>Volume</span>
+          <span>Turnover</span>
           <span>Change %</span>
           <span>Chart</span>
         </div>
@@ -496,7 +497,7 @@
 }
 .sector-stock-row {
   display: grid;
-  grid-template-columns: 0.45fr 1.2fr 0.75fr 0.95fr 0.75fr auto;
+  grid-template-columns: 0.45fr 1.2fr 0.72fr 0.82fr 0.9fr 0.72fr auto;
   gap: 12px;
   align-items: center;
   padding: 11px 12px;
@@ -512,12 +513,14 @@
 .sector-stock-rank,
 .sector-stock-price,
 .sector-stock-volume,
+.sector-stock-turnover,
 .sector-stock-change {
   font-family: "JetBrains Mono", monospace;
 }
 .sector-stock-rank { text-align: center; }
 .sector-stock-price,
 .sector-stock-volume,
+.sector-stock-turnover,
 .sector-stock-change { text-align: right; }
 .sector-stock-symbol {
   display: flex;
@@ -949,7 +952,8 @@
   .sector-stock-row > span:nth-child(1)::before,
   .sector-stock-row > span:nth-child(3)::before,
   .sector-stock-row > span:nth-child(4)::before,
-  .sector-stock-row > span:nth-child(5)::before {
+  .sector-stock-row > span:nth-child(5)::before,
+  .sector-stock-row > span:nth-child(6)::before {
     content: none;
   }
 
@@ -962,12 +966,12 @@
     display: none !important;
   }
 
-  .sector-stock-head > span:nth-child(6) {
+  .sector-stock-head > span:nth-child(7) {
     display: inline !important;
     font-size: 0;
   }
 
-  .sector-stock-head > span:nth-child(6)::before {
+  .sector-stock-head > span:nth-child(7)::before {
     content: "TV";
     font-size: 8px;
   }

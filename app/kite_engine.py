@@ -2523,15 +2523,11 @@ class MarketEngine:
 
     def _rank_sector_breakdown_rows(self, rows, market_open):
         prepared = [dict(row) for row in rows or [] if isinstance(row, dict)]
-        if not market_open:
-            self._decorate_rows_with_previous_day_badges(prepared, fetch_missing=False)
-            for row in prepared:
-                previous_change = row.get("previous_day_change")
-                try:
-                    if previous_change is not None:
-                        row["change"] = round(float(previous_change), 2)
-                except (TypeError, ValueError):
-                    continue
+        self._decorate_rows_with_previous_day_badges(prepared, fetch_missing=False)
+        for row in prepared:
+            price = self._float_or_none(row.get("price"))
+            volume = self._coerce_volume(row.get("volume"))
+            row["turnover"] = round(price * volume, 2) if price not in (None, 0) and volume not in (None, 0) else None
         ranked = sorted(prepared, key=lambda item: item.get("change") or 0, reverse=True)
         for index, row in enumerate(ranked, start=1):
             row["rank"] = index
@@ -4869,20 +4865,28 @@ class MarketEngine:
             return {"sector": "", "stocks": [], "updated_at": self.last_update, "market_open": self._is_market_open()}
 
         market_open = self._is_market_open()
+        cached_breakdowns = {}
+        cached_payload = None
+        cache_marker = self._completed_session_cache_marker() if not market_open else None
         if not market_open:
             cached_breakdowns = self._cached_sector_breakdowns() or {}
             cached_payload = cached_breakdowns.get(sector)
-            cache_marker = self._completed_session_cache_marker()
-            if cached_payload and cached_payload.get("stocks"):
-                marker = cached_payload.get("session_marker") or self._snapshot_cache_marker(cached_payload)
-                if marker == cache_marker:
-                    payload = dict(cached_payload)
-                    payload["stocks"] = self._rank_sector_breakdown_rows(cached_payload["stocks"], market_open=False)
-                    payload["constituent_count"] = len(payload["stocks"])
-                    return payload
 
         if not self.sector_members.get(sector):
             self._restore_cached_sector_memberships()
+        cached_payload_fresh = False
+        cached_payload_symbols = []
+        if not market_open and cached_payload and cached_payload.get("stocks"):
+            marker = cached_payload.get("session_marker") or self._snapshot_cache_marker(cached_payload)
+            cached_payload_fresh = marker == cache_marker
+            if cached_payload_fresh:
+                cached_payload_symbols = [
+                    str(row.get("symbol") or "").upper()
+                    for row in cached_payload.get("stocks") or []
+                    if isinstance(row, dict) and row.get("symbol")
+                ]
+        if not self.sector_members.get(sector) and cached_payload_symbols:
+            self.sector_members[sector] = cached_payload_symbols
         if not self.sector_members.get(sector):
             self._refresh_sector_memberships(force=not bool(self.sector_members))
         symbols = self.sector_members.get(sector, [])
@@ -4898,13 +4902,11 @@ class MarketEngine:
         if not market_open:
             rows = self._rows_for_symbols_from_cache(symbols)
             if not rows:
-                if cached_payload and cached_payload.get("stocks"):
-                    marker = cached_payload.get("session_marker") or self._snapshot_cache_marker(cached_payload)
-                    if marker == cache_marker:
-                        payload = dict(cached_payload)
-                        payload["stocks"] = self._rank_sector_breakdown_rows(cached_payload["stocks"], market_open=False)
-                        payload["constituent_count"] = len(payload["stocks"])
-                        return payload
+                if cached_payload_fresh:
+                    payload = dict(cached_payload)
+                    payload["stocks"] = self._rank_sector_breakdown_rows(cached_payload["stocks"], market_open=False)
+                    payload["constituent_count"] = len(payload["stocks"])
+                    return payload
         else:
             rows = self._get_latest_rows_for_symbols(symbols)
 

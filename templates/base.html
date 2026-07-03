@@ -2474,6 +2474,7 @@ h3,
           </span>
           <span class="sector-stock-price">${stock.price}</span>
           <span class="sector-stock-volume">${formatVolume(stock.volume)}</span>
+          <span class="sector-stock-turnover">${formatVolume(stock.turnover)}</span>
           <span class="sector-stock-change ${cls}">${sign}${stock.change}%</span>
           <a class="tv-link" href="${tradingViewUrl(stock.symbol)}" target="_blank" rel="noopener noreferrer">TradingView</a>
         `;
