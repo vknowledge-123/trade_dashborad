@@ -1269,11 +1269,15 @@ class MarketEngine:
                     if not symbol:
                         return
                     base_close = day_close if day_close not in (None, 0) else self.rest_prev_close.get(symbol)
+                    existing = self.latest.get(symbol) or {}
                     row = self._build_stock_row(
                         symbol,
                         last_price,
                         base_close,
-                        volume=volume or (self.latest.get(symbol) or {}).get("volume"),
+                        volume=volume or existing.get("volume"),
+                        day_open=existing.get("day_open"),
+                        day_high=existing.get("day_high"),
+                        day_low=existing.get("day_low"),
                     )
                     if row:
                         self.latest[symbol] = row
@@ -1385,6 +1389,33 @@ class MarketEngine:
             "open_equals_high": open_equals_high,
             "ohlc_badges": ohlc_badges,
         }
+
+    def _apply_open_extreme_flags(self, row):
+        if not isinstance(row, dict):
+            return row
+        badges, open_equals_low, open_equals_high = self._ohlc_badges(
+            row.get("day_open"),
+            row.get("day_high"),
+            row.get("day_low"),
+        )
+        existing_badges = [str(badge).upper() for badge in (row.get("ohlc_badges") or [])]
+        if "OPEN=LOW" in existing_badges:
+            open_equals_low = True
+        if "OPEN=HIGH" in existing_badges:
+            open_equals_high = True
+        normalized = dict(row)
+        normalized["open_equals_low"] = bool(normalized.get("open_equals_low") or open_equals_low)
+        normalized["open_equals_high"] = bool(normalized.get("open_equals_high") or open_equals_high)
+        merged_badges = list(row.get("ohlc_badges") or [])
+        for badge in badges:
+            if badge not in merged_badges:
+                merged_badges.append(badge)
+        if normalized["open_equals_low"] and "OPEN=LOW" not in merged_badges:
+            merged_badges.append("OPEN=LOW")
+        if normalized["open_equals_high"] and "OPEN=HIGH" not in merged_badges:
+            merged_badges.append("OPEN=HIGH")
+        normalized["ohlc_badges"] = merged_badges
+        return normalized
 
     def _bucket_start(self, moment, timeframe):
         timeframe = int(timeframe)
@@ -1711,9 +1742,14 @@ class MarketEngine:
         market_open = self._is_market_open()
         with self.lock:
             latest_rows = [dict(row) for row in self.latest.values()]
+        cached = self._cached_latest_rows() or {}
+        cached_rows_by_symbol = {
+            str(symbol).upper(): dict(row)
+            for symbol, row in (cached.get("rows") or {}).items()
+            if isinstance(row, dict)
+        }
         if not market_open and not latest_rows:
-            cached = self._cached_latest_rows() or {}
-            latest_rows = [dict(row) for row in (cached.get("rows") or {}).values() if isinstance(row, dict)]
+            latest_rows = list(cached_rows_by_symbol.values())
         if not latest_rows:
             latest_rows = self._rows_for_symbols_from_cache(self.symbol_to_token.keys())
 
@@ -1727,7 +1763,14 @@ class MarketEngine:
                 continue
             if row.get("price") in (None, 0) or row.get("change") is None:
                 continue
-            enriched = dict(row)
+            cached_row = cached_rows_by_symbol.get(symbol, {})
+            enriched = dict(cached_row)
+            enriched.update({key: value for key, value in row.items() if value is not None})
+            if not enriched.get("open_equals_low") and cached_row.get("open_equals_low"):
+                enriched["open_equals_low"] = True
+            if not enriched.get("open_equals_high") and cached_row.get("open_equals_high"):
+                enriched["open_equals_high"] = True
+            enriched = self._apply_open_extreme_flags(enriched)
             enriched.update(self._sector_context_for_symbol(symbol, latest=enriched, rankings=rankings))
             prepared.append(enriched)
 

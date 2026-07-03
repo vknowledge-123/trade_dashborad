@@ -1,4 +1,5 @@
 import os
+import struct
 import tempfile
 import time
 import unittest
@@ -322,6 +323,34 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
 
         self.assertEqual(engine.latest["INFY"]["volume"], 543210)
         self.assertTrue(engine.connected)
+
+    def test_dhan_websocket_tick_preserves_existing_open_high_low_flags(self):
+        engine = MarketEngine(redis_client=None)
+        engine.token_to_symbol = {123: "INFY"}
+        engine.rest_prev_close = {"INFY": 1490.0}
+        engine.latest = {
+            "INFY": {
+                "symbol": "INFY",
+                "name": "Infosys",
+                "price": 1498.0,
+                "change": 0.54,
+                "volume": 543210,
+                "day_open": 1500.0,
+                "day_low": 1500.0,
+                "day_high": 1510.0,
+                "open_equals_low": True,
+                "open_equals_high": False,
+                "ohlc_badges": ["OPEN=LOW"],
+            }
+        }
+        packet = struct.pack("<B H B I f", 2, 12, 1, 123, 1502.0)
+
+        engine._on_dhan_binary_message(packet)
+
+        self.assertEqual(engine.latest["INFY"]["day_open"], 1500.0)
+        self.assertEqual(engine.latest["INFY"]["day_low"], 1500.0)
+        self.assertTrue(engine.latest["INFY"]["open_equals_low"])
+        self.assertIn("OPEN=LOW", engine.latest["INFY"]["ohlc_badges"])
 
     def test_sector_snapshot_refreshes_on_repeated_live_snapshot_requests(self):
         fake_kite = FakeKite(
@@ -778,6 +807,40 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertEqual(payload["open_low_gainers"][0]["sector_change"], 2.5)
         self.assertEqual(payload["open_high_losers"][0]["sector_name"], "NIFTY MEDIA")
         self.assertEqual(payload["open_high_losers"][0]["sector_change"], -1.5)
+
+    def test_open_extreme_scanner_uses_cached_flags_when_live_row_lacks_ohlc(self):
+        engine = MarketEngine(redis_client=None)
+        engine.nifty500_set = set()
+        engine._is_market_open = lambda: False
+        engine.latest = {
+            "ECLERX": {
+                "symbol": "ECLERX",
+                "price": 1485,
+                "change": 6.73,
+                "volume": 1310000,
+            }
+        }
+        engine._cached_latest_rows = lambda: {
+            "rows": {
+                "ECLERX": {
+                    "symbol": "ECLERX",
+                    "price": 1485,
+                    "change": 6.73,
+                    "volume": 1310000,
+                    "day_open": 1391.3,
+                    "day_low": 1391.3,
+                    "day_high": 1490,
+                    "open_equals_low": True,
+                    "ohlc_badges": ["OPEN=LOW"],
+                }
+            }
+        }
+
+        payload = engine.get_open_extreme_scanner()
+
+        self.assertEqual(payload["open_low_gainers"][0]["symbol"], "ECLERX")
+        self.assertTrue(payload["open_low_gainers"][0]["open_equals_low"])
+        self.assertEqual(payload["open_low_gainers"][0]["day_open"], 1391.3)
 
     def test_acceleration_scanner_keeps_repeated_hits_for_same_stock(self):
         engine = MarketEngine(redis_client=None)
