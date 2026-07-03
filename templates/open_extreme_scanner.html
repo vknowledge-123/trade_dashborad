@@ -55,7 +55,7 @@
             <span class="sector-meta">
               <span>{{ row.sector_name or row.sector or '-' }}</span>
               {% if row.sector_change is not none %}
-                <small class="{{ 'positive' if row.sector_change >= 0 else 'negative' }}">{{ '+' if row.sector_change >= 0 else '' }}{{ row.sector_change }}%{% if row.sector_rank %} · Rank {{ row.sector_rank }}{% endif %}</small>
+                <small class="{{ 'positive' if row.sector_change >= 0 else 'negative' }}">{{ '+' if row.sector_change >= 0 else '' }}{{ row.sector_change }}%{% if row.sector_rank %} - Rank {{ row.sector_rank }}{% endif %}</small>
               {% else %}
                 <small>-</small>
               {% endif %}
@@ -101,7 +101,7 @@
             <span class="sector-meta">
               <span>{{ row.sector_name or row.sector or '-' }}</span>
               {% if row.sector_change is not none %}
-                <small class="{{ 'positive' if row.sector_change >= 0 else 'negative' }}">{{ '+' if row.sector_change >= 0 else '' }}{{ row.sector_change }}%{% if row.sector_rank %} · Rank {{ row.sector_rank }}{% endif %}</small>
+                <small class="{{ 'positive' if row.sector_change >= 0 else 'negative' }}">{{ '+' if row.sector_change >= 0 else '' }}{{ row.sector_change }}%{% if row.sector_rank %} - Rank {{ row.sector_rank }}{% endif %}</small>
               {% else %}
                 <small>-</small>
               {% endif %}
@@ -194,6 +194,13 @@
   const lowHead = lowBody.querySelector(".table-head")?.outerHTML || "";
   const highHead = highBody.querySelector(".table-head")?.outerHTML || "";
   const tvUrl = (symbol) => `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(`NSE:${symbol}`)}`;
+  const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  }[char]));
   const formatVolume = (value) => {
     const number = Number(value);
     if (!Number.isFinite(number)) return "-";
@@ -207,18 +214,18 @@
     const sectorChange = Number(row.sector_change);
     const sectorName = row.sector_name || row.sector || "-";
     const sectorHtml = Number.isFinite(sectorChange)
-      ? `<span class="sector-meta"><span>${sectorName}</span><small class="${sectorChange >= 0 ? "positive" : "negative"}">${sectorChange >= 0 ? "+" : ""}${sectorChange}%${row.sector_rank ? ` · Rank ${row.sector_rank}` : ""}</small></span>`
-      : `<span class="sector-meta"><span>${sectorName}</span><small>-</small></span>`;
+      ? `<span class="sector-meta"><span>${escapeHtml(sectorName)}</span><small class="${sectorChange >= 0 ? "positive" : "negative"}">${sectorChange >= 0 ? "+" : ""}${sectorChange}%${row.sector_rank ? ` - Rank ${escapeHtml(row.sector_rank)}` : ""}</small></span>`
+      : `<span class="sector-meta"><span>${escapeHtml(sectorName)}</span><small>-</small></span>`;
     return `
-      <div class="table-row openx-row" data-symbol="${row.symbol}">
+      <div class="table-row openx-row" data-symbol="${escapeHtml(row.symbol)}">
         <span class="mono">${index + 1}</span>
         <span class="cell-symbol">
-          <span class="cell-symbol-main">${row.symbol}${row.is_fno ? ' <span class="fno-tag">F&O</span>' : ""}</span>
-          <span class="sector-stock-name">${row.name || ""}</span>
+          <span class="cell-symbol-main">${escapeHtml(row.symbol)}${row.is_fno ? ' <span class="fno-tag">F&O</span>' : ""}</span>
+          <span class="sector-stock-name">${escapeHtml(row.name || "")}</span>
         </span>
-        <span class="mono">${row.price ?? "-"}</span>
-        <span class="mono">${row.day_open ?? "-"}</span>
-        <span class="mono">${extreme ?? "-"}</span>
+        <span class="mono">${escapeHtml(row.price ?? "-")}</span>
+        <span class="mono">${escapeHtml(row.day_open ?? "-")}</span>
+        <span class="mono">${escapeHtml(extreme ?? "-")}</span>
         ${sectorHtml}
         <span class="mono">${formatVolume(row.volume)}</span>
         <span class="${change >= 0 ? "positive" : "negative"} mono">${change >= 0 ? "+" : ""}${Number.isFinite(change) ? change : "-"}%</span>

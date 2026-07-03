@@ -337,6 +337,13 @@
   if (!pdhBody || !pdlBody) return;
 
   const tvUrl = (symbol) => `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(`NSE:${symbol}`)}`;
+  const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  }[char]));
   const headHtml = "<div class=\"table-row table-head scanner-row\"><span>Symbol</span><span>Price</span><span>Level</span><span>Break</span><span>Chart</span></div>";
   const distanceHeadHtml = "<div class=\"table-row table-head scanner-distance-row\"><span>Symbol</span><span>Price</span><span>PDH</span><span>PDH Dist</span><span>PDL</span><span>PDL Dist</span><span>Chart</span></div>";
   const formatDistance = (value) => {
@@ -350,14 +357,14 @@
     const cls = side === "pdh" ? "positive" : "negative";
     const sign = side === "pdh" ? "+" : "-";
     return `
-      <div class="table-row scanner-row" data-symbol="${row.symbol}">
+      <div class="table-row scanner-row" data-symbol="${escapeHtml(row.symbol)}">
         <span class="cell-symbol">
-          <span class="cell-symbol-main">${row.symbol}${row.is_fno ? ' <span class="fno-tag">F&O</span>' : ""}</span>
-          <span class="sector-stock-name">${row.name || ""}</span>
+          <span class="cell-symbol-main">${escapeHtml(row.symbol)}${row.is_fno ? ' <span class="fno-tag">F&O</span>' : ""}</span>
+          <span class="sector-stock-name">${escapeHtml(row.name || "")}</span>
         </span>
-        <span class="mono">${row.price}</span>
-        <span class="mono">${level}</span>
-        <span class="${cls} mono">${sign}${row.break_percent}%</span>
+        <span class="mono">${escapeHtml(row.price)}</span>
+        <span class="mono">${escapeHtml(level)}</span>
+        <span class="${cls} mono">${escapeHtml(`${sign}${row.break_percent}%`)}</span>
         <a class="tv-link" href="${tvUrl(row.symbol)}" target="_blank" rel="noopener noreferrer">TradingView</a>
       </div>
     `;
@@ -366,15 +373,15 @@
     container.innerHTML = headHtml + (rows || []).map((row) => rowHtml(row, side)).join("");
   };
   const distanceRowHtml = (row) => `
-    <div class="table-row scanner-distance-row" data-symbol="${row.symbol}">
+    <div class="table-row scanner-distance-row" data-symbol="${escapeHtml(row.symbol)}">
       <span class="cell-symbol">
-        <span class="cell-symbol-main">${row.symbol}${row.is_fno ? ' <span class="fno-tag">F&O</span>' : ""}</span>
-        <span class="sector-stock-name">${row.name || ""}</span>
+        <span class="cell-symbol-main">${escapeHtml(row.symbol)}${row.is_fno ? ' <span class="fno-tag">F&O</span>' : ""}</span>
+        <span class="sector-stock-name">${escapeHtml(row.name || "")}</span>
       </span>
-      <span class="mono">${row.price ?? "-"}</span>
-      <span class="mono">${row.previous_high ?? "-"}</span>
+      <span class="mono">${escapeHtml(row.price ?? "-")}</span>
+      <span class="mono">${escapeHtml(row.previous_high ?? "-")}</span>
       <span class="mono ${row.pdh_side === "above" ? "positive" : "negative"}">${formatDistance(row.pdh_distance_percent)}</span>
-      <span class="mono">${row.previous_low ?? "-"}</span>
+      <span class="mono">${escapeHtml(row.previous_low ?? "-")}</span>
       <span class="mono ${row.pdl_side === "above" ? "positive" : "negative"}">${formatDistance(row.pdl_distance_percent)}</span>
       <a class="tv-link" href="${tvUrl(row.symbol)}" target="_blank" rel="noopener noreferrer">TradingView</a>
     </div>

@@ -336,24 +336,31 @@
   if (!body) return;
 
   const tvUrl = (symbol) => `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(`NSE:${symbol}`)}`;
+  const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  }[char]));
   const tableHead = body.querySelector(".table-head")?.outerHTML || "";
   const scanClass = (state) => state === "BULLISH_SCAN" ? "positive" : "neutral";
   const rowHtml = (row) => `
-    <div class="table-row swing-row" data-symbol="${row.symbol}">
+    <div class="table-row swing-row" data-symbol="${escapeHtml(row.symbol)}">
       <span class="cell-symbol">
-        <span class="cell-symbol-main">${row.symbol}</span>
-        <span class="sector-stock-name">${row.name || ""}</span>
+        <span class="cell-symbol-main">${escapeHtml(row.symbol)}</span>
+        <span class="sector-stock-name">${escapeHtml(row.name || "")}</span>
       </span>
-      <span class="pill ${scanClass(row.scan_state)}">${row.scan_state || "-"}</span>
-      <span class="mono">${row.score ?? "-"}</span>
-      <span class="mono">${row.price ?? "-"}</span>
-      <span class="mono">${row.rsi ?? "-"}</span>
-      <span><span class="swing-stack-main">${row.staircase_pattern || "-"}</span><span class="sector-stock-name">HL ${row.higher_low_count ?? 0} / HC ${row.higher_close_count ?? 0}</span></span>
-      <span><span class="swing-stack-main">${row.price_growth_pct ?? 0}%</span><span class="sector-stock-name">Vol ${row.volume_growth_pct ?? 0}% · ${row.daily_volume_ratio ?? "-"}x</span></span>
-      <span>${row.setup || "-"}</span>
-      <span><span class="swing-stack-main">${row.liquidity_pattern || "-"}</span><span class="sector-stock-name">Reclaimed ${row.reclaimed_level ?? "-"}</span></span>
-      <span class="mono">${row.support_zone ?? "-"}</span>
-      <span class="mono">${row.resistance_zone ?? "-"}</span>
+      <span class="pill ${scanClass(row.scan_state)}">${escapeHtml(row.scan_state || "-")}</span>
+      <span class="mono">${escapeHtml(row.score ?? "-")}</span>
+      <span class="mono">${escapeHtml(row.price ?? "-")}</span>
+      <span class="mono">${escapeHtml(row.rsi ?? "-")}</span>
+      <span><span class="swing-stack-main">${escapeHtml(row.staircase_pattern || "-")}</span><span class="sector-stock-name">HL ${escapeHtml(row.higher_low_count ?? 0)} / HC ${escapeHtml(row.higher_close_count ?? 0)}</span></span>
+      <span><span class="swing-stack-main">${escapeHtml(row.price_growth_pct ?? 0)}%</span><span class="sector-stock-name">Vol ${escapeHtml(row.volume_growth_pct ?? 0)}% - ${escapeHtml(row.daily_volume_ratio ?? "-")}x</span></span>
+      <span>${escapeHtml(row.setup || "-")}</span>
+      <span><span class="swing-stack-main">${escapeHtml(row.liquidity_pattern || "-")}</span><span class="sector-stock-name">Reclaimed ${escapeHtml(row.reclaimed_level ?? "-")}</span></span>
+      <span class="mono">${escapeHtml(row.support_zone ?? "-")}</span>
+      <span class="mono">${escapeHtml(row.resistance_zone ?? "-")}</span>
       <a class="tv-link" href="${tvUrl(row.symbol)}" target="_blank" rel="noopener noreferrer">TradingView</a>
     </div>
   `;
@@ -405,15 +412,15 @@
       const trades = data.trades || [];
       backtestBody.innerHTML = backtestHead + trades.slice(-20).reverse().map((trade) => `
         <div class="table-row backtest-row">
-          <span>${trade.entry_date || "-"}</span>
-          <span class="positive">${trade.scan_state || "-"}</span>
-          <span class="mono">${trade.entry_price ?? "-"}</span>
-          <span class="mono">${trade.exit_price ?? "-"}</span>
-          <span class="mono ${Number(trade.return_pct) > 0 ? "positive" : "negative"}">${trade.return_pct ?? "-"}%</span>
+          <span>${escapeHtml(trade.entry_date || "-")}</span>
+          <span class="positive">${escapeHtml(trade.scan_state || "-")}</span>
+          <span class="mono">${escapeHtml(trade.entry_price ?? "-")}</span>
+          <span class="mono">${escapeHtml(trade.exit_price ?? "-")}</span>
+          <span class="mono ${Number(trade.return_pct) > 0 ? "positive" : "negative"}">${escapeHtml(trade.return_pct ?? "-")}%</span>
         </div>
       `).join("");
       if (!trades.length) {
-        backtestBody.innerHTML += `<div class="table-row backtest-row"><span>${data.error || "No completed trades found for this rule set."}</span><span></span><span></span><span></span><span></span></div>`;
+        backtestBody.innerHTML += `<div class="table-row backtest-row"><span>${escapeHtml(data.error || "No completed trades found for this rule set.")}</span><span></span><span></span><span></span><span></span></div>`;
       }
     } catch (error) {
       backtestBody.innerHTML = backtestHead + '<div class="table-row backtest-row"><span>Backtest failed.</span><span></span><span></span><span></span><span></span></div>';

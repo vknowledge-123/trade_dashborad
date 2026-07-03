@@ -508,6 +508,99 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertEqual(snapshot["sector_gainers"][0]["price"], "-")
         self.assertEqual(snapshot["sector_losers"][0]["sector"], "NIFTY PVT BANK")
 
+    def test_closed_market_snapshot_uses_constituent_sector_moves_when_sector_quotes_are_zero(self):
+        engine = MarketEngine(redis_client=None)
+        engine.latest = {
+            "INFY": {"symbol": "INFY", "price": 1500, "change": 2.0, "sectors": ["NIFTY IT"]},
+            "TCS": {"symbol": "TCS", "price": 4200, "change": 1.0, "sectors": ["NIFTY IT"]},
+            "HDFCBANK": {"symbol": "HDFCBANK", "price": 900, "change": -1.0, "sectors": ["NIFTY PVT BANK"]},
+        }
+        engine.sector_latest = {
+            "NIFTY IT": {"sector": "NIFTY IT", "price": 27439.4, "change": 0.0},
+            "NIFTY PVT BANK": {"sector": "NIFTY PVT BANK", "price": 28215.45, "change": 0.0},
+        }
+
+        snapshot = engine._build_snapshot(market_open=False)
+
+        self.assertEqual(snapshot["sector_gainers"][0]["sector"], "NIFTY IT")
+        self.assertEqual(snapshot["sector_gainers"][0]["change"], 1.5)
+        self.assertEqual(snapshot["sector_gainers"][0]["price"], 27439.4)
+        self.assertEqual(snapshot["sector_losers"][0]["sector"], "NIFTY PVT BANK")
+        self.assertEqual(snapshot["sector_losers"][0]["change"], -1.0)
+
+    def test_closed_market_snapshot_hydrates_from_previous_day_stock_cache(self):
+        engine = MarketEngine(redis_client=None)
+        engine.nifty500_set = {"INFY", "HDFCBANK"}
+        engine.symbol_to_token = {"INFY": 1, "HDFCBANK": 2}
+        engine.symbol_to_name = {"INFY": "Infosys", "HDFCBANK": "HDFC Bank"}
+        engine.symbol_to_sectors = {"INFY": ["NIFTY IT"], "HDFCBANK": ["NIFTY PVT BANK"]}
+        engine._completed_session_cache_marker = lambda: "2026-05-22"
+        engine.previous_close_cache = {
+            "symbols": {
+                "INFY": {"cache_marker": "2026-05-22", "broker": "kite", "close": 1500.0},
+                "HDFCBANK": {"cache_marker": "2026-05-22", "broker": "kite", "close": 900.0},
+            }
+        }
+        engine.previous_day_badges_cache = {
+            "INFY": {"cache_marker": "2026-05-22", "broker": "kite", "change": 2.0},
+            "HDFCBANK": {"cache_marker": "2026-05-22", "broker": "kite", "change": -1.0},
+        }
+        engine._restore_previous_day_badges_cache = lambda: engine.previous_day_badges_cache
+        engine._restore_previous_close_cache = lambda: engine.previous_close_cache
+        engine._save_latest_rows_cache = lambda: None
+
+        snapshot = engine._build_snapshot(market_open=False)
+
+        self.assertEqual(snapshot["gainers"][0]["symbol"], "INFY")
+        self.assertEqual(snapshot["gainers"][0]["change"], 2.0)
+        self.assertEqual(snapshot["losers"][0]["symbol"], "HDFCBANK")
+        self.assertEqual(snapshot["sector_gainers"][0]["sector"], "NIFTY IT")
+        self.assertEqual(snapshot["sector_losers"][0]["sector"], "NIFTY PVT BANK")
+        self.assertEqual(engine.last_snapshot_source, "previous_day_cache")
+
+    def test_previous_day_cache_hydration_populates_shared_latest_rows(self):
+        engine = MarketEngine(redis_client=None)
+        engine.symbol_to_token = {"INFY": 1}
+        engine.symbol_to_name = {"INFY": "Infosys"}
+        engine.symbol_to_sectors = {"INFY": ["NIFTY IT"]}
+        engine._completed_session_cache_marker = lambda: "2026-05-22"
+        engine.previous_close_cache = {
+            "symbols": {
+                "INFY": {"cache_marker": "2026-05-22", "broker": "kite", "close": 1500.0},
+            }
+        }
+        engine.previous_day_badges_cache = {
+            "INFY": {"cache_marker": "2026-05-22", "broker": "kite", "change": 2.0},
+        }
+        engine._restore_previous_day_badges_cache = lambda: engine.previous_day_badges_cache
+        engine._restore_previous_close_cache = lambda: engine.previous_close_cache
+        engine._save_latest_rows_cache = lambda: None
+
+        rows = engine._hydrate_latest_rows_from_previous_day_cache(["INFY"])
+
+        self.assertEqual(rows[0]["symbol"], "INFY")
+        self.assertEqual(engine.latest["INFY"]["price"], 1500.0)
+        self.assertEqual(engine.latest["INFY"]["change"], 2.0)
+
+    def test_closed_sector_quote_refresh_preserves_existing_nonzero_change(self):
+        engine = MarketEngine(redis_client=None)
+        engine.kite = object()
+        engine.sector_tokens = {"NIFTY IT": 123}
+        engine.sector_latest = {
+            "NIFTY IT": {"sector": "NIFTY IT", "price": 27000.0, "change": 1.25}
+        }
+        engine._is_market_open = lambda: False
+        engine._fetch_sector_quote = lambda kite, sectors: (
+            {},
+            {"NIFTY IT": {"sector": "NIFTY IT", "price": 27439.4, "change": 0.0}},
+        )
+
+        refreshed = engine._refresh_sector_snapshot(force=True)
+
+        self.assertTrue(refreshed)
+        self.assertEqual(engine.sector_latest["NIFTY IT"]["price"], 27439.4)
+        self.assertEqual(engine.sector_latest["NIFTY IT"]["change"], 1.25)
+
     def test_pdh_pdl_scanner_uses_cached_rows_without_blocking_on_history(self):
         engine = MarketEngine(redis_client=None)
         engine.kite = object()
@@ -855,6 +948,84 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertEqual(payload["open_low_gainers"][0]["symbol"], "ECLERX")
         self.assertTrue(payload["open_low_gainers"][0]["open_equals_low"])
         self.assertEqual(payload["open_low_gainers"][0]["day_open"], 1391.3)
+
+    def test_closed_open_extreme_scanner_forces_today_quote_refresh(self):
+        engine = MarketEngine(redis_client=None)
+        engine.nifty500_set = set()
+        engine.kite = object()
+        engine.symbol_to_token = {"ECLERX": 1, "ZEEL": 2}
+        engine.symbol_to_name = {"ECLERX": "Eclerx", "ZEEL": "Zee"}
+        engine._is_market_open = lambda: False
+        engine._cached_latest_rows = lambda: {}
+        engine._save_latest_rows_cache = lambda: None
+
+        refreshed = []
+
+        def fake_refresh(force=False):
+            refreshed.append(force)
+            engine.latest = {
+                "ECLERX": {
+                    "symbol": "ECLERX",
+                    "name": "Eclerx",
+                    "price": 1485.0,
+                    "change": 6.73,
+                    "day_open": 1391.3,
+                    "day_high": 1490.0,
+                    "day_low": 1391.3,
+                    "open_equals_low": True,
+                    "open_equals_high": False,
+                },
+                "ZEEL": {
+                    "symbol": "ZEEL",
+                    "name": "Zee",
+                    "price": 94.0,
+                    "change": -3.2,
+                    "day_open": 100.0,
+                    "day_high": 100.0,
+                    "day_low": 92.0,
+                    "open_equals_low": False,
+                    "open_equals_high": True,
+                },
+            }
+            return True
+
+        engine._refresh_rest_snapshot = fake_refresh
+
+        payload = engine.get_open_extreme_scanner()
+
+        self.assertEqual(refreshed, [True])
+        self.assertEqual(payload["open_low_gainers"][0]["symbol"], "ECLERX")
+        self.assertEqual(payload["open_low_gainers"][0]["day_open"], 1391.3)
+        self.assertTrue(payload["open_low_gainers"][0]["open_equals_low"])
+        self.assertEqual(payload["open_high_losers"][0]["symbol"], "ZEEL")
+        self.assertTrue(payload["open_high_losers"][0]["open_equals_high"])
+
+    def test_open_extreme_scanner_does_not_use_previous_day_ohlc_cache(self):
+        engine = MarketEngine(redis_client=None)
+        engine.nifty500_set = set()
+        engine.symbol_to_token = {"ECLERX": 1}
+        engine._is_market_open = lambda: False
+        engine.kite = None
+        engine._cached_latest_rows = lambda: {}
+        engine._rows_for_symbols_from_cache = lambda symbols: []
+        engine.previous_day_levels_cache = {
+            "ECLERX": {
+                "cache_marker": "2026-07-03",
+                "broker": "kite",
+                "open": 1391.3,
+                "high": 1490.0,
+                "low": 1391.3,
+                "close": 1485.0,
+            }
+        }
+        engine.previous_day_badges_cache = {
+            "ECLERX": {"cache_marker": "2026-07-03", "broker": "kite", "change": 6.73}
+        }
+
+        payload = engine.get_open_extreme_scanner()
+
+        self.assertEqual(payload["open_low_gainers"], [])
+        self.assertEqual(payload["open_high_losers"], [])
 
     def test_acceleration_scanner_keeps_repeated_hits_for_same_stock(self):
         engine = MarketEngine(redis_client=None)

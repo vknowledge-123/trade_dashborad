@@ -357,6 +357,13 @@
   bindStoredInput(sellLimitOffset, sellLimitKey, "1");
   const head = body.querySelector(".table-head")?.outerHTML || "";
   const tvUrl = (symbol) => `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(`NSE:${symbol}`)}`;
+  const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  }[char]));
   const formatVolume = (value) => {
     const number = Number(value);
     if (!Number.isFinite(number)) return "-";
@@ -377,33 +384,33 @@
     const name = row.sector_name || row.sector || "-";
     const change = Number(row.sector_change);
     const rank = Number(row.sector_rank);
-    if (!Number.isFinite(change)) return `<span>${name}</span><small>-</small>`;
-    return `<span>${name}</span><small class="${change >= 0 ? "positive" : "negative"}">${change >= 0 ? "+" : ""}${change.toFixed(2)}%${Number.isFinite(rank) ? ` - Rank ${rank}` : ""}</small>`;
+    if (!Number.isFinite(change)) return `<span>${escapeHtml(name)}</span><small>-</small>`;
+    return `<span>${escapeHtml(name)}</span><small class="${change >= 0 ? "positive" : "negative"}">${change >= 0 ? "+" : ""}${change.toFixed(2)}%${Number.isFinite(rank) ? ` - Rank ${rank}` : ""}</small>`;
   };
   const rowHtml = (row) => `
-    <div class="table-row accel-row" data-symbol="${row.symbol}">
+    <div class="table-row accel-row" data-symbol="${escapeHtml(row.symbol)}">
       <span class="cell-symbol">
-        <span class="cell-symbol-main">${row.symbol}${row.is_fno ? ' <span class="fno-tag">F&O</span>' : ""}</span>
-        <span class="sector-stock-name">${row.name || ""}</span>
+        <span class="cell-symbol-main">${escapeHtml(row.symbol)}${row.is_fno ? ' <span class="fno-tag">F&O</span>' : ""}</span>
+        <span class="sector-stock-name">${escapeHtml(row.name || "")}</span>
       </span>
-      <span class="mono">${row.price ?? "-"}</span>
-      <span class="mono">${row.from_close ?? "-"}</span>
-      <span class="mono">${row.to_close ?? "-"}</span>
+      <span class="mono">${escapeHtml(row.price ?? "-")}</span>
+      <span class="mono">${escapeHtml(row.from_close ?? "-")}</span>
+      <span class="mono">${escapeHtml(row.to_close ?? "-")}</span>
       <span class="${Number(row.move_percent) >= 0 ? "positive" : "negative"} mono">${formatSigned(row.move_percent)}</span>
       <span class="sector-meta">${sectorText(row)}</span>
       <span class="mono">${formatVolume(row.candle_volume)}</span>
       <span class="mono">${multiplier(row.volume_sma_multiplier)}</span>
       <span class="mono">${formatVolume(row.turnover)}</span>
-      <span class="mono">${row.appearance_time_display || "-"}</span>
-      <span class="mono">${row.repeat_count || 1}</span>
+      <span class="mono">${escapeHtml(row.appearance_time_display || "-")}</span>
+      <span class="mono">${escapeHtml(row.repeat_count || 1)}</span>
       <span class="accel-row-actions">
-        ${row.kept ? '<span class="pill positive">Kept</span>' : `<button class="btn btn-ghost btn-mini accel-hit-btn" type="button" data-action="keep" data-event-id="${row.event_id || ""}">Keep</button>`}
-        <button class="btn btn-ghost btn-mini accel-hit-btn delete" type="button" data-action="delete" data-event-id="${row.event_id || ""}">Delete</button>
+        ${row.kept ? '<span class="pill positive">Kept</span>' : `<button class="btn btn-ghost btn-mini accel-hit-btn" type="button" data-action="keep" data-event-id="${escapeHtml(row.event_id || "")}">Keep</button>`}
+        <button class="btn btn-ghost btn-mini accel-hit-btn delete" type="button" data-action="delete" data-event-id="${escapeHtml(row.event_id || "")}">Delete</button>
       </span>
       ${isAdmin ? `
         <span class="accel-trade-actions">
-          <button class="btn btn-primary btn-mini accel-order-btn" type="button" data-side="BUY" data-symbol="${row.symbol}" data-price="${row.price ?? ""}">Buy</button>
-          <button class="btn btn-ghost btn-mini accel-order-btn sell" type="button" data-side="SELL" data-symbol="${row.symbol}" data-price="${row.price ?? ""}">Sell</button>
+          <button class="btn btn-primary btn-mini accel-order-btn" type="button" data-side="BUY" data-symbol="${escapeHtml(row.symbol)}" data-price="${escapeHtml(row.price ?? "")}">Buy</button>
+          <button class="btn btn-ghost btn-mini accel-order-btn sell" type="button" data-side="SELL" data-symbol="${escapeHtml(row.symbol)}" data-price="${escapeHtml(row.price ?? "")}">Sell</button>
         </span>
       ` : ""}
       <a class="tv-link" href="${tvUrl(row.symbol)}" target="_blank" rel="noopener noreferrer">TradingView</a>

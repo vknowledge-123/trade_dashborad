@@ -2148,6 +2148,13 @@ h3,
   const snapshotStatusText = document.getElementById("snapshot-status-text");
   const snapshotUpdatedAt = document.getElementById("snapshot-updated-at");
   const tradingViewUrl = (symbol) => `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(`NSE:${symbol}`)}`;
+  const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  }[char]));
   const calcTrigger = document.getElementById("quantity-calculator-trigger");
   const calcModal = document.getElementById("quantity-calculator-modal");
   const calcClose = document.getElementById("quantity-calculator-close");
@@ -2309,7 +2316,7 @@ h3,
         row.open_equals_high ? '<span class="ohlc-badge open-high">OPEN=HIGH</span>' : "",
       ].filter(Boolean).join("");
       return `
-        <span class="cell-symbol-main">${row.symbol} ${fno}</span>
+        <span class="cell-symbol-main">${escapeHtml(row.symbol)} ${fno}</span>
         ${prevBadge ? `<span class="cell-symbol-badges">${prevBadge}</span>` : ""}
         ${ohlcBadges ? `<span class="cell-symbol-badges">${ohlcBadges}</span>` : ""}
       `;
@@ -2334,9 +2341,9 @@ h3,
       el.style.setProperty("--row-delay", `${delay}s`);
       el.innerHTML = `
         <span class="cell-symbol">${symbolCellHtml(row)}</span>
-        <span class="cell-price">${row.price}</span>
+        <span class="cell-price">${escapeHtml(row.price)}</span>
         <span class="cell-volume">${formatVolume(row.volume)}</span>
-        <span class="cell-change ${positive ? "positive" : "negative"}">${sign}${row.change}%</span>
+        <span class="cell-change ${positive ? "positive" : "negative"}">${escapeHtml(`${sign}${row.change}%`)}</span>
         <a class="tv-link" href="${tradingViewUrl(row.symbol)}" target="_blank" rel="noopener noreferrer">TradingView</a>
       `;
       return el;
@@ -2386,9 +2393,9 @@ h3,
       el.setAttribute("role", "button");
       el.setAttribute("tabindex", "0");
       el.innerHTML = `
-        <div class="sector-name">${row.sector}</div>
-        <div class="sector-price">${row.price ?? "-"}</div>
-        <div class="sector-change ${cls}">${sign}${row.change}%</div>
+        <div class="sector-name">${escapeHtml(row.sector)}</div>
+        <div class="sector-price">${escapeHtml(row.price ?? "-")}</div>
+        <div class="sector-change ${cls}">${escapeHtml(`${sign}${row.change}%`)}</div>
       `;
       return el;
     };
@@ -2463,19 +2470,19 @@ h3,
         const row = document.createElement("div");
         row.className = "sector-stock-row";
         row.innerHTML = `
-          <span class="sector-stock-rank">${stock.rank}</span>
+          <span class="sector-stock-rank">${escapeHtml(stock.rank)}</span>
           <span class="sector-stock-symbol">
             <span>
-              <span class="cell-symbol-main">${stock.symbol}${stock.is_fno ? ' <span class="fno-tag">F&O</span>' : ""}</span>
+              <span class="cell-symbol-main">${escapeHtml(stock.symbol)}${stock.is_fno ? ' <span class="fno-tag">F&O</span>' : ""}</span>
               ${stock.previous_day_positive ? `<span class="cell-symbol-badges"><span class="prev-rise-badge">Prev ${formatSignedPercent(stock.previous_day_change)}</span></span>` : ""}
               ${ohlcBadges ? `<span class="cell-symbol-badges">${ohlcBadges}</span>` : ""}
-              ${stock.name ? `<span class="sector-stock-name">${stock.name}</span>` : ""}
+              ${stock.name ? `<span class="sector-stock-name">${escapeHtml(stock.name)}</span>` : ""}
             </span>
           </span>
-          <span class="sector-stock-price">${stock.price}</span>
+          <span class="sector-stock-price">${escapeHtml(stock.price)}</span>
           <span class="sector-stock-volume">${formatVolume(stock.volume)}</span>
           <span class="sector-stock-turnover">${formatVolume(stock.turnover)}</span>
-          <span class="sector-stock-change ${cls}">${sign}${stock.change}%</span>
+          <span class="sector-stock-change ${cls}">${escapeHtml(`${sign}${stock.change}%`)}</span>
           <a class="tv-link" href="${tradingViewUrl(stock.symbol)}" target="_blank" rel="noopener noreferrer">TradingView</a>
         `;
         sectorModalBody.appendChild(row);

@@ -1740,6 +1740,8 @@ class MarketEngine:
 
     def get_open_extreme_scanner(self):
         market_open = self._is_market_open()
+        if self.kite and self.symbol_to_token:
+            self._refresh_rest_snapshot(force=True)
         with self.lock:
             latest_rows = [dict(row) for row in self.latest.values()]
         cached = self._cached_latest_rows() or {}
@@ -1932,6 +1934,8 @@ class MarketEngine:
                     "rows": self.latest,
                     "updated_at": self.last_update,
                     "snapshot_source": self.last_snapshot_source,
+                    "cache_marker": self._completed_session_cache_marker(),
+                    "broker": self._current_broker(),
                 },
             )
         except Exception:
@@ -2314,6 +2318,21 @@ class MarketEngine:
             self.last_update = self._utc_now()
         return rows
 
+    def _hydrate_latest_rows_from_previous_day_cache(self, symbols=None):
+        requested = list(symbols or self._symbols_for_badge_warmup())
+        rows = self._rows_for_symbols_from_previous_close_cache(requested)
+        if not rows:
+            return []
+        with self.lock:
+            for row in rows:
+                self.latest[row["symbol"]] = row
+            if not self.last_update:
+                self.last_update = self._utc_now()
+            if self.last_snapshot_source == "empty":
+                self.last_snapshot_source = "previous_day_cache"
+        self._save_latest_rows_cache()
+        return rows
+
     def _stock_row_count(self, snapshot):
         return len(snapshot.get("gainers") or []) + len(snapshot.get("losers") or [])
 
@@ -2348,6 +2367,50 @@ class MarketEngine:
         if enriched.get("sector_losers"):
             enriched["sector_losers"] = enrich_rows(enriched.get("sector_losers"))
         return enriched
+
+    def _sector_rows_from_constituent_changes(self, movers):
+        grouped = defaultdict(list)
+        for row in movers:
+            for sector in row.get("sectors") or self.symbol_to_sectors.get(row.get("symbol", "").upper(), []):
+                if row.get("change") is not None:
+                    grouped[sector].append(float(row.get("change") or 0))
+        return [
+            {
+                "sector": sector,
+                "price": "-",
+                "change": round(sum(changes) / len(changes), 2),
+                "rank_source": "constituent_average",
+                "constituent_count": len(changes),
+            }
+            for sector, changes in grouped.items()
+            if changes
+        ]
+
+    def _sector_rows_have_real_move(self, sectors):
+        for row in sectors or []:
+            try:
+                if abs(float(row.get("change") or 0)) > 0:
+                    return True
+            except (TypeError, ValueError):
+                continue
+        return False
+
+    def _merge_sector_prices_into_rows(self, rows, price_rows):
+        if not rows or not price_rows:
+            return rows
+        latest_by_sector = {
+            str(row.get("sector") or "").upper(): row
+            for row in price_rows
+            if isinstance(row, dict) and row.get("sector")
+        }
+        merged_rows = []
+        for row in rows:
+            merged = dict(row)
+            latest = latest_by_sector.get(str(row.get("sector") or "").upper())
+            if latest and latest.get("price") not in (None, "", "-"):
+                merged["price"] = latest.get("price")
+            merged_rows.append(merged)
+        return merged_rows
 
     def _with_runtime_fields(self, snapshot, market_open, source=None):
         runtime = dict(snapshot)
@@ -2637,12 +2700,14 @@ class MarketEngine:
             candle = candles[-1]
         high = candle.get("high")
         low = candle.get("low")
+        open_value = candle.get("open")
         close = candle.get("close")
         if high in (None, 0) or low in (None, 0):
             return cached
         levels = {
             "cache_marker": cache_marker,
             "broker": self._current_broker(),
+            "open": round(float(open_value), 2) if open_value not in (None, 0) else None,
             "high": round(float(high), 2),
             "low": round(float(low), 2),
             "close": round(float(close), 2) if close not in (None, 0) else None,
@@ -3897,7 +3962,22 @@ class MarketEngine:
             if prev:
                 self.sector_prev_close.update(prev)
             if latest:
-                self.sector_latest.update(latest)
+                if not self._is_market_open():
+                    for sector_name, row in latest.items():
+                        existing = self.sector_latest.get(sector_name)
+                        if (
+                            existing
+                            and row.get("change") == 0
+                            and existing.get("change") not in (None, 0)
+                        ):
+                            merged = dict(existing)
+                            if row.get("price") not in (None, "", "-"):
+                                merged["price"] = row.get("price")
+                            self.sector_latest[sector_name] = merged
+                        else:
+                            self.sector_latest[sector_name] = row
+                else:
+                    self.sector_latest.update(latest)
                 self.last_update = self._utc_now()
                 self.last_snapshot_source = "api_sector"
         self.last_sector_quote_ts = now
@@ -4116,6 +4196,8 @@ class MarketEngine:
     def _build_snapshot(self, market_open):
         if not self.sector_latest and not self.symbol_to_sectors:
             self._restore_cached_sector_memberships()
+        if not market_open and not self.latest:
+            self._hydrate_latest_rows_from_previous_day_cache()
         with self.lock:
             movers = list(self.latest.values())
             if self.nifty500_set:
@@ -4124,22 +4206,11 @@ class MarketEngine:
             losers = [dict(m) for m in sorted([m for m in movers if m["change"] < 0], key=lambda x: x["change"])[:20]]
             sectors = list(self.sector_latest.values())
             if not sectors:
-                grouped = defaultdict(list)
-                for row in movers:
-                    for sector in row.get("sectors") or self.symbol_to_sectors.get(row.get("symbol", "").upper(), []):
-                        if row.get("change") is not None:
-                            grouped[sector].append(float(row.get("change") or 0))
-                sectors = [
-                    {
-                        "sector": sector,
-                        "price": "-",
-                        "change": round(sum(changes) / len(changes), 2),
-                        "rank_source": "constituent_average",
-                        "constituent_count": len(changes),
-                    }
-                    for sector, changes in grouped.items()
-                    if changes
-                ]
+                sectors = self._sector_rows_from_constituent_changes(movers)
+            elif not market_open and not self._sector_rows_have_real_move(sectors):
+                constituent_sectors = self._sector_rows_from_constituent_changes(movers)
+                if self._sector_rows_have_real_move(constituent_sectors):
+                    sectors = self._merge_sector_prices_into_rows(constituent_sectors, sectors)
             sector_gainers = sorted([s for s in sectors if s["change"] > 0], key=lambda x: x["change"], reverse=True)[:10]
             sector_losers = sorted([s for s in sectors if s["change"] < 0], key=lambda x: x["change"])[:10]
             snapshot = {
