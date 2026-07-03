@@ -1718,6 +1718,7 @@ class MarketEngine:
             latest_rows = self._rows_for_symbols_from_cache(self.symbol_to_token.keys())
 
         prepared = []
+        rankings = self._sector_rankings()
         for row in latest_rows:
             if not isinstance(row, dict):
                 continue
@@ -1726,15 +1727,23 @@ class MarketEngine:
                 continue
             if row.get("price") in (None, 0) or row.get("change") is None:
                 continue
-            prepared.append(dict(row))
+            enriched = dict(row)
+            enriched.update(self._sector_context_for_symbol(symbol, latest=enriched, rankings=rankings))
+            prepared.append(enriched)
 
         open_low = sorted(
-            [row for row in prepared if row.get("open_equals_low")],
+            [
+                row for row in prepared
+                if row.get("open_equals_low") and float(row.get("change") or 0) > 0
+            ],
             key=lambda item: float(item.get("change") or 0),
             reverse=True,
         )[:20]
         open_high = sorted(
-            [row for row in prepared if row.get("open_equals_high")],
+            [
+                row for row in prepared
+                if row.get("open_equals_high") and float(row.get("change") or 0) < 0
+            ],
             key=lambda item: float(item.get("change") or 0),
         )[:20]
         return {
