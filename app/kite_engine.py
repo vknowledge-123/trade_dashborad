@@ -1425,7 +1425,15 @@ class MarketEngine:
             "error": error,
         }
 
-    def place_acceleration_market_order(self, symbol, side, per_trade_capital=10000, client_price=None):
+    def place_acceleration_market_order(
+        self,
+        symbol,
+        side,
+        per_trade_capital=10000,
+        client_price=None,
+        buy_limit_offset_pct=1,
+        sell_limit_offset_pct=1,
+    ):
         symbol = (symbol or "").strip().upper()
         side = (side or "").strip().upper()
         if side not in {"BUY", "SELL"}:
@@ -1457,7 +1465,19 @@ class MarketEngine:
         quantity = int(capital // price)
         if quantity <= 0:
             return {"ok": False, "error": f"Capital {capital:.2f} is lower than {symbol} price {price:.2f}."}
-        limit_price = round(price * 1.01, 2)
+        try:
+            buy_offset = max(0.0, float(buy_limit_offset_pct if buy_limit_offset_pct is not None else 1))
+        except (TypeError, ValueError):
+            buy_offset = 1.0
+        try:
+            sell_offset = max(0.0, float(sell_limit_offset_pct if sell_limit_offset_pct is not None else 1))
+        except (TypeError, ValueError):
+            sell_offset = 1.0
+        limit_offset_pct = buy_offset if side == "BUY" else sell_offset
+        limit_multiplier = 1 + (limit_offset_pct / 100) if side == "BUY" else 1 - (limit_offset_pct / 100)
+        limit_price = round(price * limit_multiplier, 2)
+        if limit_price <= 0:
+            return {"ok": False, "error": "Limit price must be greater than zero."}
         correlation_id = f"ACC{side[:1]}{symbol}{int(time.time())}"[:30]
         try:
             if active_broker == "dhan":
@@ -1503,6 +1523,7 @@ class MarketEngine:
             "quantity": quantity,
             "price": round(price, 2),
             "limit_price": limit_price,
+            "limit_offset_pct": round(limit_offset_pct, 3),
             "capital": round(capital, 2),
             "product_type": broker_product,
             "order_type": broker_order_type,

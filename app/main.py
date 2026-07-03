@@ -715,6 +715,8 @@ def admin_acceleration_order(
             side=payload.get("side"),
             per_trade_capital=payload.get("capital", 10000),
             client_price=payload.get("price"),
+            buy_limit_offset_pct=payload.get("buy_limit_offset_pct", 1),
+            sell_limit_offset_pct=payload.get("sell_limit_offset_pct", 1),
         )
     except Exception as exc:
         result = {"ok": False, "error": str(exc) or "Order placement failed."}
