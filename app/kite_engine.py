@@ -32,7 +32,7 @@ ACCELERATION_VOLUME_SMA_CACHE_KEY = "acceleration_volume_sma"
 ACCELERATION_HITS_CACHE_KEY = "acceleration_hits"
 DHAN_SCRIP_MASTER_CACHE_KEY = "dhan_scrip_master"
 IST = ZoneInfo("Asia/Kolkata")
-LIVE_FEED_STALE_AFTER_SECONDS = 15
+LIVE_FEED_STALE_AFTER_SECONDS = 45
 LIVE_FEED_RECONNECT_COOLDOWN_SECONDS = 20
 LIVE_FEED_CONNECT_GRACE_SECONDS = 45
 SECTOR_SNAPSHOT_REFRESH_SECONDS = 5
@@ -535,6 +535,8 @@ class MarketEngine:
         self.last_connect_ts = 0.0
         self.last_reconnect_attempt_ts = 0.0
         self.last_ticker_start_ts = 0.0
+        self.live_feed_subscription_count = 0
+        self.live_feed_last_close = None
         self.websocket_generation = 0
         self.demo_mode = False
         self.demo_snapshot = None
@@ -997,6 +999,7 @@ class MarketEngine:
             self.connected = True
             self.last_connect_ts = time.time()
             self.last_error = None
+            self.live_feed_subscription_count = len(instruments)
             for chunk in self._chunked(instruments, 100):
                 ws.send(
                     json.dumps(
@@ -1007,11 +1010,35 @@ class MarketEngine:
                         }
                     )
                 )
+                time.sleep(0.05)
 
         def on_message(ws, message):
             if generation != self.websocket_generation:
                 return
             if isinstance(message, str):
+                self.last_connect_ts = time.time()
+                parsed = None
+                try:
+                    parsed = json.loads(message)
+                except (TypeError, ValueError):
+                    parsed = None
+                if isinstance(parsed, dict):
+                    status = str(parsed.get("status") or parsed.get("Status") or "").lower()
+                    error_code = parsed.get("errorCode") or parsed.get("ErrorCode") or parsed.get("code")
+                    message_text = (
+                        parsed.get("message")
+                        or parsed.get("Message")
+                        or parsed.get("errorMessage")
+                        or parsed.get("ErrorMessage")
+                        or parsed.get("remarks")
+                        or parsed.get("Remarks")
+                    )
+                    if status in {"failed", "failure", "error"} or error_code:
+                        self.connected = False
+                        self.last_error = f"Dhan WebSocket message: {message_text or parsed}"
+                elif "error" in message.lower() or "fail" in message.lower():
+                    self.connected = False
+                    self.last_error = f"Dhan WebSocket message: {message[:200]}"
                 return
             self._on_dhan_binary_message(message)
 
@@ -1025,22 +1052,27 @@ class MarketEngine:
             if generation != self.websocket_generation:
                 return
             self.connected = False
-            self.last_error = f"Dhan WebSocket closed: {code} {reason}"
+            close_text = f"{code or ''} {reason or ''}".strip()
+            self.live_feed_last_close = close_text or "closed"
+            self.last_error = f"Dhan WebSocket closed: {close_text or 'no reason'}"
 
-        self.ticker = websocket.WebSocketApp(
-            url,
-            on_open=on_open,
-            on_message=on_message,
-            on_error=on_error,
-            on_close=on_close,
-        )
+        def make_app():
+            return websocket.WebSocketApp(
+                url,
+                on_open=on_open,
+                on_message=on_message,
+                on_error=on_error,
+                on_close=on_close,
+            )
 
         def run():
             backoff = 2
             while generation == self.websocket_generation and self.broker == "dhan" and self.access_token:
+                app = make_app()
+                self.ticker = app
                 try:
                     self.last_ticker_start_ts = time.time()
-                    self.ticker.run_forever(ping_interval=20, ping_timeout=10)
+                    app.run_forever(ping_interval=20, ping_timeout=10)
                 except Exception as exc:
                     if generation != self.websocket_generation:
                         break
@@ -1050,7 +1082,7 @@ class MarketEngine:
                     break
                 self.connected = False
                 self.last_reconnect_attempt_ts = time.time()
-                if self._is_market_open():
+                if self._is_market_open() and not self.last_error:
                     self.last_error = "Dhan WebSocket reconnecting"
                 time.sleep(backoff)
                 backoff = min(backoff * 2, 30)
@@ -2092,9 +2124,14 @@ class MarketEngine:
 
     def _with_runtime_fields(self, snapshot, market_open, source=None):
         runtime = dict(snapshot)
+        now_ts = time.time()
         runtime["connected"] = self.connected
         runtime["error"] = self.last_error
         runtime["market_open"] = market_open
+        runtime["last_tick_age_seconds"] = round(now_ts - self.last_tick_ts, 1) if self.last_tick_ts else None
+        runtime["last_connect_age_seconds"] = round(now_ts - self.last_connect_ts, 1) if self.last_connect_ts else None
+        runtime["live_feed_subscription_count"] = self.live_feed_subscription_count
+        runtime["live_feed_last_close"] = self.live_feed_last_close
         if source:
             runtime["snapshot_source"] = source
         return runtime
