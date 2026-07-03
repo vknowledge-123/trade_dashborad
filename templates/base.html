@@ -467,7 +467,7 @@ body::after {
 
 .table-row {
   display: grid;
-  grid-template-columns: 1.3fr 0.9fr 0.9fr auto;
+  grid-template-columns: 1.35fr 0.72fr 0.82fr 0.9fr 0.72fr auto;
   gap: 10px;
   padding: 8px 12px;
   border-radius: 8px;
@@ -1391,7 +1391,7 @@ body.modal-open {
   .hero-actions .btn { width: 100%; }
   .dash-grid { grid-template-columns: 1fr; }
   .panel { padding: 12px; }
-  .table-row { grid-template-columns: 1.1fr 0.8fr 0.8fr auto; font-size: 12px; }
+  .table-row { grid-template-columns: 1.2fr 0.72fr 0.78fr 0.86fr 0.72fr auto; font-size: 12px; }
   .sector-row { grid-template-columns: 1.6fr 0.9fr 0.7fr; }
   .hero-badge { border-radius: var(--radius); padding: 10px 12px; }
   .promo-strip { padding: 10px 12px; }
@@ -2299,6 +2299,12 @@ h3,
       return Math.trunc(number).toString();
     };
 
+    const formatCrores = (value) => {
+      const number = Number(value);
+      if (!Number.isFinite(number)) return "-";
+      return `${(number / 10_000_000).toFixed(2)} Cr`;
+    };
+
     const formatSignedPercent = (value) => {
       const number = Number(value);
       if (!Number.isFinite(number)) return "";
@@ -2327,7 +2333,7 @@ h3,
       if (!head) {
         head = document.createElement("div");
         head.className = "table-row table-head";
-        head.innerHTML = "<span>Symbol</span><span>Price</span><span>Volume</span><span>Change %</span><span>Chart</span>";
+        head.innerHTML = "<span>Symbol</span><span>Price</span><span>Volume</span><span>Turnover</span><span>Change %</span><span>Chart</span>";
       }
       return head;
     };
@@ -2343,6 +2349,7 @@ h3,
         <span class="cell-symbol">${symbolCellHtml(row)}</span>
         <span class="cell-price">${escapeHtml(row.price)}</span>
         <span class="cell-volume">${formatVolume(row.volume)}</span>
+        <span class="cell-turnover">${formatCrores(row.turnover)}</span>
         <span class="cell-change ${positive ? "positive" : "negative"}">${escapeHtml(`${sign}${row.change}%`)}</span>
         <a class="tv-link" href="${tradingViewUrl(row.symbol)}" target="_blank" rel="noopener noreferrer">TradingView</a>
       `;
@@ -2366,11 +2373,13 @@ h3,
           const symbolCell = el.querySelector('.cell-symbol');
           const priceCell = el.querySelector('.cell-price');
           const volumeCell = el.querySelector('.cell-volume');
+          const turnoverCell = el.querySelector('.cell-turnover');
           const changeCell = el.querySelector('.cell-change');
           const chartLink = el.querySelector('.tv-link');
           if (symbolCell) symbolCell.innerHTML = symbolCellHtml(row);
           if (priceCell) priceCell.textContent = row.price;
           if (volumeCell) volumeCell.textContent = formatVolume(row.volume);
+          if (turnoverCell) turnoverCell.textContent = formatCrores(row.turnover);
           if (changeCell) {
             changeCell.className = `cell-change ${positive ? "positive" : "negative"}`;
             changeCell.textContent = `${sign}${row.change}%`;
@@ -2481,7 +2490,7 @@ h3,
           </span>
           <span class="sector-stock-price">${escapeHtml(stock.price)}</span>
           <span class="sector-stock-volume">${formatVolume(stock.volume)}</span>
-          <span class="sector-stock-turnover">${formatVolume(stock.turnover)}</span>
+          <span class="sector-stock-turnover">${formatCrores(stock.turnover)}</span>
           <span class="sector-stock-change ${cls}">${escapeHtml(`${sign}${stock.change}%`)}</span>
           <a class="tv-link" href="${tradingViewUrl(stock.symbol)}" target="_blank" rel="noopener noreferrer">TradingView</a>
         `;

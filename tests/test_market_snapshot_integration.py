@@ -430,6 +430,26 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertFalse(snapshot["losers"][0]["previous_day_positive"])
         self.assertEqual(snapshot["losers"][0]["previous_day_change"], -1.25)
 
+    def test_build_stock_row_includes_turnover_from_price_and_volume(self):
+        engine = MarketEngine(redis_client=None)
+
+        row = engine._build_stock_row("INFY", last_price=1500.5, close=1450.0, volume=123456)
+
+        self.assertEqual(row["turnover"], 185245728.0)
+
+    def test_decorate_snapshot_rows_backfills_cached_turnover(self):
+        engine = MarketEngine(redis_client=None)
+        snapshot = {
+            "gainers": [{"symbol": "INFY", "price": 1500.0, "volume": 1000, "change": 1.2}],
+            "losers": [{"symbol": "TCS", "price": 4200.0, "volume": 50, "change": -0.8}],
+        }
+        engine._get_previous_day_change = lambda symbol, allow_fetch=True: None
+
+        engine._decorate_snapshot_rows(snapshot)
+
+        self.assertEqual(snapshot["gainers"][0]["turnover"], 1500000.0)
+        self.assertEqual(snapshot["losers"][0]["turnover"], 210000.0)
+
     def test_live_snapshot_schedules_background_refresh_when_cache_is_empty(self):
         engine = MarketEngine(redis_client=None)
         engine.kite = object()

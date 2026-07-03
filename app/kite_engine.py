@@ -1333,6 +1333,13 @@ class MarketEngine:
             except (TypeError, ValueError):
                 return None
 
+    def _calculate_turnover(self, price, volume):
+        price = self._float_or_none(price)
+        volume = self._coerce_volume(volume)
+        if price in (None, 0) or volume in (None, 0):
+            return None
+        return round(price * volume, 2)
+
     def _extract_volume(self, payload, fallback=None):
         fallback_volume = self._coerce_volume(fallback)
         for key in ("volume_traded", "volume"):
@@ -1398,6 +1405,7 @@ class MarketEngine:
             "price": round(last_price, 2),
             "change": round(change, 2),
             "volume": int(volume) if volume not in (None, "") else None,
+            "turnover": self._calculate_turnover(last_price, volume),
             "is_fno": symbol.upper() in self.fno_symbols or self.symbol_to_name.get(symbol, "").upper() in self.fno_symbols,
             "sectors": self.symbol_to_sectors.get(symbol, []),
             "day_open": round(day_open_value, 2) if day_open_value is not None else None,
@@ -2677,15 +2685,22 @@ class MarketEngine:
             return snapshot
         self._decorate_rows_with_previous_day_badges(snapshot.get("gainers") or [], fetch_missing=False)
         self._decorate_rows_with_previous_day_badges(snapshot.get("losers") or [], fetch_missing=False)
+        self._decorate_rows_with_turnover(snapshot.get("gainers") or [])
+        self._decorate_rows_with_turnover(snapshot.get("losers") or [])
         return snapshot
+
+    def _decorate_rows_with_turnover(self, rows):
+        for row in rows or []:
+            if not isinstance(row, dict):
+                continue
+            if row.get("turnover") in (None, ""):
+                row["turnover"] = self._calculate_turnover(row.get("price"), row.get("volume"))
+        return rows
 
     def _rank_sector_breakdown_rows(self, rows, market_open):
         prepared = [dict(row) for row in rows or [] if isinstance(row, dict)]
         self._decorate_rows_with_previous_day_badges(prepared, fetch_missing=False)
-        for row in prepared:
-            price = self._float_or_none(row.get("price"))
-            volume = self._coerce_volume(row.get("volume"))
-            row["turnover"] = round(price * volume, 2) if price not in (None, 0) and volume not in (None, 0) else None
+        self._decorate_rows_with_turnover(prepared)
         ranked = sorted(prepared, key=lambda item: item.get("change") or 0, reverse=True)
         for index, row in enumerate(ranked, start=1):
             row["rank"] = index

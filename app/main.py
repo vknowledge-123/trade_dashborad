@@ -253,7 +253,16 @@ def format_compact_volume(value):
     return str(int(number))
 
 
+def format_crores(value):
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return "-"
+    return f"{number / 10_000_000:.2f} Cr"
+
+
 templates.env.globals["format_compact_volume"] = format_compact_volume
+templates.env.globals["format_crores"] = format_crores
 
 @app.on_event("startup")
 def on_startup():
