@@ -82,6 +82,71 @@ SECTOR_INDEX_PAGES = {
     "NIFTY INDIA MFG": "https://www.niftyindices.com/indices/equity/thematic-indices/nifty-india-manufacturing",
 }
 FALLBACK_SECTOR_MEMBERS = {
+    "NIFTY AUTO": [
+        "ASHOKLEY", "BAJAJ-AUTO", "BALKRISIND", "BHARATFORG", "BOSCHLTD",
+        "EICHERMOT", "EXIDEIND", "HEROMOTOCO", "M&M", "MARUTI",
+        "MOTHERSON", "MRF", "TATAMOTORS", "TMPV", "TIINDIA", "TVSMOTOR",
+    ],
+    "NIFTY BANK": [
+        "AUBANK", "AXISBANK", "BANDHANBNK", "BANKBARODA", "FEDERALBNK",
+        "HDFCBANK", "ICICIBANK", "IDFCFIRSTB", "INDUSINDBK", "KOTAKBANK",
+        "PNB", "SBIN",
+    ],
+    "NIFTY CAPITAL MKT": [
+        "ANGELONE", "BSE", "CDSL", "CAMS", "IEX", "MCX", "MOTILALOFS",
+        "NUVAMA", "360ONE", "KFINTECH", "HDFCAMC", "NAM-INDIA",
+    ],
+    "NIFTY CONSR DURBL": [
+        "AMBER", "BATAINDIA", "BLUESTARCO", "CROMPTON", "DIXON",
+        "HAVELLS", "KAJARIACER", "KALYANKJIL", "PGEL", "TITAN",
+        "VOLTAS", "WHIRLPOOL",
+    ],
+    "NIFTY CPSE": [
+        "BEL", "BHEL", "COALINDIA", "CONCOR", "GAIL", "HAL", "IRCTC",
+        "NHPC", "NMDC", "NTPC", "OIL", "ONGC", "POWERGRID", "SAIL",
+    ],
+    "NIFTY ENERGY": [
+        "ADANIENSOL", "ADANIGREEN", "ADANIPOWER", "BPCL", "CGPOWER",
+        "COALINDIA", "GAIL", "IOC", "JSWENERGY", "NTPC", "ONGC",
+        "POWERGRID", "RELIANCE", "TATAPOWER", "TORNTPOWER",
+    ],
+    "NIFTY FINSEREXBNK": [
+        "BAJAJFINSV", "BAJFINANCE", "CHOLAFIN", "HDFCAMC", "HDFCLIFE",
+        "ICICIGI", "ICICIPRULI", "JIOFIN", "LICHSGFIN", "MUTHOOTFIN",
+        "PFC", "RECLTD", "SBICARD", "SBILIFE", "SHRIRAMFIN",
+    ],
+    "NIFTY FMCG": [
+        "BALRAMCHIN", "BRITANNIA", "COLPAL", "DABUR", "GODREJCP",
+        "HINDUNILVR", "ITC", "MARICO", "NESTLEIND", "PATANJALI",
+        "PGHH", "RADICO", "TATACONSUM", "UBL", "UNITDSPR", "VBL",
+    ],
+    "NIFTY HEALTHCARE": [
+        "ABBOTINDIA", "ALKEM", "APOLLOHOSP", "AUROPHARMA", "BIOCON",
+        "CIPLA", "DIVISLAB", "DRREDDY", "FORTIS", "GLENMARK",
+        "IPCALAB", "LAURUSLABS", "LUPIN", "MANKIND", "MAXHEALTH",
+        "SUNPHARMA", "SYNGENE", "TORNTPHARM", "ZYDUSLIFE",
+    ],
+    "NIFTY IND DEFENCE": [
+        "ASTRAMICRO", "BEML", "BEL", "BDL", "COCHINSHIP", "DATAPATTNS",
+        "GRSE", "HAL", "MAZDOCK", "MTARTECH", "PARAS", "SOLARINDS",
+    ],
+    "NIFTY IND DIGITAL": [
+        "AFFLE", "BHARTIARTL", "BSOFT", "CYIENT", "DELHIVERY", "EASEMYTRIP",
+        "ETERNAL", "HAPPSTMNDS", "INDIAMART", "INFOBEAN", "INTELLECT",
+        "JUSTDIAL", "KPITTECH", "NAUKRI", "NYKAA", "PAYTM", "POLICYBZR",
+        "TANLA", "TATAELXSI",
+    ],
+    "NIFTY IND TOURISM": [
+        "CHALET", "EASEMYTRIP", "EIHOTEL", "INDHOTEL", "IRCTC", "JUBLFOOD",
+        "LEMONTREE", "SAPPHIRE", "DEVYANI", "WESTLIFE",
+    ],
+    "NIFTY INDIA MFG": [
+        "ABB", "APLAPOLLO", "ASHOKLEY", "BAJAJ-AUTO", "BALKRISIND",
+        "BEL", "BHARATFORG", "BHEL", "CIPLA", "DIXON", "DRREDDY",
+        "HAL", "HAVELLS", "HINDALCO", "JSWSTEEL", "LT", "MARUTI",
+        "MOTHERSON", "PIDILITIND", "SIEMENS", "SUNPHARMA", "TATAMOTORS",
+        "TATASTEEL", "TITAN", "TVSMOTOR", "ULTRACEMCO", "VOLTAS",
+    ],
     "NIFTY IT": [
         "COFORGE",
         "HCLTECH",
@@ -93,6 +158,50 @@ FALLBACK_SECTOR_MEMBERS = {
         "TCS",
         "TECHM",
         "WIPRO",
+    ],
+    "NIFTY MEDIA": [
+        "DISHTV", "HATHWAY", "NAZARA", "NETWORK18", "PVRINOX",
+        "SAREGAMA", "SUNTV", "TIPSINDLTD", "TV18BRDCST", "ZEEL",
+    ],
+    "NIFTY METAL": [
+        "ADANIENT", "APLAPOLLO", "HINDALCO", "HINDCOPPER", "HINDZINC",
+        "JINDALSTEL", "JSL", "JSWSTEEL", "NATIONALUM", "NMDC",
+        "RATNAMANI", "SAIL", "TATASTEEL", "VEDL", "WELCORP",
+    ],
+    "NIFTY MIDSML HLTH": [
+        "AJANTPHARM", "ASTERDM", "BIOCON", "GLENMARK", "IPCALAB",
+        "LALPATHLAB", "LAURUSLABS", "METROPOLIS", "NATCOPHARM",
+        "SUVENPHAR", "SYNGENE", "VIJAYA", "WOCKPHARMA",
+    ],
+    "NIFTY MS FIN SERV": [
+        "AAVAS", "ANGELONE", "BSE", "CAMS", "CDSL", "CHOLAFIN",
+        "CREDITACC", "FIVESTAR", "IIFL", "KFINTECH", "LICHSGFIN",
+        "MANAPPURAM", "MCX", "MUTHOOTFIN", "POONAWALLA", "RBLBANK",
+    ],
+    "NIFTY MS IT TELCM": [
+        "AFFLE", "BSOFT", "CYIENT", "HAPPSTMNDS", "INTELLECT", "KPITTECH",
+        "LATENTVIEW", "MASTEK", "NEWGEN", "OFSS", "PERSISTENT", "TANLA",
+        "TATAELXSI", "ZENSARTECH",
+    ],
+    "NIFTY OIL AND GAS": [
+        "AEGISLOG", "ATGL", "BPCL", "CASTROLIND", "GAIL", "GUJGASLTD",
+        "GSPL", "HINDPETRO", "IOC", "IGL", "MGL", "OIL", "ONGC",
+        "PETRONET", "RELIANCE",
+    ],
+    "NIFTY PHARMA": [
+        "ABBOTINDIA", "ALKEM", "AUROPHARMA", "BIOCON", "CIPLA",
+        "DIVISLAB", "DRREDDY", "GLAND", "GLENMARK", "IPCALAB",
+        "LAURUSLABS", "LUPIN", "MANKIND", "SUNPHARMA", "TORNTPHARM",
+        "ZYDUSLIFE",
+    ],
+    "NIFTY PSU BANK": [
+        "BANKBARODA", "BANKINDIA", "CANBK", "CENTRALBK", "INDIANB",
+        "IOB", "MAHABANK", "PNB", "PSB", "SBIN", "UCOBANK", "UNIONBANK",
+    ],
+    "NIFTY PVT BANK": [
+        "AUBANK", "AXISBANK", "BANDHANBNK", "CUB", "DCBBANK", "FEDERALBNK",
+        "HDFCBANK", "ICICIBANK", "IDFCFIRSTB", "INDUSINDBK", "KARURVYSYA",
+        "KOTAKBANK", "RBLBANK", "YESBANK",
     ],
 }
 NSE_TRADING_HOLIDAYS = {
@@ -2483,6 +2592,7 @@ class MarketEngine:
         if payload:
             payload = dict(payload)
             payload["cache_version"] = SWING_SCANNER_CACHE_VERSION
+            payload["broker"] = self._current_broker()
             save_market_cache(SWING_SCANNER_CACHE_KEY, payload)
 
     def _is_valid_swing_scanner_cache(self, payload):
@@ -2912,12 +3022,29 @@ class MarketEngine:
 
     def get_swing_scanner(self, side="long", min_score=0, cached_only=True):
         cached = self._cached_swing_scanner_payload()
-        if cached and not self._is_valid_swing_scanner_cache(cached):
+        if cached and (not self._is_valid_swing_scanner_cache(cached) or not self._payload_matches_broker(cached)):
             cached = None
         cache_marker = self._completed_session_cache_marker()
         if cached and cached.get("cache_marker") == cache_marker:
             payload = dict(cached)
         else:
+            if cached_only:
+                if self.kite:
+                    self._ensure_swing_scanner_background_refresh()
+                payload = cached if cached else {
+                    "rows": [],
+                    "tracked_count": len([symbol for symbol in NIFTY_50_SCANNER_STOCKS if symbol in self.symbol_to_token]),
+                    "missing_count": 0,
+                    "symbols": NIFTY_50_SCANNER_STOCKS,
+                    "updated_at": self._utc_now(),
+                    "market_open": self._is_market_open(),
+                    "cache_marker": cache_marker,
+                    "cache_version": SWING_SCANNER_CACHE_VERSION,
+                    "cache_pending": True,
+                    "error": "Swing scanner daily cache is not ready. Run Market History Cache after 3:30 PM IST with a valid broker token.",
+                }
+                payload["status"] = self._swing_status_payload()
+                return self._filter_swing_rows(payload, side="long", min_score=min_score)
             payload = cached if cached else self._build_swing_scanner_payload()
             if self.kite:
                 self._ensure_swing_scanner_background_refresh()
@@ -4078,12 +4205,13 @@ class MarketEngine:
     def _run_daily_market_history_cache_job(self, force=False):
         cache_marker = self._completed_session_cache_marker()
         started_at = self._utc_now()
+        swing_total = len([symbol for symbol in NIFTY_50_SCANNER_STOCKS if symbol in self.symbol_to_token])
         total = len(
             [
                 symbol for symbol, token in self.symbol_to_token.items()
                 if token and self._is_tracked_symbol(symbol)
             ]
-        ) + len(self.sector_tokens) + 1
+        ) + len(self.sector_tokens) + 1 + swing_total
         self._update_history_cache_status(
             status="running",
             session_marker=cache_marker,
@@ -4099,8 +4227,15 @@ class MarketEngine:
         try:
             stock_summary = self._warm_market_open_stock_cache(cache_marker, force=force)
             rrg_payload = self._warm_relative_rotation_graph_cache(cache_marker, force=force)
+            self._update_history_cache_status(
+                processed=stock_summary.get("processed", 0) + len(self.sector_tokens) + 1,
+                total=total,
+                message="Caching daily swing scanner data...",
+            )
+            swing_payload = self._build_swing_scanner_payload()
+            self._save_swing_scanner_cache(swing_payload)
             self._save_previous_close_cache()
-            status = "completed" if rrg_payload.get("items") else "warning"
+            status = "completed" if rrg_payload.get("items") and not swing_payload.get("error") else "warning"
             self._update_history_cache_status(
                 status=status,
                 finished_at=self._utc_now(),
@@ -4109,9 +4244,10 @@ class MarketEngine:
                 message=(
                     f"Premarket sync ready: cached {stock_summary['previous_close_updated']} previous closes, "
                     f"{stock_summary['badge_updated']} badge rows, {stock_summary['volume_updated']} volume baselines and "
-                    f"{len(rrg_payload.get('items') or [])} RRG sectors for {cache_marker}."
+                    f"{len(rrg_payload.get('items') or [])} RRG sectors, "
+                    f"{len(swing_payload.get('rows') or [])} swing rows for {cache_marker}."
                 ),
-                error=rrg_payload.get("error"),
+                error=rrg_payload.get("error") or swing_payload.get("error"),
                 market_open_ready=True,
             )
         except Exception as exc:
@@ -4129,12 +4265,15 @@ class MarketEngine:
     def start_daily_market_history_cache(self, force=False):
         cache_marker = self._completed_session_cache_marker()
         cached_rrg = self._cached_relative_rotation_graph()
+        cached_swing = self._cached_swing_scanner_payload()
         stock_cache_ready = self._market_open_stock_cache_ready(cache_marker)
         if (
             not force
             and stock_cache_ready
             and self._cache_payload_matches_marker(cached_rrg, cache_marker)
             and cached_rrg.get("items")
+            and self._cache_payload_matches_marker(cached_swing, cache_marker)
+            and not cached_swing.get("error")
         ):
             return self._update_history_cache_status(
                 status="completed",
