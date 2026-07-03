@@ -609,6 +609,23 @@ def acceleration_scanner(request: Request):
     )
 
 
+@app.get("/open-extreme-scanner", response_class=HTMLResponse)
+def open_extreme_scanner(request: Request):
+    user = current_user(request)
+    admin = current_admin(request)
+    return templates.TemplateResponse(
+        request,
+        "open_extreme_scanner.html",
+        {
+            "title": "Open High Low Scanner",
+            "user": user,
+            "admin": admin,
+            "public_mode": True if not user and not admin else False,
+            "scanner": engine.get_open_extreme_scanner(),
+        },
+    )
+
+
 @app.get("/api/market-snapshot")
 def market_snapshot(request: Request):
     return JSONResponse(
@@ -693,6 +710,18 @@ def acceleration_scanner_data(
 ):
     return JSONResponse(
         engine.get_acceleration_scanner(timeframe=timeframe, min_gain=min_gain),
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
+
+
+@app.get("/api/open-extreme-scanner")
+def open_extreme_scanner_data(request: Request):
+    return JSONResponse(
+        engine.get_open_extreme_scanner(),
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",

@@ -1548,6 +1548,46 @@ class MarketEngine:
             "error": error,
         }
 
+    def get_open_extreme_scanner(self):
+        market_open = self._is_market_open()
+        with self.lock:
+            latest_rows = [dict(row) for row in self.latest.values()]
+        if not market_open and not latest_rows:
+            cached = self._cached_latest_rows() or {}
+            latest_rows = [dict(row) for row in (cached.get("rows") or {}).values() if isinstance(row, dict)]
+        if not latest_rows:
+            latest_rows = self._rows_for_symbols_from_cache(self.symbol_to_token.keys())
+
+        prepared = []
+        for row in latest_rows:
+            if not isinstance(row, dict):
+                continue
+            symbol = str(row.get("symbol") or "").upper()
+            if self.nifty500_set and symbol and symbol not in self.nifty500_set:
+                continue
+            if row.get("price") in (None, 0) or row.get("change") is None:
+                continue
+            prepared.append(dict(row))
+
+        open_low = sorted(
+            [row for row in prepared if row.get("open_equals_low")],
+            key=lambda item: float(item.get("change") or 0),
+            reverse=True,
+        )[:20]
+        open_high = sorted(
+            [row for row in prepared if row.get("open_equals_high")],
+            key=lambda item: float(item.get("change") or 0),
+        )[:20]
+        return {
+            "open_low_gainers": open_low,
+            "open_high_losers": open_high,
+            "tracked_count": len(prepared),
+            "updated_at": self.last_update or self._utc_now(),
+            "market_open": market_open,
+            "snapshot_source": self.last_snapshot_source,
+            "error": None if prepared else "Open high/low scanner rows are warming. Wait for live/API OHLC data.",
+        }
+
     def place_acceleration_market_order(
         self,
         symbol,
