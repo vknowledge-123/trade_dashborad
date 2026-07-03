@@ -2530,10 +2530,15 @@ h3,
       const head = document.createElement("div");
       head.className = "sector-row sector-head";
       head.innerHTML = `<div>${label}</div><div>Price</div><div>Change %</div>`;
+      const filteredRows = (rows || []).filter((row) => {
+        const change = Number(row.change);
+        if (!Number.isFinite(change)) return false;
+        return label === "Top Gainers" ? change > 0 : change < 0;
+      });
       const existing = new Map(
         Array.from(container.querySelectorAll('.sector-row[data-sector]')).map((el) => [el.dataset.sector, el])
       );
-      const ordered = rows.map((row) => {
+      const ordered = filteredRows.map((row) => {
         let el = existing.get(row.sector);
         if (!el) {
           el = renderSectorRow(row);

@@ -2366,7 +2366,7 @@ class MarketEngine:
             enriched["sector_gainers"] = enrich_rows(enriched.get("sector_gainers"))
         if enriched.get("sector_losers"):
             enriched["sector_losers"] = enrich_rows(enriched.get("sector_losers"))
-        return enriched
+        return self._normalize_sector_movers(enriched)
 
     def _sector_rows_from_constituent_changes(self, movers):
         grouped = defaultdict(list)
@@ -2411,6 +2411,35 @@ class MarketEngine:
                 merged["price"] = latest.get("price")
             merged_rows.append(merged)
         return merged_rows
+
+    def _normalize_sector_movers(self, snapshot):
+        if not snapshot:
+            return snapshot
+        sector_rows = []
+        seen = set()
+        for key in ("sectors", "sector_gainers", "sector_losers"):
+            for row in snapshot.get(key) or []:
+                if not isinstance(row, dict) or not row.get("sector"):
+                    continue
+                sector_key = str(row.get("sector")).upper()
+                if sector_key in seen:
+                    continue
+                seen.add(sector_key)
+                sector_rows.append(dict(row))
+        if not sector_rows:
+            return snapshot
+        normalized = dict(snapshot)
+        normalized["sectors"] = sector_rows
+        normalized["sector_gainers"] = sorted(
+            [row for row in sector_rows if float(row.get("change") or 0) > 0],
+            key=lambda item: float(item.get("change") or 0),
+            reverse=True,
+        )[:10]
+        normalized["sector_losers"] = sorted(
+            [row for row in sector_rows if float(row.get("change") or 0) < 0],
+            key=lambda item: float(item.get("change") or 0),
+        )[:10]
+        return normalized
 
     def _with_runtime_fields(self, snapshot, market_open, source=None):
         runtime = dict(snapshot)
@@ -2484,7 +2513,7 @@ class MarketEngine:
         merged["market_open"] = snapshot.get("market_open")
         merged["snapshot_source"] = snapshot.get("snapshot_source")
         merged["updated_at"] = snapshot.get("updated_at") or cached.get("updated_at")
-        return merged
+        return self._normalize_sector_movers(merged)
 
     def _candle_date(self, candle):
         candle_dt = candle.get("date")

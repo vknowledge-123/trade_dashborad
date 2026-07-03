@@ -528,6 +528,26 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertEqual(snapshot["sector_losers"][0]["sector"], "NIFTY PVT BANK")
         self.assertEqual(snapshot["sector_losers"][0]["change"], -1.0)
 
+    def test_cached_sector_movers_are_resplit_by_change_sign(self):
+        engine = MarketEngine(redis_client=None)
+        snapshot = {
+            "sector_gainers": [
+                {"sector": "NIFTY IT", "price": "-", "change": 0.63},
+                {"sector": "NIFTY PSU BANK", "price": "-", "change": -0.43},
+            ],
+            "sector_losers": [
+                {"sector": "NIFTY ENERGY", "price": "-", "change": -0.29},
+            ],
+        }
+
+        normalized = engine._normalize_sector_movers(snapshot)
+
+        self.assertEqual([row["sector"] for row in normalized["sector_gainers"]], ["NIFTY IT"])
+        self.assertEqual(
+            [row["sector"] for row in normalized["sector_losers"]],
+            ["NIFTY PSU BANK", "NIFTY ENERGY"],
+        )
+
     def test_closed_market_snapshot_hydrates_from_previous_day_stock_cache(self):
         engine = MarketEngine(redis_client=None)
         engine.nifty500_set = {"INFY", "HDFCBANK"}
