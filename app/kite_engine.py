@@ -2216,6 +2216,25 @@ class MarketEngine:
         if not requested:
             return []
 
+        prefer_persisted_cache = not self._is_market_open()
+        cached = self._cached_latest_rows() if prefer_persisted_cache else None
+        rows = (cached or {}).get("rows") or {}
+        if rows:
+            merged = []
+            for symbol in requested:
+                row = rows.get(symbol)
+                if isinstance(row, dict):
+                    merged.append(dict(row))
+            if merged:
+                with self.lock:
+                    for row in merged:
+                        self.latest[row["symbol"]] = row
+                if cached.get("updated_at") and not self.last_update:
+                    self.last_update = cached["updated_at"]
+                if cached.get("snapshot_source") and self.last_snapshot_source == "empty":
+                    self.last_snapshot_source = cached["snapshot_source"]
+                return merged
+
         with self.lock:
             in_memory_by_symbol = {}
             if self.latest:
@@ -2300,6 +2319,35 @@ class MarketEngine:
 
     def _sector_row_count(self, snapshot):
         return len(snapshot.get("sector_gainers") or []) + len(snapshot.get("sector_losers") or [])
+
+    def _sector_prices_missing(self, snapshot):
+        rows = (snapshot or {}).get("sector_gainers") or []
+        rows += (snapshot or {}).get("sector_losers") or []
+        return any(row.get("price") in (None, "", "-") for row in rows if isinstance(row, dict))
+
+    def _merge_snapshot_sector_prices(self, snapshot):
+        if not snapshot or not self.sector_latest:
+            return snapshot
+        enriched = dict(snapshot)
+        sector_latest = {str(key).upper(): row for key, row in self.sector_latest.items() if isinstance(row, dict)}
+
+        def enrich_rows(rows):
+            merged_rows = []
+            for row in rows or []:
+                merged = dict(row)
+                live = sector_latest.get(str(row.get("sector") or "").upper())
+                if live:
+                    merged.update({key: value for key, value in live.items() if value is not None})
+                merged_rows.append(merged)
+            return merged_rows
+
+        if enriched.get("sectors"):
+            enriched["sectors"] = enrich_rows(enriched.get("sectors"))
+        if enriched.get("sector_gainers"):
+            enriched["sector_gainers"] = enrich_rows(enriched.get("sector_gainers"))
+        if enriched.get("sector_losers"):
+            enriched["sector_losers"] = enrich_rows(enriched.get("sector_losers"))
+        return enriched
 
     def _with_runtime_fields(self, snapshot, market_open, source=None):
         runtime = dict(snapshot)
@@ -3148,7 +3196,8 @@ class MarketEngine:
         }
 
     def _build_swing_scanner_payload(self, symbols=None, sessions=180):
-        requested = [str(symbol).upper() for symbol in (symbols or NIFTY_50_SCANNER_STOCKS) if symbol]
+        default_symbols = sorted(self.nifty500_set) if self.nifty500_set else NIFTY_50_SCANNER_STOCKS
+        requested = [str(symbol).upper() for symbol in (symbols or default_symbols) if symbol]
         tracked = [symbol for symbol in requested if symbol in self.symbol_to_token]
         if not self.kite:
             return {
@@ -3283,11 +3332,12 @@ class MarketEngine:
             if cached_only:
                 if self.kite:
                     self._ensure_swing_scanner_background_refresh()
+                default_symbols = sorted(self.nifty500_set) if self.nifty500_set else NIFTY_50_SCANNER_STOCKS
                 payload = cached if cached else {
                     "rows": [],
-                    "tracked_count": len([symbol for symbol in NIFTY_50_SCANNER_STOCKS if symbol in self.symbol_to_token]),
+                    "tracked_count": len([symbol for symbol in default_symbols if symbol in self.symbol_to_token]),
                     "missing_count": 0,
-                    "symbols": NIFTY_50_SCANNER_STOCKS,
+                    "symbols": default_symbols,
                     "updated_at": self._utc_now(),
                     "market_open": self._is_market_open(),
                     "cache_marker": cache_marker,
@@ -4463,7 +4513,8 @@ class MarketEngine:
     def _run_daily_market_history_cache_job(self, force=False):
         cache_marker = self._completed_session_cache_marker()
         started_at = self._utc_now()
-        swing_total = len([symbol for symbol in NIFTY_50_SCANNER_STOCKS if symbol in self.symbol_to_token])
+        swing_symbols = sorted(self.nifty500_set) if self.nifty500_set else NIFTY_50_SCANNER_STOCKS
+        swing_total = len([symbol for symbol in swing_symbols if symbol in self.symbol_to_token])
         total = len(
             [
                 symbol for symbol, token in self.symbol_to_token.items()
@@ -4701,6 +4752,9 @@ class MarketEngine:
             and self._snapshot_cache_marker(closed_cached) == completed_marker
         )
         if not market_open and closed_cache_fresh:
+            if self.kite and self._sector_prices_missing(closed_cached):
+                self._refresh_sector_snapshot(force=True)
+                closed_cached = self._merge_snapshot_sector_prices(closed_cached)
             if self.kite and (not self.latest or not self.sector_latest):
                 self._ensure_background_refresh(market_open=False, reason="closed_market_bootstrap")
             return self._decorate_snapshot_rows(
@@ -4740,6 +4794,9 @@ class MarketEngine:
         has_sector_data = any(snapshot.get(key) for key in ("sector_gainers", "sector_losers"))
         if not market_open and closed_cache_fresh:
             if self._stock_row_count(closed_cached) > self._stock_row_count(snapshot):
+                if self.kite and self._sector_prices_missing(closed_cached):
+                    self._refresh_sector_snapshot(force=True)
+                    closed_cached = self._merge_snapshot_sector_prices(closed_cached)
                 return self._decorate_snapshot_rows(
                     self._ensure_snapshot_sector_rows(self._with_runtime_fields(closed_cached, False, "closed_cache"))
                 )
@@ -4859,6 +4916,49 @@ class MarketEngine:
                 return cached_rows
         return rows
 
+    def _quote_rows_for_symbols_with_cached_close(self, symbols):
+        requested = [symbol for symbol in symbols if symbol in self.symbol_to_token]
+        if not self.kite or not requested:
+            return []
+        quoted = self._quote_symbols(self.kite, requested)
+        rows = []
+        prev_cache_updated = False
+        for key, payload in quoted.items():
+            symbol = key.split(":", 1)[-1]
+            last_price = payload.get("last_price")
+            if last_price in (None, 0):
+                continue
+            volume = self._extract_volume(payload, fallback=(self.latest.get(symbol) or {}).get("volume"))
+            ohlc = payload.get("ohlc") or {}
+            close = ohlc.get("close")
+            if close not in (None, 0):
+                prev_cache_updated = self._remember_previous_close("symbols", symbol, close) or prev_cache_updated
+            base_close = close if close not in (None, 0) else self._cached_previous_close("symbols", symbol)
+            if base_close in (None, 0):
+                base_close = self.rest_prev_close.get(symbol)
+            row = self._build_stock_row(
+                symbol,
+                last_price,
+                base_close,
+                volume=volume,
+                day_open=ohlc.get("open"),
+                day_high=ohlc.get("high"),
+                day_low=ohlc.get("low"),
+            )
+            if row:
+                rows.append(row)
+                self._record_acceleration_price(symbol, last_price, cumulative_volume=volume)
+        if rows:
+            with self.lock:
+                for row in rows:
+                    self.latest[row["symbol"]] = row
+                self.last_update = self._utc_now()
+            self.last_snapshot_source = "api_closed_quote" if not self._is_market_open() else "api"
+            self._save_latest_rows_cache()
+        if prev_cache_updated:
+            self._save_previous_close_cache()
+        return rows
+
     def get_sector_breakdown(self, sector_name):
         sector = (sector_name or "").strip()
         if not sector:
@@ -4900,7 +5000,9 @@ class MarketEngine:
                     self.symbol_to_sectors[symbol] = sorted(sectors)
 
         if not market_open:
-            rows = self._rows_for_symbols_from_cache(symbols)
+            rows = self._quote_rows_for_symbols_with_cached_close(symbols)
+            if not rows:
+                rows = self._rows_for_symbols_from_cache(symbols)
             if not rows:
                 if cached_payload_fresh:
                     payload = dict(cached_payload)

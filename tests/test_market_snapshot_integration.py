@@ -254,6 +254,20 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertTrue(payload["cache_pending"])
         self.assertIn("daily cache is not ready", payload["error"])
 
+    def test_swing_scanner_uses_nifty500_universe_when_available(self):
+        engine = MarketEngine(redis_client=None)
+        engine.kite = object()
+        engine.nifty500_set = {"INFY", "HCLTECH", "COFORGE"}
+        engine.symbol_to_token = {"INFY": 1, "HCLTECH": 2, "COFORGE": 3}
+        seen = []
+        engine._fetch_swing_candles = lambda symbol, sessions=180: seen.append(symbol) or []
+
+        payload = engine._build_swing_scanner_payload()
+
+        self.assertEqual(payload["tracked_count"], 3)
+        self.assertEqual(set(payload["symbols"]), {"INFY", "HCLTECH", "COFORGE"})
+        self.assertEqual(set(seen), {"INFY", "HCLTECH", "COFORGE"})
+
     def test_market_history_cache_builds_and_saves_swing_scanner(self):
         engine = MarketEngine(redis_client=None)
         engine.symbol_to_token = {"INFY": 123}
@@ -1412,6 +1426,70 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertEqual(payload["stocks"][0]["change"], 1.25)
         self.assertEqual(payload["stocks"][0]["turnover"], 184500.0)
         self.assertEqual(payload["session_marker"], "2026-05-22")
+
+    def test_closed_market_sector_breakdown_uses_quote_ltp_with_cached_previous_close(self):
+        engine = MarketEngine(redis_client=None)
+        engine.kite = object()
+        engine._is_market_open = lambda: False
+        engine._completed_session_cache_marker = lambda: "2026-07-03"
+        engine.sector_members = {"NIFTY IT": ["HCLTECH"]}
+        engine.symbol_to_token = {"HCLTECH": 7229}
+        engine.symbol_to_name = {"HCLTECH": "HCL Technologies"}
+        engine.previous_close_cache = {
+            "symbols": {
+                "HCLTECH": {
+                    "cache_marker": "2026-07-03",
+                    "broker": "kite",
+                    "close": 1084.76,
+                }
+            }
+        }
+        engine.latest = {
+            "HCLTECH": {
+                "symbol": "HCLTECH",
+                "price": 1139.0,
+                "change": 0.0,
+                "volume": 12770000,
+            }
+        }
+        engine._cached_latest_rows = lambda: {"rows": {}}
+        engine._cached_sector_breakdowns = lambda: {}
+        engine._quote_symbols = lambda kite, symbols: {
+            "NSE:HCLTECH": {
+                "last_price": 1139.0,
+                "volume": 12770000,
+                "ohlc": {},
+            }
+        }
+        engine._save_latest_rows_cache = lambda: None
+        engine._save_previous_close_cache = lambda: None
+
+        payload = engine.get_sector_breakdown("NIFTY IT")
+
+        self.assertEqual(payload["stocks"][0]["symbol"], "HCLTECH")
+        self.assertAlmostEqual(payload["stocks"][0]["change"], 5.0, places=1)
+        self.assertEqual(payload["stocks"][0]["turnover"], 14545030000.0)
+
+    def test_closed_market_cache_prefers_persisted_latest_rows_over_zero_memory_rows(self):
+        engine = MarketEngine(redis_client=None)
+        engine._is_market_open = lambda: False
+        engine.latest = {"HCLTECH": {"symbol": "HCLTECH", "price": 1139, "change": 0.0}}
+        engine._cached_latest_rows = lambda: {
+            "rows": {
+                "HCLTECH": {
+                    "symbol": "HCLTECH",
+                    "price": 1139,
+                    "change": 5.0,
+                    "volume": 12770000,
+                }
+            },
+            "updated_at": "2026-07-03T15:30:00+05:30",
+            "snapshot_source": "api",
+        }
+
+        rows = engine._rows_for_symbols_from_cache(["HCLTECH"])
+
+        self.assertEqual(rows[0]["change"], 5.0)
 
     def test_closed_market_sector_breakdown_can_use_previous_close_cache_without_latest_rows(self):
         engine = MarketEngine(redis_client=None)
