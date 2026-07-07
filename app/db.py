@@ -165,6 +165,19 @@ def init_db():
     )
     cur.execute(
         """
+        CREATE TABLE IF NOT EXISTS free_course_classes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            description TEXT,
+            youtube_url TEXT NOT NULL,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            is_published INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    cur.execute(
+        """
         CREATE TABLE IF NOT EXISTS academy_licenses (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             assigned_email TEXT NOT NULL,
@@ -299,6 +312,23 @@ def init_db():
             CREATE TABLE IF NOT EXISTS academy_videos (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 title TEXT NOT NULL,
+                youtube_url TEXT NOT NULL,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                is_published INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+
+    cur.execute("PRAGMA table_info(free_course_classes)")
+    free_course_class_cols = {row["name"] for row in cur.fetchall()}
+    if not free_course_class_cols:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS free_course_classes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                description TEXT,
                 youtube_url TEXT NOT NULL,
                 sort_order INTEGER NOT NULL DEFAULT 0,
                 is_published INTEGER NOT NULL DEFAULT 1,
@@ -774,6 +804,65 @@ def update_free_course_settings(title, description, youtube_url):
     )
     _commit_with_retry(conn)
     conn.close()
+
+
+def add_free_course_class(title, description, youtube_url, sort_order=0, is_published=1):
+    conn = get_conn()
+    cur = conn.cursor()
+    now = utcnow().isoformat(timespec="seconds")
+    cur.execute(
+        """
+        INSERT INTO free_course_classes (
+            title, description, youtube_url, sort_order, is_published, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            str(title or "").strip(),
+            str(description or "").strip(),
+            str(youtube_url or "").strip(),
+            int(sort_order),
+            int(is_published),
+            now,
+        ),
+    )
+    _commit_with_retry(conn)
+    class_id = cur.lastrowid
+    conn.close()
+    return class_id
+
+
+def delete_free_course_class(class_id):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM free_course_classes WHERE id = ?", (int(class_id),))
+    _commit_with_retry(conn)
+    conn.close()
+
+
+def get_free_course_classes(include_unpublished=False):
+    conn = get_conn()
+    cur = conn.cursor()
+    if include_unpublished:
+        cur.execute(
+            """
+            SELECT *
+            FROM free_course_classes
+            ORDER BY sort_order ASC, id ASC
+            """
+        )
+    else:
+        cur.execute(
+            """
+            SELECT *
+            FROM free_course_classes
+            WHERE is_published = 1
+            ORDER BY sort_order ASC, id ASC
+            """
+        )
+    rows = cur.fetchall()
+    conn.close()
+    return rows
 
 
 def add_academy_video(title, youtube_url, sort_order=0, is_published=1):

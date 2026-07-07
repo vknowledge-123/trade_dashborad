@@ -2227,6 +2227,27 @@ class MarketSnapshotApiIntegrationTests(unittest.TestCase):
         self.assertTrue(response.json()["ok"])
         self.assertEqual(response.json()["status"]["status"], "completed")
 
+    def test_free_course_page_renders_playlist_classes(self):
+        from app.db import add_free_course_class, delete_free_course_class
+
+        class_id = add_free_course_class(
+            "Scanner Basics",
+            "Learn how to read the dashboard scanners.",
+            "https://youtu.be/dQw4w9WgXcQ",
+            sort_order=1,
+            is_published=1,
+        )
+        try:
+            with TestClient(main_module.app) as client:
+                response = client.get("/free-course")
+        finally:
+            delete_free_course_class(class_id)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Class Playlist", response.text)
+        self.assertIn("Scanner Basics", response.text)
+        self.assertIn("https://www.youtube.com/embed/dQw4w9WgXcQ", response.text)
+
 
 if __name__ == "__main__":
     unittest.main()

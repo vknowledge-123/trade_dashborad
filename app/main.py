@@ -43,6 +43,9 @@ from app.db import (
     update_course_settings,
     update_free_course_settings,
     update_course_payment_qr,
+    add_free_course_class,
+    delete_free_course_class,
+    get_free_course_classes,
     add_academy_video,
     delete_academy_video,
     get_academy_videos,
@@ -590,6 +593,19 @@ def dashboard(request: Request):
 def free_course(request: Request):
     user = current_user(request)
     admin = current_admin(request)
+    course_settings = get_course_settings()
+    free_course_classes = get_free_course_classes(include_unpublished=bool(admin))
+    if not free_course_classes and course_settings.get("free_course_youtube_url"):
+        free_course_classes = [
+            {
+                "id": 0,
+                "title": course_settings.get("free_course_title") or "Free Course Class",
+                "description": course_settings.get("free_course_description") or "",
+                "youtube_url": course_settings.get("free_course_youtube_url"),
+                "sort_order": 0,
+                "is_published": 1,
+            }
+        ]
     return templates.TemplateResponse(
         request,
         "free_course.html",
@@ -598,7 +614,8 @@ def free_course(request: Request):
             "user": user,
             "admin": admin,
             "public_mode": True if not user and not admin else False,
-            "course_settings": get_course_settings(),
+            "course_settings": course_settings,
+            "free_course_classes": free_course_classes,
         },
     )
 
@@ -1043,6 +1060,7 @@ def admin_home(request: Request):
         inquiries = get_inquiries(20)
         recent_users = get_recent_users(20)
         course_settings = get_course_settings()
+        free_course_classes = get_free_course_classes(include_unpublished=True)
         academy_videos = get_academy_videos(include_unpublished=True)
         academy_licenses = get_recent_academy_licenses(30)
         generated_license = request.session.pop("last_generated_license", None)
@@ -1074,6 +1092,7 @@ def admin_home(request: Request):
                 "inquiries": inquiries,
                 "users_activity": users_activity,
                 "course_settings": course_settings,
+                "free_course_classes": free_course_classes,
                 "academy_videos": academy_videos,
                 "academy_licenses": academy_licenses,
                 "generated_license": generated_license,
@@ -1440,6 +1459,33 @@ def admin_free_course_settings(
 
     update_free_course_settings(free_course_title, free_course_description, free_course_youtube_url)
     return RedirectResponse(url="/admin?free_course=saved", status_code=302)
+
+
+@app.post("/admin/free-course/classes")
+def admin_add_free_course_class(
+    request: Request,
+    title: str = Form(...),
+    description: str = Form(""),
+    youtube_url: str = Form(...),
+    sort_order: int = Form(0),
+    is_published: int = Form(1),
+):
+    admin = require_admin(request)
+    if not admin:
+        return RedirectResponse(url="/admin/login", status_code=302)
+
+    add_free_course_class(title, description, youtube_url, sort_order, is_published)
+    return RedirectResponse(url="/admin?free_course=class_added", status_code=302)
+
+
+@app.post("/admin/free-course/classes/delete")
+def admin_delete_free_course_class(request: Request, class_id: int = Form(...)):
+    admin = require_admin(request)
+    if not admin:
+        return RedirectResponse(url="/admin/login", status_code=302)
+
+    delete_free_course_class(class_id)
+    return RedirectResponse(url="/admin?free_course=class_deleted", status_code=302)
 
 
 @app.post("/admin/course/payment-qr")

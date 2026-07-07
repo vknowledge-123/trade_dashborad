@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 
+{% set first_class = free_course_classes[0] if free_course_classes else None %}
 <section class="free-course-shell">
   <div class="free-course-hero panel">
     <div class="free-course-copy">
@@ -16,19 +17,57 @@
     </div>
   </div>
 
-  <div class="panel free-course-video-panel">
-    {% if course_settings.free_course_youtube_url %}
-      <div class="free-course-video">
-        <iframe
-          src="{{ youtube_embed_url(course_settings.free_course_youtube_url) }}"
-          title="{{ course_settings.free_course_title or 'Free course video' }}"
-          loading="lazy"
-          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-          allowfullscreen></iframe>
+  <div class="panel free-course-player-panel">
+    {% if first_class %}
+      <div class="free-course-player-grid">
+        <div class="free-course-watch">
+          <div class="free-course-video">
+            <iframe
+              data-free-course-frame
+              src="{{ youtube_embed_url(first_class.youtube_url) }}"
+              title="{{ first_class.title }}"
+              loading="lazy"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allowfullscreen></iframe>
+          </div>
+          <div class="free-course-current">
+            <span class="pill">Now Playing</span>
+            <h2 data-free-course-title>{{ first_class.title }}</h2>
+            <p data-free-course-description>{{ first_class.description or 'Watch this class and continue with the next lesson from the playlist.' }}</p>
+          </div>
+        </div>
+
+        <aside class="free-course-playlist" aria-label="Free course playlist">
+          <div class="panel-header">
+            <h3>Class Playlist</h3>
+            <span class="pill">{{ free_course_classes|length }} classes</span>
+          </div>
+          <div class="free-course-class-list">
+            {% for item in free_course_classes %}
+              <button
+                class="free-course-class {{ 'active' if loop.first else '' }}"
+                type="button"
+                data-free-course-class
+                data-embed="{{ youtube_embed_url(item.youtube_url) }}"
+                data-title="{{ item.title }}"
+                data-description="{{ item.description or '' }}">
+                <span class="free-course-class-index">{{ loop.index }}</span>
+                <span class="free-course-class-copy">
+                  <strong>{{ item.title }}</strong>
+                  {% if item.description %}
+                    <small>{{ item.description }}</small>
+                  {% else %}
+                    <small>Free class video</small>
+                  {% endif %}
+                </span>
+              </button>
+            {% endfor %}
+          </div>
+        </aside>
       </div>
     {% else %}
       <div class="free-course-empty">
-        <h3>Free course video is being prepared.</h3>
+        <h3>Free course classes are being prepared.</h3>
         <p>Check again soon or contact support for the latest beginner session.</p>
       </div>
     {% endif %}
@@ -51,7 +90,7 @@
 }
 .free-course-copy h1 {
   margin: 0;
-  font-size: clamp(28px, 5vw, 54px);
+  font-size: clamp(28px, 5vw, 48px);
   letter-spacing: 0;
 }
 .free-course-copy p {
@@ -59,8 +98,19 @@
   color: #b6c4dd;
   line-height: 1.7;
 }
-.free-course-video-panel {
+.free-course-player-panel {
   padding: clamp(10px, 2vw, 16px);
+}
+.free-course-player-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 680px) minmax(260px, 1fr);
+  align-items: start;
+  gap: 16px;
+}
+.free-course-watch {
+  display: grid;
+  gap: 12px;
+  max-width: 680px;
 }
 .free-course-video {
   aspect-ratio: 16 / 9;
@@ -76,6 +126,77 @@
   border: 0;
   display: block;
 }
+.free-course-current {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.free-course-current h2 {
+  margin: 0;
+  font-size: clamp(20px, 3vw, 28px);
+  letter-spacing: 0;
+}
+.free-course-current p {
+  margin: 0;
+  color: #aebdda;
+  line-height: 1.6;
+}
+.free-course-playlist {
+  min-width: 0;
+}
+.free-course-class-list {
+  display: grid;
+  gap: 10px;
+  max-height: 560px;
+  overflow: auto;
+  padding-right: 4px;
+}
+.free-course-class {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 10px;
+  width: 100%;
+  padding: 12px;
+  text-align: left;
+  border-radius: 10px;
+  color: #eaf2ff;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  cursor: pointer;
+}
+.free-course-class:hover,
+.free-course-class.active {
+  border-color: rgba(97, 218, 251, 0.48);
+  background: rgba(97, 218, 251, 0.10);
+}
+.free-course-class-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.08);
+  color: #8fdfff;
+  font-weight: 800;
+  font-size: 12px;
+}
+.free-course-class-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.free-course-class-copy strong,
+.free-course-class-copy small {
+  overflow-wrap: anywhere;
+}
+.free-course-class-copy small {
+  color: #91a5c4;
+  line-height: 1.45;
+}
 .free-course-empty {
   padding: 28px 14px;
   text-align: center;
@@ -85,14 +206,50 @@
   margin: 0 0 8px;
   color: #e8f0fe;
 }
+@media (max-width: 980px) {
+  .free-course-player-grid {
+    grid-template-columns: 1fr;
+  }
+  .free-course-watch {
+    max-width: 760px;
+  }
+  .free-course-class-list {
+    max-height: none;
+  }
+}
 @media (max-width: 760px) {
   .free-course-copy h1 {
     font-size: 28px;
   }
-  .free-course-video-panel {
+  .free-course-player-panel {
     padding: 8px;
+  }
+  .free-course-current {
+    padding: 10px;
   }
 }
 </style>
+
+<script>
+(function () {
+  const frame = document.querySelector("[data-free-course-frame]");
+  const title = document.querySelector("[data-free-course-title]");
+  const description = document.querySelector("[data-free-course-description]");
+  const buttons = Array.from(document.querySelectorAll("[data-free-course-class]"));
+  if (!frame || !title || !description || !buttons.length) return;
+
+  buttons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const embed = button.dataset.embed;
+      if (!embed) return;
+      frame.src = embed;
+      frame.title = button.dataset.title || "Free course class";
+      title.textContent = button.dataset.title || "Free course class";
+      description.textContent = button.dataset.description || "Watch this class and continue with the next lesson from the playlist.";
+      buttons.forEach((item) => item.classList.toggle("active", item === button));
+    });
+  });
+})();
+</script>
 
 {% endblock %}
