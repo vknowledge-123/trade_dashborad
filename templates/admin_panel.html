@@ -7,6 +7,7 @@
       <span class="pill">{{ active_broker|upper if active_broker else "KITE" }}</span>
     </div>
     <form class="broker-switch" method="post" action="/admin/broker">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}" />
       <label class="broker-option">
         <input type="radio" name="active_broker" value="kite" {% if active_broker != "dhan" %}checked{% endif %} />
         <span>Kite Connect</span>
@@ -25,13 +26,14 @@
       <span class="pill">Admin only</span>
     </div>
     <form class="inquiry" method="post" action="/admin/kite/credentials">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}" />
       <label>
         API Key
         <input type="text" name="api_key" value="{{ creds['api_key'] if creds else '' }}" required />
       </label>
       <label>
         API Secret
-        <input type="password" name="api_secret" value="{{ creds['api_secret'] if creds else '' }}" required />
+        <input type="password" name="api_secret" placeholder="{{ 'Saved - enter new secret to replace' if creds else '' }}" required />
       </label>
       <button class="btn btn-primary" type="submit">Save Credentials</button>
     </form>
@@ -47,13 +49,14 @@
       <span class="pill">Token login</span>
     </div>
     <form class="inquiry" method="post" action="/admin/dhan/credentials">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}" />
       <label>
         Dhan Client ID
         <input type="text" name="client_id" value="{{ dhan_creds['client_id'] if dhan_creds else '' }}" required />
       </label>
       <label>
         Access Token
-        <input type="password" name="access_token" value="{{ dhan_creds['access_token'] if dhan_creds else '' }}" required />
+        <input type="password" name="access_token" placeholder="{{ 'Saved - enter new token to replace' if dhan_creds else '' }}" required />
       </label>
       <button class="btn btn-primary" type="submit">Save & Connect Dhan</button>
     </form>
@@ -186,6 +189,7 @@
             </span>
             <span>
               <form method="post" action="/admin/inquiry/status">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}" />
                 <input type="hidden" name="inquiry_id" value="{{ row['id'] }}" />
                 {% if row["status"] == "closed" %}
                   <input type="hidden" name="status" value="open" />
@@ -212,6 +216,7 @@
       <span class="pill">Public pricing</span>
     </div>
     <form class="inquiry" method="post" action="/admin/course/settings">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}" />
       <div class="course-settings-grid">
         <label>
           4 Months Price
@@ -236,6 +241,7 @@
       <span class="pill">UPI apps</span>
     </div>
     <form class="inquiry" method="post" action="/admin/course/payment-qr" enctype="multipart/form-data">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}" />
       <label>
         Upload QR Image
         <input type="file" name="payment_qr" accept="image/png,image/jpeg,image/webp" required />
@@ -261,6 +267,7 @@
       <span class="pill">Public playlist</span>
     </div>
     <form class="inquiry" method="post" action="/admin/free-course/settings">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}" />
       <label>
         Course Title
         <input type="text" name="free_course_title" value="{{ course_settings['free_course_title'] if course_settings else 'Free Trading Foundation Course' }}" required />
@@ -275,6 +282,7 @@
 
     <div class="panel-divider"></div>
     <form class="inquiry" method="post" action="/admin/free-course/classes">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}" />
       <div class="academy-video-grid">
         <label>
           Class Title
@@ -325,6 +333,7 @@
             <span class="mono"><a class="tv-link" href="{{ item['youtube_url'] }}" target="_blank" rel="noopener noreferrer">Open</a></span>
             <span>
               <form method="post" action="/admin/free-course/classes/delete">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}" />
                 <input type="hidden" name="class_id" value="{{ item['id'] }}" />
                 <button class="btn btn-ghost btn-mini" type="submit">Delete</button>
               </form>
@@ -343,6 +352,7 @@
       <span class="pill">YouTube private links</span>
     </div>
     <form class="inquiry" method="post" action="/admin/academy/videos">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}" />
       <div class="academy-video-grid">
         <label>
           Class Title
@@ -384,6 +394,7 @@
             <span class="mono"><a class="tv-link" href="{{ video['youtube_url'] }}" target="_blank" rel="noopener noreferrer">Open</a></span>
             <span>
               <form method="post" action="/admin/academy/videos/delete">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}" />
                 <input type="hidden" name="video_id" value="{{ video['id'] }}" />
                 <button class="btn btn-ghost btn-mini" type="submit">Delete</button>
               </form>
@@ -411,6 +422,7 @@
       </div>
     {% endif %}
     <form class="inquiry" method="post" action="/admin/academy/licenses">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}" />
       <div class="academy-video-grid">
         <label>
           User Email

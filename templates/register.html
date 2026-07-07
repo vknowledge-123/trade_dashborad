@@ -10,6 +10,7 @@
     {% endif %}
 
     <form method="post" action="/register" class="auth-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}" />
       <label>
         Full Name
         <input type="text" name="full_name" required />

@@ -20,6 +20,7 @@
       <span class="pill">Ask the desk</span>
     </div>
     <form class="inquiry" method="post" action="/inquiry">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}" />
       <label>
         Subject
         <input type="text" name="subject" required />

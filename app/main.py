@@ -2,6 +2,8 @@ from datetime import datetime, timedelta, timezone
 import io
 import math
 from pathlib import Path
+import re
+import secrets
 import threading
 from urllib.parse import parse_qs, urlparse
 
@@ -9,7 +11,7 @@ import pyotp
 import qrcode
 from PIL import Image, UnidentifiedImageError
 
-from fastapi import Body, FastAPI, File, Form, Request, UploadFile
+from fastapi import Body, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
@@ -17,7 +19,7 @@ from starlette.middleware.sessions import SessionMiddleware
 import redis
 from kiteconnect import KiteConnect
 
-from app.middleware import BlockLoggedInUserFromAdminMiddleware
+from app.middleware import BlockLoggedInUserFromAdminMiddleware, SecurityHeadersMiddleware
 from app.db import (
     init_db,
     create_user,
@@ -73,6 +75,7 @@ app = FastAPI()
 # Serve local static assets (images used in Services page, etc.)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 # Middleware order matters: SessionMiddleware must wrap anything that reads sessions.
+app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(BlockLoggedInUserFromAdminMiddleware)
 app.add_middleware(
     SessionMiddleware,
@@ -266,6 +269,20 @@ def format_crores(value):
     return f"{number / 10_000_000:.2f} Cr"
 
 
+def csrf_token(request: Request):
+    token = request.session.get("csrf_token")
+    if not token:
+        token = secrets.token_urlsafe(32)
+        request.session["csrf_token"] = token
+    return token
+
+
+def require_csrf(request: Request, submitted_token: str):
+    expected = request.session.get("csrf_token")
+    if not expected or not submitted_token or not secrets.compare_digest(expected, submitted_token):
+        raise HTTPException(status_code=403, detail="Invalid CSRF token")
+
+
 def youtube_embed_url(url):
     raw = str(url or "").strip()
     if not raw:
@@ -276,22 +293,24 @@ def youtube_embed_url(url):
         return raw
     host = parsed.netloc.lower()
     video_id = ""
-    if "youtu.be" in host:
+    if host in {"youtu.be", "www.youtu.be"}:
         video_id = parsed.path.strip("/").split("/")[0]
-    elif "youtube.com" in host:
+    elif host in {"youtube.com", "www.youtube.com", "m.youtube.com"}:
         if parsed.path.startswith("/embed/"):
-            return raw
-        video_id = parse_qs(parsed.query).get("v", [""])[0]
-        if not video_id and parsed.path.startswith("/shorts/"):
-            video_id = parsed.path.strip("/").split("/")[1]
-    if video_id:
+            video_id = parsed.path.strip("/").split("/")[1] if len(parsed.path.strip("/").split("/")) > 1 else ""
+        else:
+            video_id = parse_qs(parsed.query).get("v", [""])[0]
+            if not video_id and parsed.path.startswith("/shorts/"):
+                video_id = parsed.path.strip("/").split("/")[1]
+    if video_id and re.fullmatch(r"[A-Za-z0-9_-]{6,20}", video_id):
         return f"https://www.youtube.com/embed/{video_id}"
-    return raw
+    return ""
 
 
 templates.env.globals["format_compact_volume"] = format_compact_volume
 templates.env.globals["format_crores"] = format_crores
 templates.env.globals["youtube_embed_url"] = youtube_embed_url
+templates.env.globals["csrf_token"] = csrf_token
 
 @app.on_event("startup")
 def on_startup():
@@ -328,27 +347,36 @@ def maybe_upgrade_password_hash(user_row, password: str, verify_result=None):
         update_user_password_hash(user_row["id"], hash_password(password))
 
 
-def _admin_login_keys(email: str, ip: str):
+def password_policy_error(password: str):
+    value = password or ""
+    if len(value) < 8:
+        return "Password must be at least 8 characters."
+    if not re.search(r"[A-Za-z]", value) or not re.search(r"\d", value):
+        return "Password must include at least one letter and one number."
+    return None
+
+
+def _login_keys(prefix: str, email: str, ip: str):
     safe_email = (email or "").lower()
     safe_ip = ip or "unknown"
     return (
-        f"admin:login:fail:{safe_email}:{safe_ip}",
-        f"admin:login:lock:{safe_email}:{safe_ip}",
+        f"{prefix}:login:fail:{safe_email}:{safe_ip}",
+        f"{prefix}:login:lock:{safe_email}:{safe_ip}",
     )
 
 
-def admin_login_locked(email: str, ip: str):
+def login_locked(prefix: str, email: str, ip: str):
     try:
-        _, lock_key = _admin_login_keys(email, ip)
+        _, lock_key = _login_keys(prefix, email, ip)
         ttl = redis_client.ttl(lock_key)
         return ttl if ttl and ttl > 0 else 0
     except Exception:
         return 0
 
 
-def admin_login_fail(email: str, ip: str):
+def login_fail(prefix: str, email: str, ip: str):
     try:
-        fail_key, lock_key = _admin_login_keys(email, ip)
+        fail_key, lock_key = _login_keys(prefix, email, ip)
         count = redis_client.incr(fail_key)
         if count == 1:
             redis_client.expire(fail_key, 600)
@@ -359,13 +387,34 @@ def admin_login_fail(email: str, ip: str):
         pass
 
 
-def admin_login_success(email: str, ip: str):
+def login_success(prefix: str, email: str, ip: str):
     try:
-        fail_key, lock_key = _admin_login_keys(email, ip)
+        fail_key, lock_key = _login_keys(prefix, email, ip)
         redis_client.delete(fail_key)
         redis_client.delete(lock_key)
     except Exception:
         pass
+
+
+def _admin_login_keys(email: str, ip: str):
+    safe_email = (email or "").lower()
+    safe_ip = ip or "unknown"
+    return (
+        f"admin:login:fail:{safe_email}:{safe_ip}",
+        f"admin:login:lock:{safe_email}:{safe_ip}",
+    )
+
+
+def admin_login_locked(email: str, ip: str):
+    return login_locked("admin", email, ip)
+
+
+def admin_login_fail(email: str, ip: str):
+    login_fail("admin", email, ip)
+
+
+def admin_login_success(email: str, ip: str):
+    login_success("admin", email, ip)
 
 
 def get_client_ip(request: Request) -> str:
@@ -518,7 +567,12 @@ def register_post(
     email: str = Form(...),
     phone: str = Form(...),
     password: str = Form(...),
+    csrf_token: str = Form(""),
 ):
+    require_csrf(request, csrf_token)
+    password_error = password_policy_error(password)
+    if password_error:
+        return templates.TemplateResponse(request, "register.html", {"error": password_error, "user": None, "admin": None})
     existing = get_user_by_email(email)
     if existing:
         return templates.TemplateResponse(request, "register.html", {"error": "Email already registered.", "user": None, "admin": None})
@@ -539,17 +593,30 @@ def login_post(
     request: Request,
     email: str = Form(...),
     password: str = Form(...),
+    csrf_token: str = Form(""),
 ):
+    require_csrf(request, csrf_token)
+    ip = get_client_ip(request)
+    locked_ttl = login_locked("user", email, ip)
+    if locked_ttl:
+        minutes = max(1, locked_ttl // 60)
+        return templates.TemplateResponse(
+            request,
+            "login.html",
+            {"error": f"Too many attempts. Try again in {minutes} minutes.", "user": None, "admin": None},
+        )
     user = get_user_by_email(email)
     if not user:
+        login_fail("user", email, ip)
         return templates.TemplateResponse(request, "login.html", {"error": "Invalid email or password.", "user": None, "admin": None})
 
     verify_result = verify_password(password, user["password_hash"])
     if not verify_result.ok:
+        login_fail("user", email, ip)
         return templates.TemplateResponse(request, "login.html", {"error": "Invalid email or password.", "user": None, "admin": None})
 
+    login_success("user", email, ip)
     maybe_upgrade_password_hash(user, password, verify_result)
-    ip = get_client_ip(request)
     user_agent = request.headers.get("user-agent", "-")
     record_user_login(user["id"], ip, user_agent)
     request.session["user_id"] = user["id"]
@@ -934,7 +1001,9 @@ def inquiry(
     request: Request,
     subject: str = Form(...),
     message: str = Form(...),
+    csrf_token: str = Form(""),
 ):
+    require_csrf(request, csrf_token)
     user = require_login(request)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
@@ -1014,7 +1083,8 @@ def academy(request: Request):
 
 
 @app.post("/academy/license", response_class=HTMLResponse)
-def academy_activate_license(request: Request, license_key: str = Form(...)):
+def academy_activate_license(request: Request, license_key: str = Form(...), csrf_token: str = Form("")):
+    require_csrf(request, csrf_token)
     user = require_login(request)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
@@ -1122,7 +1192,9 @@ def admin_setup_post(
     email: str = Form(...),
     phone: str = Form(...),
     password: str = Form(...),
+    csrf_token: str = Form(""),
 ):
+    require_csrf(request, csrf_token)
     ip = get_client_ip(request)
     if not is_ip_allowed(ip):
         return templates.TemplateResponse(
@@ -1132,6 +1204,13 @@ def admin_setup_post(
         )
     if get_admin_user():
         return RedirectResponse(url="/admin/login", status_code=302)
+    password_error = password_policy_error(password)
+    if password_error:
+        return templates.TemplateResponse(
+            request,
+            "admin_setup.html",
+            {"error": password_error, "admin": None, "user": None},
+        )
     existing = get_user_by_email(email)
     if existing:
         return templates.TemplateResponse(
@@ -1183,7 +1262,9 @@ def admin_login_post(
     request: Request,
     email: str = Form(...),
     password: str = Form(...),
+    csrf_token: str = Form(""),
 ):
+    require_csrf(request, csrf_token)
     ip = get_client_ip(request)
     user_agent = request.headers.get("user-agent", "-")
     if not is_ip_allowed(ip):
@@ -1255,7 +1336,8 @@ def admin_2fa_get(request: Request):
 
 
 @app.post("/admin/2fa", response_class=HTMLResponse)
-def admin_2fa_post(request: Request, code: str = Form(...)):
+def admin_2fa_post(request: Request, code: str = Form(...), csrf_token: str = Form("")):
+    require_csrf(request, csrf_token)
     ip = get_client_ip(request)
     if not is_ip_allowed(ip):
         return RedirectResponse(url="/admin/login", status_code=302)
@@ -1313,7 +1395,8 @@ def admin_2fa_setup_get(request: Request):
 
 
 @app.post("/admin/2fa/setup", response_class=HTMLResponse)
-def admin_2fa_setup_post(request: Request, code: str = Form(...)):
+def admin_2fa_setup_post(request: Request, code: str = Form(...), csrf_token: str = Form("")):
+    require_csrf(request, csrf_token)
     ip = get_client_ip(request)
     if not is_ip_allowed(ip):
         return RedirectResponse(url="/admin/login", status_code=302)
@@ -1369,7 +1452,9 @@ def admin_save_kite_credentials(
     request: Request,
     api_key: str = Form(...),
     api_secret: str = Form(...),
+    csrf_token: str = Form(""),
 ):
+    require_csrf(request, csrf_token)
     admin = require_admin(request)
     if not admin:
         return RedirectResponse(url="/admin/login", status_code=302)
@@ -1383,7 +1468,9 @@ def admin_save_dhan_credentials(
     request: Request,
     client_id: str = Form(...),
     access_token: str = Form(...),
+    csrf_token: str = Form(""),
 ):
+    require_csrf(request, csrf_token)
     admin = require_admin(request)
     if not admin:
         return RedirectResponse(url="/admin/login", status_code=302)
@@ -1398,7 +1485,9 @@ def admin_save_dhan_credentials(
 def admin_select_broker(
     request: Request,
     active_broker: str = Form(...),
+    csrf_token: str = Form(""),
 ):
+    require_csrf(request, csrf_token)
     admin = require_admin(request)
     if not admin:
         return RedirectResponse(url="/admin/login", status_code=302)
@@ -1422,7 +1511,9 @@ def admin_inquiry_status(
     request: Request,
     inquiry_id: int = Form(...),
     status: str = Form(...),
+    csrf_token: str = Form(""),
 ):
+    require_csrf(request, csrf_token)
     admin = require_admin(request)
     if not admin:
         return RedirectResponse(url="/admin/login", status_code=302)
@@ -1437,7 +1528,9 @@ def admin_course_settings(
     four_month_price: int = Form(...),
     one_year_price: int = Form(...),
     support_text: str = Form(...),
+    csrf_token: str = Form(""),
 ):
+    require_csrf(request, csrf_token)
     admin = require_admin(request)
     if not admin:
         return RedirectResponse(url="/admin/login", status_code=302)
@@ -1452,10 +1545,14 @@ def admin_free_course_settings(
     free_course_title: str = Form(...),
     free_course_description: str = Form(""),
     free_course_youtube_url: str = Form(""),
+    csrf_token: str = Form(""),
 ):
+    require_csrf(request, csrf_token)
     admin = require_admin(request)
     if not admin:
         return RedirectResponse(url="/admin/login", status_code=302)
+    if free_course_youtube_url and not youtube_embed_url(free_course_youtube_url):
+        return RedirectResponse(url="/admin?free_course=invalid_url", status_code=302)
 
     update_free_course_settings(free_course_title, free_course_description, free_course_youtube_url)
     return RedirectResponse(url="/admin?free_course=saved", status_code=302)
@@ -1469,17 +1566,22 @@ def admin_add_free_course_class(
     youtube_url: str = Form(...),
     sort_order: int = Form(0),
     is_published: int = Form(1),
+    csrf_token: str = Form(""),
 ):
+    require_csrf(request, csrf_token)
     admin = require_admin(request)
     if not admin:
         return RedirectResponse(url="/admin/login", status_code=302)
+    if not youtube_embed_url(youtube_url):
+        return RedirectResponse(url="/admin?free_course=invalid_url", status_code=302)
 
     add_free_course_class(title, description, youtube_url, sort_order, is_published)
     return RedirectResponse(url="/admin?free_course=class_added", status_code=302)
 
 
 @app.post("/admin/free-course/classes/delete")
-def admin_delete_free_course_class(request: Request, class_id: int = Form(...)):
+def admin_delete_free_course_class(request: Request, class_id: int = Form(...), csrf_token: str = Form("")):
+    require_csrf(request, csrf_token)
     admin = require_admin(request)
     if not admin:
         return RedirectResponse(url="/admin/login", status_code=302)
@@ -1492,7 +1594,9 @@ def admin_delete_free_course_class(request: Request, class_id: int = Form(...)):
 async def admin_course_payment_qr(
     request: Request,
     payment_qr: UploadFile = File(...),
+    csrf_token: str = Form(""),
 ):
+    require_csrf(request, csrf_token)
     admin = require_admin(request)
     if not admin:
         return RedirectResponse(url="/admin/login", status_code=302)
@@ -1534,17 +1638,22 @@ def admin_add_video(
     youtube_url: str = Form(...),
     sort_order: int = Form(0),
     is_published: int = Form(1),
+    csrf_token: str = Form(""),
 ):
+    require_csrf(request, csrf_token)
     admin = require_admin(request)
     if not admin:
         return RedirectResponse(url="/admin/login", status_code=302)
+    if not youtube_embed_url(youtube_url):
+        return RedirectResponse(url="/admin?academy=invalid_url", status_code=302)
 
     add_academy_video(title, youtube_url, sort_order, is_published)
     return RedirectResponse(url="/admin", status_code=302)
 
 
 @app.post("/admin/academy/videos/delete")
-def admin_delete_video(request: Request, video_id: int = Form(...)):
+def admin_delete_video(request: Request, video_id: int = Form(...), csrf_token: str = Form("")):
+    require_csrf(request, csrf_token)
     admin = require_admin(request)
     if not admin:
         return RedirectResponse(url="/admin/login", status_code=302)
@@ -1560,7 +1669,9 @@ def admin_generate_license(
     plan_name: str = Form(...),
     duration_days: int = Form(...),
     notes: str = Form(""),
+    csrf_token: str = Form(""),
 ):
+    require_csrf(request, csrf_token)
     admin = require_admin(request)
     if not admin:
         return RedirectResponse(url="/admin/login", status_code=302)

@@ -1,5 +1,6 @@
 import os
 
+APP_ENV = os.getenv("APP_ENV", "development").lower().strip()
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 REDIS_DB = int(os.getenv("REDIS_DB", "0"))
@@ -13,6 +14,8 @@ DHAN_TOKEN_UPDATED_KEY = "dhan:access_token_updated"
 SESSION_SECRET_KEY = os.getenv("SESSION_SECRET_KEY", "change-this-secret")
 SESSION_HTTPS_ONLY = os.getenv("SESSION_HTTPS_ONLY", "0") == "1"
 SESSION_SAMESITE = os.getenv("SESSION_SAMESITE", "lax")
+if APP_ENV in {"production", "prod"} and SESSION_SECRET_KEY == "change-this-secret":
+    raise RuntimeError("Set a strong SESSION_SECRET_KEY before running in production.")
 
 ADMIN_IP_ALLOWLIST = [ip.strip() for ip in os.getenv("ADMIN_IP_ALLOWLIST", "").split(",") if ip.strip()]
 HCAPTCHA_SITE_KEY = os.getenv("HCAPTCHA_SITE_KEY")

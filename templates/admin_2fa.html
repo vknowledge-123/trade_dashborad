@@ -8,6 +8,7 @@
       <div class="alert">{{ error }}</div>
     {% endif %}
     <form method="post" action="/admin/2fa" class="auth-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}" />
       <label>
         Authentication Code
         <input type="text" name="code" inputmode="numeric" pattern="[0-9]{6}" placeholder="123456" required />

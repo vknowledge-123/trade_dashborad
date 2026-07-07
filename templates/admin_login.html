@@ -10,6 +10,7 @@
     {% endif %}
 
     <form method="post" action="/admin/login" class="auth-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}" />
       <label>
         Email
         <input type="email" name="email" required />
