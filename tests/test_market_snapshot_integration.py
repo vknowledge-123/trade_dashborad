@@ -273,12 +273,21 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         engine.symbol_to_token = {"INFY": 123}
         engine.sector_tokens = {}
         engine._completed_session_cache_marker = lambda: "2026-07-03"
-        engine._warm_market_open_stock_cache = lambda cache_marker, force=False: {
-            "processed": 1,
-            "previous_close_updated": 1,
-            "badge_updated": 1,
-            "volume_updated": 1,
+        steps = []
+        engine._ensure_dhan_universe_ready_for_cache = lambda: steps.append("universe") or {
+            "required": True,
+            "ready": True,
+            "rebuilt": False,
         }
+        def warm_stock_cache(cache_marker, force=False):
+            steps.append("stock")
+            return {
+                "processed": 1,
+                "previous_close_updated": 1,
+                "badge_updated": 1,
+                "volume_updated": 1,
+            }
+        engine._warm_market_open_stock_cache = warm_stock_cache
         engine._warm_relative_rotation_graph_cache = lambda cache_marker, force=False: {"items": [{"sector": "NIFTY IT"}]}
         saved = {}
         engine._save_swing_scanner_cache = lambda payload: saved.update(payload)
@@ -293,6 +302,7 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
 
         self.assertEqual(saved["rows"][0]["symbol"], "INFY")
         self.assertIn("swing rows", engine.history_cache_status["message"])
+        self.assertEqual(steps[:2], ["universe", "stock"])
 
     def test_rest_snapshot_uses_quote_volume_field(self):
         engine = MarketEngine(redis_client=None)
@@ -694,6 +704,70 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertEqual(payload["filtered_rows"][0]["pdh_side"], "below")
         self.assertAlmostEqual(abs(payload["filtered_rows"][0]["pdh_distance_percent"]), 0.1, places=3)
 
+    def test_pdh_pdl_scanner_rejects_index_sized_levels_for_stock(self):
+        engine = MarketEngine(redis_client=None)
+        engine.symbol_to_token = {"HDFCLIFE": 123}
+        engine._is_market_open = lambda: True
+        engine._completed_session_cache_marker = lambda: "2026-07-07"
+        engine.latest = {
+            "HDFCLIFE": {
+                "symbol": "HDFCLIFE",
+                "name": "HDFC Life Insurance",
+                "price": 573.0,
+                "change": -1.2,
+                "volume": 1000,
+                "is_fno": True,
+            }
+        }
+        engine.previous_day_levels_cache = {
+            "HDFCLIFE": {
+                "cache_marker": "2026-07-07",
+                "broker": "kite",
+                "high": 17000.0,
+                "low": 16479.65,
+                "close": 16600.0,
+            }
+        }
+
+        payload = engine.get_pdh_pdl_scanner(level="pdl", side="below")
+
+        self.assertEqual(payload["pdl_breaks"], [])
+        self.assertEqual(payload["rows"], [])
+        self.assertEqual(payload["missing_levels"], 1)
+
+    def test_pdh_pdl_scanner_sanitizes_stale_cached_payload(self):
+        engine = MarketEngine(redis_client=None)
+        payload = {
+            "rows": [
+                {
+                    "symbol": "HDFCLIFE",
+                    "price": 573.0,
+                    "previous_high": 17000.0,
+                    "previous_low": 16479.65,
+                },
+                {
+                    "symbol": "INFY",
+                    "price": 1500.0,
+                    "previous_high": 1510.0,
+                    "previous_low": 1475.0,
+                },
+            ],
+            "pdl_breaks": [
+                {
+                    "symbol": "HDFCLIFE",
+                    "price": 573.0,
+                    "previous_high": 17000.0,
+                    "previous_low": 16479.65,
+                }
+            ],
+            "pdh_breaks": [],
+        }
+
+        sanitized = engine._sanitize_pdh_pdl_payload(payload)
+
+        self.assertEqual([row["symbol"] for row in sanitized["rows"]], ["INFY"])
+        self.assertEqual(sanitized["pdl_breaks"], [])
+
     def test_dhan_private_bank_security_id_is_available_for_idx_segment(self):
         engine = MarketEngine(redis_client=None)
         engine.broker = "dhan"
@@ -881,6 +955,23 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["sector_rank"], 1)
         self.assertEqual(payload["rows"][0]["sector_count"], 2)
 
+    def test_sector_rankings_split_gainers_and_losers(self):
+        engine = MarketEngine(redis_client=None)
+        engine.sector_latest = {
+            "NIFTY IT": {"sector": "NIFTY IT", "price": 1000, "change": 2.5},
+            "NIFTY METAL": {"sector": "NIFTY METAL", "price": 1000, "change": 1.0},
+            "NIFTY MEDIA": {"sector": "NIFTY MEDIA", "price": 1000, "change": -0.5},
+            "NIFTY ENERGY": {"sector": "NIFTY ENERGY", "price": 1000, "change": -3.0},
+        }
+
+        rankings = engine._sector_rankings()
+
+        self.assertEqual(rankings["NIFTY IT"]["sector_rank"], 1)
+        self.assertEqual(rankings["NIFTY METAL"]["sector_rank"], 2)
+        self.assertEqual(rankings["NIFTY ENERGY"]["sector_rank"], 1)
+        self.assertEqual(rankings["NIFTY MEDIA"]["sector_rank"], 2)
+        self.assertEqual(rankings["NIFTY ENERGY"]["sector_side"], "loser")
+
     def test_open_extreme_scanner_ranks_only_open_low_and_open_high_rows(self):
         engine = MarketEngine(redis_client=None)
         engine.nifty500_set = set()
@@ -971,6 +1062,114 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertEqual(payload["open_low_gainers"][0]["sector_change"], 2.5)
         self.assertEqual(payload["open_high_losers"][0]["sector_name"], "NIFTY MEDIA")
         self.assertEqual(payload["open_high_losers"][0]["sector_change"], -1.5)
+
+    def test_open_extreme_scanner_adds_nifty50_and_opening_candle_stats(self):
+        engine = MarketEngine(redis_client=None)
+        engine.nifty500_set = set()
+        engine.latest = {
+            "INFY": {
+                "symbol": "INFY",
+                "price": 1510,
+                "change": 2.0,
+                "day_open": 1480,
+                "day_low": 1480,
+                "open_equals_low": True,
+            }
+        }
+        engine._opening_candle_context = lambda symbol, reference_price=None, allow_fetch=True: {
+            "opening_candle_volume": 250000,
+            "opening_candle_close": 1500,
+            "opening_volume_sma": 100000,
+            "opening_volume_sma_multiplier": 2.5,
+            "opening_turnover": 375000000.0,
+        }
+
+        payload = engine.get_open_extreme_scanner()
+        row = payload["open_low_gainers"][0]
+
+        self.assertTrue(row["is_nifty50"])
+        self.assertEqual(row["opening_candle_volume"], 250000)
+        self.assertEqual(row["opening_volume_sma_multiplier"], 2.5)
+        self.assertEqual(row["opening_turnover"], 375000000.0)
+
+    def test_dhan_opening_candle_fetch_starts_at_914(self):
+        class FakeDhanHistory:
+            def __init__(self):
+                self.calls = []
+
+            def historical_data(self, token, from_date, to_date, interval):
+                self.calls.append((token, from_date, to_date, interval))
+                return [
+                    {
+                        "date": from_date + timedelta(minutes=1),
+                        "open": 100,
+                        "high": 101,
+                        "low": 99,
+                        "close": 100.5,
+                        "volume": 12345,
+                    }
+                ]
+
+        fake = FakeDhanHistory()
+        engine = MarketEngine(redis_client=None)
+        engine.broker = "dhan"
+        engine.kite = fake
+        engine.symbol_to_token = {"INFY": 123}
+        engine.dhan_security_to_segment = {123: "NSE_EQ"}
+        engine.dhan_security_to_instrument = {123: "EQUITY"}
+
+        candle = engine._opening_candle_for_symbol("INFY")
+
+        self.assertEqual(candle["volume"], 12345)
+        self.assertEqual(fake.calls[0][1].hour, 9)
+        self.assertEqual(fake.calls[0][1].minute, 14)
+        self.assertEqual(fake.calls[0][3], "1")
+
+    def test_opening_candle_context_rejects_price_mismatched_candle(self):
+        engine = MarketEngine(redis_client=None)
+        engine._opening_candle_for_symbol = lambda symbol, allow_fetch=True: {
+            "date": datetime.now(IST).replace(hour=9, minute=15, second=0, microsecond=0),
+            "open": 24500.0,
+            "high": 24600.0,
+            "low": 24400.0,
+            "close": 24463.74,
+            "volume": 6820000,
+        }
+        engine._acceleration_volume_sma = lambda symbol: 1115000
+
+        context = engine._opening_candle_context("ABB", reference_price=6935.0)
+
+        self.assertIsNone(context["opening_candle_volume"])
+        self.assertIsNone(context["opening_volume_sma_multiplier"])
+        self.assertIsNone(context["opening_turnover"])
+
+    def test_open_extreme_scanner_schedules_opening_candle_refresh_without_blocking(self):
+        engine = MarketEngine(redis_client=None)
+        engine.nifty500_set = set()
+        engine.kite = object()
+        engine.latest = {
+            "INFY": {
+                "symbol": "INFY",
+                "price": 1510,
+                "change": 2.0,
+                "day_open": 1480,
+                "day_low": 1480,
+                "open_equals_low": True,
+            }
+        }
+        called = []
+        def cached_only_opening(symbol, allow_fetch=True):
+            if allow_fetch:
+                self.fail("scanner should not fetch opening candle inline")
+            return None
+        engine._opening_candle_for_symbol = cached_only_opening
+        engine._ensure_opening_candle_background_refresh = lambda symbols: called.append(symbols) or True
+
+        payload = engine.get_open_extreme_scanner()
+
+        self.assertEqual(payload["open_low_gainers"][0]["symbol"], "INFY")
+        self.assertIsNone(payload["open_low_gainers"][0]["opening_candle_volume"])
+        self.assertEqual(called, [["INFY"]])
 
     def test_open_extreme_scanner_uses_cached_flags_when_live_row_lacks_ohlc(self):
         engine = MarketEngine(redis_client=None)

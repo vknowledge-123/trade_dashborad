@@ -103,16 +103,16 @@
           <span class="mono">{{ row.to_close }}</span>
           <span class="{{ 'positive' if row.move_percent >= 0 else 'negative' }} mono">{{ '+' if row.move_percent >= 0 else '' }}{{ row.move_percent }}%</span>
           <span class="sector-meta">
-            <span>{{ row.sector_name or row.sector or '-' }}</span>
-            {% if row.sector_change is not none %}
+            <span>{{ row.sector_name or row.sector or 'No sector' }}</span>
+            {% if (row.sector_name or row.sector) and row.sector_change is not none %}
               <small class="{{ 'positive' if row.sector_change >= 0 else 'negative' }}">{{ '+' if row.sector_change >= 0 else '' }}{{ row.sector_change }}%{% if row.sector_rank %} - Rank {{ row.sector_rank }}{% endif %}</small>
             {% else %}
-              <small>-</small>
+              <small>No sector</small>
             {% endif %}
           </span>
           <span class="mono">{{ format_compact_volume(row.candle_volume if row.candle_volume is defined else none) }}</span>
           <span class="mono">{{ row.volume_sma_multiplier ~ 'x' if row.volume_sma_multiplier else '-' }}</span>
-          <span class="mono">{{ format_compact_volume(row.turnover if row.turnover is defined else none) }}</span>
+          <span class="mono">{{ format_crores(row.turnover if row.turnover is defined else none) }}</span>
           <span class="mono">{{ row.appearance_time_display or '-' }}</span>
           <span class="mono">{{ row.repeat_count or 1 }}</span>
           <span class="accel-row-actions">
@@ -240,9 +240,17 @@
 }
 .accel-row {
   grid-template-columns: 1.05fr 0.54fr 0.58fr 0.58fr 0.56fr 0.95fr 0.62fr 0.46fr 0.62fr 0.68fr 0.36fr 0.82fr auto;
+  align-items: center;
 }
 .accel-table[data-admin="1"] .accel-row {
   grid-template-columns: 1fr 0.52fr 0.56fr 0.56fr 0.54fr 0.9fr 0.58fr 0.46fr 0.58fr 0.64fr 0.36fr 0.78fr 0.92fr auto;
+}
+.accel-table {
+  overflow-x: auto;
+}
+.accel-row > span,
+.openx-row > span {
+  min-width: 0;
 }
 .sector-meta {
   display: grid;
@@ -371,6 +379,11 @@
     if (Math.abs(number) >= 1_000) return `${(number / 1_000).toFixed(1)}K`;
     return Math.trunc(number).toString();
   };
+  const formatCrores = (value) => {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return "-";
+    return `${(number / 10_000_000).toFixed(2)} Cr`;
+  };
   const formatSigned = (value) => {
     const number = Number(value);
     if (!Number.isFinite(number)) return "-";
@@ -381,10 +394,11 @@
     return Number.isFinite(number) ? `${number.toFixed(2)}x` : "-";
   };
   const sectorText = (row) => {
-    const name = row.sector_name || row.sector || "-";
+    const name = row.sector_name || row.sector || "No sector";
     const change = Number(row.sector_change);
     const rank = Number(row.sector_rank);
-    if (!Number.isFinite(change)) return `<span>${escapeHtml(name)}</span><small>-</small>`;
+    const hasSector = Boolean(row.sector_name || row.sector);
+    if (!hasSector || !Number.isFinite(change)) return `<span>${escapeHtml(name)}</span><small>No sector</small>`;
     return `<span>${escapeHtml(name)}</span><small class="${change >= 0 ? "positive" : "negative"}">${change >= 0 ? "+" : ""}${change.toFixed(2)}%${Number.isFinite(rank) ? ` - Rank ${rank}` : ""}</small>`;
   };
   const rowHtml = (row) => `
@@ -400,7 +414,7 @@
       <span class="sector-meta">${sectorText(row)}</span>
       <span class="mono">${formatVolume(row.candle_volume)}</span>
       <span class="mono">${multiplier(row.volume_sma_multiplier)}</span>
-      <span class="mono">${formatVolume(row.turnover)}</span>
+      <span class="mono">${formatCrores(row.turnover)}</span>
       <span class="mono">${escapeHtml(row.appearance_time_display || "-")}</span>
       <span class="mono">${escapeHtml(row.repeat_count || 1)}</span>
       <span class="accel-row-actions">

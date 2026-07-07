@@ -257,6 +257,28 @@
 
   <div class="panel panel-wide panel-accent">
     <div class="panel-header">
+      <h3>Free Course</h3>
+      <span class="pill">Public lesson</span>
+    </div>
+    <form class="inquiry" method="post" action="/admin/free-course/settings">
+      <label>
+        Course Title
+        <input type="text" name="free_course_title" value="{{ course_settings['free_course_title'] if course_settings else 'Free Trading Foundation Course' }}" required />
+      </label>
+      <label>
+        Description
+        <textarea name="free_course_description" rows="3">{{ course_settings['free_course_description'] if course_settings else '' }}</textarea>
+      </label>
+      <label>
+        YouTube Private URL
+        <input type="url" name="free_course_youtube_url" value="{{ course_settings['free_course_youtube_url'] if course_settings else '' }}" placeholder="https://www.youtube.com/watch?v=..." />
+      </label>
+      <button class="btn btn-primary" type="submit">Save Free Course</button>
+    </form>
+  </div>
+
+  <div class="panel panel-wide panel-accent">
+    <div class="panel-header">
       <h3>Academy Videos</h3>
       <span class="pill">YouTube private links</span>
     </div>

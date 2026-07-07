@@ -4,6 +4,18 @@
 <div class="dash-shell">
   <section class="dash-hero">
     <div class="hero-badge">
+      {% if show_free_course_prompt and course_settings %}
+        <div class="free-course-prompt" id="free-course-prompt">
+          <div>
+            <span class="trial-cta">Free course available</span>
+            <span>{{ course_settings.free_course_title or 'Free Trading Foundation Course' }}</span>
+          </div>
+          <div class="free-course-prompt-actions">
+            <a class="btn btn-primary btn-mini" href="/free-course">Watch</a>
+            <button class="btn btn-ghost btn-mini" id="free-course-dismiss" type="button">Close</button>
+          </div>
+        </div>
+      {% endif %}
       {% if guest_trial %}
         {% if guest_trial.stage == "fresh" %}
           <div class="trial-chip active">
@@ -218,6 +230,30 @@
 .trial-link { color: var(--cyan); text-decoration: none; font-weight: 600; }
 .trial-link:hover { text-decoration: underline; }
 .trial-cta { color: #ffdd66; }
+.free-course-prompt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid rgba(129, 201, 149, 0.24);
+  background: rgba(129, 201, 149, 0.08);
+  border-radius: 10px;
+  color: #dff8ea;
+  font-size: 13px;
+}
+.free-course-prompt > div:first-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.free-course-prompt-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
 .trial-chip.register-stage {
   background: rgba(255, 184, 48, 0.10);
   border: 1px solid rgba(255, 184, 48, 0.18);
@@ -604,6 +640,20 @@
     padding: 3px 7px !important;
     font-size: 10px !important;
     white-space: normal;
+  }
+
+  .free-course-prompt {
+    flex-direction: column;
+    align-items: flex-start;
+    font-size: 11px;
+  }
+
+  .free-course-prompt-actions {
+    width: 100%;
+  }
+
+  .free-course-prompt-actions .btn {
+    flex: 1;
   }
 
   .status-line {
@@ -1028,5 +1078,23 @@
   }
 }
 </style>
+
+<script>
+(function () {
+  const prompt = document.getElementById("free-course-prompt");
+  const close = document.getElementById("free-course-dismiss");
+  if (!prompt || !close) return;
+  close.addEventListener("click", async () => {
+    prompt.remove();
+    try {
+      await fetch("/free-course/dismiss", {
+        method: "POST",
+        cache: "no-store",
+        headers: { "Cache-Control": "no-cache" },
+      });
+    } catch (error) {}
+  });
+})();
+</script>
 
 {% endblock %}

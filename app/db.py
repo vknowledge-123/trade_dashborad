@@ -18,6 +18,9 @@ DEFAULT_COURSE_SETTINGS = {
     "one_year_price": 10000,
     "support_text": "Priority support, live Q&A sessions, and direct mentorship guidance with Owner Amol Charpe.",
     "payment_qr_path": "",
+    "free_course_title": "Free Trading Foundation Course",
+    "free_course_description": "Start with the basics of scanner workflow, risk discipline, and practical market preparation.",
+    "free_course_youtube_url": "",
 }
 
 
@@ -141,6 +144,9 @@ def init_db():
             one_year_price INTEGER NOT NULL,
             support_text TEXT NOT NULL,
             payment_qr_path TEXT,
+            free_course_title TEXT,
+            free_course_description TEXT,
+            free_course_youtube_url TEXT,
             updated_at TEXT NOT NULL
         )
         """
@@ -269,12 +275,21 @@ def init_db():
                 one_year_price INTEGER NOT NULL,
                 support_text TEXT NOT NULL,
                 payment_qr_path TEXT,
+                free_course_title TEXT,
+                free_course_description TEXT,
+                free_course_youtube_url TEXT,
                 updated_at TEXT NOT NULL
             )
             """
         )
     elif "payment_qr_path" not in course_settings_cols:
         cur.execute("ALTER TABLE course_settings ADD COLUMN payment_qr_path TEXT")
+    if course_settings_cols and "free_course_title" not in course_settings_cols:
+        cur.execute("ALTER TABLE course_settings ADD COLUMN free_course_title TEXT")
+    if course_settings_cols and "free_course_description" not in course_settings_cols:
+        cur.execute("ALTER TABLE course_settings ADD COLUMN free_course_description TEXT")
+    if course_settings_cols and "free_course_youtube_url" not in course_settings_cols:
+        cur.execute("ALTER TABLE course_settings ADD COLUMN free_course_youtube_url TEXT")
 
     cur.execute("PRAGMA table_info(academy_videos)")
     academy_video_cols = {row["name"] for row in cur.fetchall()}
@@ -326,8 +341,11 @@ def init_db():
     )
     cur.execute(
         """
-        INSERT INTO course_settings (id, four_month_price, one_year_price, support_text, payment_qr_path, updated_at)
-        VALUES (1, ?, ?, ?, ?, ?)
+        INSERT INTO course_settings (
+            id, four_month_price, one_year_price, support_text, payment_qr_path,
+            free_course_title, free_course_description, free_course_youtube_url, updated_at
+        )
+        VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO NOTHING
         """,
         (
@@ -335,6 +353,9 @@ def init_db():
             DEFAULT_COURSE_SETTINGS["one_year_price"],
             DEFAULT_COURSE_SETTINGS["support_text"],
             DEFAULT_COURSE_SETTINGS["payment_qr_path"],
+            DEFAULT_COURSE_SETTINGS["free_course_title"],
+            DEFAULT_COURSE_SETTINGS["free_course_description"],
+            DEFAULT_COURSE_SETTINGS["free_course_youtube_url"],
             now,
         ),
     )
@@ -672,6 +693,9 @@ def get_course_settings():
         "one_year_price": int(row["one_year_price"]),
         "support_text": row["support_text"],
         "payment_qr_path": row["payment_qr_path"] if "payment_qr_path" in row.keys() else "",
+        "free_course_title": row["free_course_title"] if "free_course_title" in row.keys() and row["free_course_title"] else DEFAULT_COURSE_SETTINGS["free_course_title"],
+        "free_course_description": row["free_course_description"] if "free_course_description" in row.keys() and row["free_course_description"] else DEFAULT_COURSE_SETTINGS["free_course_description"],
+        "free_course_youtube_url": row["free_course_youtube_url"] if "free_course_youtube_url" in row.keys() else "",
         "updated_at": row["updated_at"],
     }
 
@@ -713,6 +737,38 @@ def update_course_payment_qr(payment_qr_path):
             DEFAULT_COURSE_SETTINGS["one_year_price"],
             DEFAULT_COURSE_SETTINGS["support_text"],
             str(payment_qr_path or ""),
+            now,
+        ),
+    )
+    _commit_with_retry(conn)
+    conn.close()
+
+
+def update_free_course_settings(title, description, youtube_url):
+    conn = get_conn()
+    cur = conn.cursor()
+    now = utcnow().isoformat(timespec="seconds")
+    cur.execute(
+        """
+        INSERT INTO course_settings (
+            id, four_month_price, one_year_price, support_text, payment_qr_path,
+            free_course_title, free_course_description, free_course_youtube_url, updated_at
+        )
+        VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            free_course_title = excluded.free_course_title,
+            free_course_description = excluded.free_course_description,
+            free_course_youtube_url = excluded.free_course_youtube_url,
+            updated_at = excluded.updated_at
+        """,
+        (
+            DEFAULT_COURSE_SETTINGS["four_month_price"],
+            DEFAULT_COURSE_SETTINGS["one_year_price"],
+            DEFAULT_COURSE_SETTINGS["support_text"],
+            DEFAULT_COURSE_SETTINGS["payment_qr_path"],
+            str(title or "").strip() or DEFAULT_COURSE_SETTINGS["free_course_title"],
+            str(description or "").strip(),
+            str(youtube_url or "").strip(),
             now,
         ),
     )

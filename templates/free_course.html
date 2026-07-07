@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block content %}
+
+<section class="free-course-shell">
+  <div class="free-course-hero panel">
+    <div class="free-course-copy">
+      <span class="premium-kicker">Free Course</span>
+      <h1>{{ course_settings.free_course_title or 'Free Trading Foundation Course' }}</h1>
+      <p>{{ course_settings.free_course_description or 'Start with the basics of scanner workflow, risk discipline, and practical market preparation.' }}</p>
+      <div class="premium-actions">
+        <a class="btn btn-ghost" href="/dashboard">Back To Dashboard</a>
+        {% if not user and not admin %}
+          <a class="btn btn-primary" href="/register">Create Free Account</a>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="panel free-course-video-panel">
+    {% if course_settings.free_course_youtube_url %}
+      <div class="free-course-video">
+        <iframe
+          src="{{ youtube_embed_url(course_settings.free_course_youtube_url) }}"
+          title="{{ course_settings.free_course_title or 'Free course video' }}"
+          loading="lazy"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+          allowfullscreen></iframe>
+      </div>
+    {% else %}
+      <div class="free-course-empty">
+        <h3>Free course video is being prepared.</h3>
+        <p>Check again soon or contact support for the latest beginner session.</p>
+      </div>
+    {% endif %}
+  </div>
+</section>
+
+<style>
+.free-course-shell {
+  display: grid;
+  gap: 16px;
+}
+.free-course-hero {
+  display: block;
+  padding: clamp(18px, 3vw, 30px);
+}
+.free-course-copy {
+  display: grid;
+  gap: 12px;
+  max-width: 840px;
+}
+.free-course-copy h1 {
+  margin: 0;
+  font-size: clamp(28px, 5vw, 54px);
+  letter-spacing: 0;
+}
+.free-course-copy p {
+  max-width: 780px;
+  color: #b6c4dd;
+  line-height: 1.7;
+}
+.free-course-video-panel {
+  padding: clamp(10px, 2vw, 16px);
+}
+.free-course-video {
+  aspect-ratio: 16 / 9;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 10px;
+  background: #05070d;
+  border: 1px solid rgba(255,255,255,0.08);
+}
+.free-course-video iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+}
+.free-course-empty {
+  padding: 28px 14px;
+  text-align: center;
+  color: #9fb0cc;
+}
+.free-course-empty h3 {
+  margin: 0 0 8px;
+  color: #e8f0fe;
+}
+@media (max-width: 760px) {
+  .free-course-copy h1 {
+    font-size: 28px;
+  }
+  .free-course-video-panel {
+    padding: 8px;
+  }
+}
+</style>
+
+{% endblock %}

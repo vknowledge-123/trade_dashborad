@@ -3,6 +3,7 @@ import io
 import math
 from pathlib import Path
 import threading
+from urllib.parse import parse_qs, urlparse
 
 import pyotp
 import qrcode
@@ -40,6 +41,7 @@ from app.db import (
     create_inquiry,
     get_course_settings,
     update_course_settings,
+    update_free_course_settings,
     update_course_payment_qr,
     add_academy_video,
     delete_academy_video,
@@ -261,8 +263,32 @@ def format_crores(value):
     return f"{number / 10_000_000:.2f} Cr"
 
 
+def youtube_embed_url(url):
+    raw = str(url or "").strip()
+    if not raw:
+        return ""
+    try:
+        parsed = urlparse(raw)
+    except Exception:
+        return raw
+    host = parsed.netloc.lower()
+    video_id = ""
+    if "youtu.be" in host:
+        video_id = parsed.path.strip("/").split("/")[0]
+    elif "youtube.com" in host:
+        if parsed.path.startswith("/embed/"):
+            return raw
+        video_id = parse_qs(parsed.query).get("v", [""])[0]
+        if not video_id and parsed.path.startswith("/shorts/"):
+            video_id = parsed.path.strip("/").split("/")[1]
+    if video_id:
+        return f"https://www.youtube.com/embed/{video_id}"
+    return raw
+
+
 templates.env.globals["format_compact_volume"] = format_compact_volume
 templates.env.globals["format_crores"] = format_crores
+templates.env.globals["youtube_embed_url"] = youtube_embed_url
 
 @app.on_event("startup")
 def on_startup():
@@ -443,6 +469,15 @@ def guest_dashboard_status(request: Request):
     }
 
 
+def should_show_free_course_prompt(request: Request, user_row=None, admin_row=None):
+    if admin_row:
+        return False
+    if user_row and get_active_license_for_user(user_row["id"]):
+        return False
+    today = utcnow().date().isoformat()
+    return request.session.get("free_course_prompt_dismissed_on") != today
+
+
 def start_engine_in_background(api_key: str, access_token: str):
     thread = threading.Thread(
         target=engine.start,
@@ -533,6 +568,7 @@ def dashboard(request: Request):
         guest_trial = guest_dashboard_status(request)
     snapshot = engine.get_snapshot()
     trial = trial_status(user) if user else None
+    course_settings = get_course_settings()
 
     return templates.TemplateResponse(
         request,
@@ -544,8 +580,33 @@ def dashboard(request: Request):
             "guest_trial": guest_trial,
             "snapshot": snapshot,
             "public_mode": True if not user and not admin else False,
+            "course_settings": course_settings,
+            "show_free_course_prompt": should_show_free_course_prompt(request, user_row=user, admin_row=admin),
         },
     )
+
+
+@app.get("/free-course", response_class=HTMLResponse)
+def free_course(request: Request):
+    user = current_user(request)
+    admin = current_admin(request)
+    return templates.TemplateResponse(
+        request,
+        "free_course.html",
+        {
+            "title": "Free Course",
+            "user": user,
+            "admin": admin,
+            "public_mode": True if not user and not admin else False,
+            "course_settings": get_course_settings(),
+        },
+    )
+
+
+@app.post("/free-course/dismiss")
+def free_course_dismiss(request: Request):
+    request.session["free_course_prompt_dismissed_on"] = utcnow().date().isoformat()
+    return JSONResponse({"ok": True})
 
 
 @app.get("/relative-rotation", response_class=HTMLResponse)
@@ -1364,6 +1425,21 @@ def admin_course_settings(
 
     update_course_settings(four_month_price, one_year_price, support_text)
     return RedirectResponse(url="/admin", status_code=302)
+
+
+@app.post("/admin/free-course/settings")
+def admin_free_course_settings(
+    request: Request,
+    free_course_title: str = Form(...),
+    free_course_description: str = Form(""),
+    free_course_youtube_url: str = Form(""),
+):
+    admin = require_admin(request)
+    if not admin:
+        return RedirectResponse(url="/admin/login", status_code=302)
+
+    update_free_course_settings(free_course_title, free_course_description, free_course_youtube_url)
+    return RedirectResponse(url="/admin?free_course=saved", status_code=302)
 
 
 @app.post("/admin/course/payment-qr")

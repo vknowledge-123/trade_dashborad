@@ -39,6 +39,9 @@
           <span>Low</span>
           <span>Sector</span>
           <span>Volume</span>
+          <span>9:15 Vol</span>
+          <span>Vol x</span>
+          <span>9:15 TO</span>
           <span>Change %</span>
           <span>Chart</span>
         </div>
@@ -46,21 +49,24 @@
           <div class="table-row openx-row" data-symbol="{{ row.symbol }}">
             <span class="mono">{{ loop.index }}</span>
             <span class="cell-symbol">
-              <span class="cell-symbol-main">{{ row.symbol }}{% if row.is_fno %} <span class="fno-tag">F&amp;O</span>{% endif %}</span>
+              <span class="cell-symbol-main">{{ row.symbol }}{% if row.is_fno %} <span class="fno-tag">F&amp;O</span>{% endif %}{% if row.is_nifty50 %} <span class="nifty50-tag">Nifty 50</span>{% endif %}</span>
               <span class="sector-stock-name">{{ row.name }}</span>
             </span>
             <span class="mono">{{ row.price }}</span>
             <span class="mono">{{ row.day_open or '-' }}</span>
             <span class="mono">{{ row.day_low or '-' }}</span>
             <span class="sector-meta">
-              <span>{{ row.sector_name or row.sector or '-' }}</span>
-              {% if row.sector_change is not none %}
+              <span>{{ row.sector_name or row.sector or 'No sector' }}</span>
+              {% if (row.sector_name or row.sector) and row.sector_change is not none %}
                 <small class="{{ 'positive' if row.sector_change >= 0 else 'negative' }}">{{ '+' if row.sector_change >= 0 else '' }}{{ row.sector_change }}%{% if row.sector_rank %} - Rank {{ row.sector_rank }}{% endif %}</small>
               {% else %}
-                <small>-</small>
+                <small>No sector</small>
               {% endif %}
             </span>
             <span class="mono">{{ format_compact_volume(row.volume if row.volume is defined else none) }}</span>
+            <span class="mono">{{ format_compact_volume(row.opening_candle_volume if row.opening_candle_volume is defined else none) }}</span>
+            <span class="mono">{{ row.opening_volume_sma_multiplier ~ 'x' if row.opening_volume_sma_multiplier else '-' }}</span>
+            <span class="mono">{{ format_crores(row.opening_turnover if row.opening_turnover is defined else none) }}</span>
             <span class="positive mono">+{{ row.change }}%</span>
             <a class="tv-link" href="https://www.tradingview.com/chart/?symbol=NSE%3A{{ row.symbol | urlencode }}" target="_blank" rel="noopener noreferrer">TradingView</a>
           </div>
@@ -85,6 +91,9 @@
           <span>High</span>
           <span>Sector</span>
           <span>Volume</span>
+          <span>9:15 Vol</span>
+          <span>Vol x</span>
+          <span>9:15 TO</span>
           <span>Change %</span>
           <span>Chart</span>
         </div>
@@ -92,21 +101,24 @@
           <div class="table-row openx-row" data-symbol="{{ row.symbol }}">
             <span class="mono">{{ loop.index }}</span>
             <span class="cell-symbol">
-              <span class="cell-symbol-main">{{ row.symbol }}{% if row.is_fno %} <span class="fno-tag">F&amp;O</span>{% endif %}</span>
+              <span class="cell-symbol-main">{{ row.symbol }}{% if row.is_fno %} <span class="fno-tag">F&amp;O</span>{% endif %}{% if row.is_nifty50 %} <span class="nifty50-tag">Nifty 50</span>{% endif %}</span>
               <span class="sector-stock-name">{{ row.name }}</span>
             </span>
             <span class="mono">{{ row.price }}</span>
             <span class="mono">{{ row.day_open or '-' }}</span>
             <span class="mono">{{ row.day_high or '-' }}</span>
             <span class="sector-meta">
-              <span>{{ row.sector_name or row.sector or '-' }}</span>
-              {% if row.sector_change is not none %}
+              <span>{{ row.sector_name or row.sector or 'No sector' }}</span>
+              {% if (row.sector_name or row.sector) and row.sector_change is not none %}
                 <small class="{{ 'positive' if row.sector_change >= 0 else 'negative' }}">{{ '+' if row.sector_change >= 0 else '' }}{{ row.sector_change }}%{% if row.sector_rank %} - Rank {{ row.sector_rank }}{% endif %}</small>
               {% else %}
-                <small>-</small>
+                <small>No sector</small>
               {% endif %}
             </span>
             <span class="mono">{{ format_compact_volume(row.volume if row.volume is defined else none) }}</span>
+            <span class="mono">{{ format_compact_volume(row.opening_candle_volume if row.opening_candle_volume is defined else none) }}</span>
+            <span class="mono">{{ row.opening_volume_sma_multiplier ~ 'x' if row.opening_volume_sma_multiplier else '-' }}</span>
+            <span class="mono">{{ format_crores(row.opening_turnover if row.opening_turnover is defined else none) }}</span>
             <span class="negative mono">{{ row.change }}%</span>
             <a class="tv-link" href="https://www.tradingview.com/chart/?symbol=NSE%3A{{ row.symbol | urlencode }}" target="_blank" rel="noopener noreferrer">TradingView</a>
           </div>
@@ -151,7 +163,20 @@
   gap: 14px;
 }
 .openx-row {
-  grid-template-columns: 0.34fr 1.08fr 0.62fr 0.62fr 0.62fr 0.95fr 0.72fr 0.68fr auto;
+  grid-template-columns: 0.34fr 1.12fr 0.58fr 0.58fr 0.58fr 0.9fr 0.64fr 0.64fr 0.48fr 0.68fr 0.62fr auto;
+  align-items: center;
+}
+.nifty50-tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  border: 1px solid rgba(138, 180, 248, 0.26);
+  color: #d8e7ff;
+  background: rgba(138, 180, 248, 0.1);
+  font-size: 10px;
+  font-weight: 800;
 }
 .openx-empty-row span:first-child {
   grid-column: 1 / -1;
@@ -178,7 +203,10 @@
   .openx-row:not(.table-head) > span:nth-child(5)::before { content: "Extreme "; color: #6b7fa3; }
   .openx-row:not(.table-head) > span:nth-child(6)::before { content: "Sector "; color: #6b7fa3; }
   .openx-row:not(.table-head) > span:nth-child(7)::before { content: "Vol "; color: #6b7fa3; }
-  .openx-row:not(.table-head) > span:nth-child(8)::before { content: "Change "; color: #6b7fa3; }
+  .openx-row:not(.table-head) > span:nth-child(8)::before { content: "9:15 Vol "; color: #6b7fa3; }
+  .openx-row:not(.table-head) > span:nth-child(9)::before { content: "Vol x "; color: #6b7fa3; }
+  .openx-row:not(.table-head) > span:nth-child(10)::before { content: "9:15 TO "; color: #6b7fa3; }
+  .openx-row:not(.table-head) > span:nth-child(11)::before { content: "Change "; color: #6b7fa3; }
 }
 </style>
 
@@ -208,19 +236,29 @@
     if (Math.abs(number) >= 1_000) return `${(number / 1_000).toFixed(1)}K`;
     return Math.trunc(number).toString();
   };
+  const formatCrores = (value) => {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return "-";
+    return `${(number / 10_000_000).toFixed(2)} Cr`;
+  };
+  const multiplier = (value) => {
+    const number = Number(value);
+    return Number.isFinite(number) ? `${number.toFixed(2)}x` : "-";
+  };
   const rowHtml = (row, index, type) => {
     const extreme = type === "low" ? row.day_low : row.day_high;
     const change = Number(row.change);
     const sectorChange = Number(row.sector_change);
-    const sectorName = row.sector_name || row.sector || "-";
-    const sectorHtml = Number.isFinite(sectorChange)
+    const sectorName = row.sector_name || row.sector || "No sector";
+    const hasSector = Boolean(row.sector_name || row.sector);
+    const sectorHtml = hasSector && Number.isFinite(sectorChange)
       ? `<span class="sector-meta"><span>${escapeHtml(sectorName)}</span><small class="${sectorChange >= 0 ? "positive" : "negative"}">${sectorChange >= 0 ? "+" : ""}${sectorChange}%${row.sector_rank ? ` - Rank ${escapeHtml(row.sector_rank)}` : ""}</small></span>`
-      : `<span class="sector-meta"><span>${escapeHtml(sectorName)}</span><small>-</small></span>`;
+      : `<span class="sector-meta"><span>${escapeHtml(sectorName)}</span><small>No sector</small></span>`;
     return `
       <div class="table-row openx-row" data-symbol="${escapeHtml(row.symbol)}">
         <span class="mono">${index + 1}</span>
         <span class="cell-symbol">
-          <span class="cell-symbol-main">${escapeHtml(row.symbol)}${row.is_fno ? ' <span class="fno-tag">F&O</span>' : ""}</span>
+          <span class="cell-symbol-main">${escapeHtml(row.symbol)}${row.is_fno ? ' <span class="fno-tag">F&O</span>' : ""}${row.is_nifty50 ? ' <span class="nifty50-tag">Nifty 50</span>' : ""}</span>
           <span class="sector-stock-name">${escapeHtml(row.name || "")}</span>
         </span>
         <span class="mono">${escapeHtml(row.price ?? "-")}</span>
@@ -228,12 +266,15 @@
         <span class="mono">${escapeHtml(extreme ?? "-")}</span>
         ${sectorHtml}
         <span class="mono">${formatVolume(row.volume)}</span>
+        <span class="mono">${formatVolume(row.opening_candle_volume)}</span>
+        <span class="mono">${multiplier(row.opening_volume_sma_multiplier)}</span>
+        <span class="mono">${formatCrores(row.opening_turnover)}</span>
         <span class="${change >= 0 ? "positive" : "negative"} mono">${change >= 0 ? "+" : ""}${Number.isFinite(change) ? change : "-"}%</span>
         <a class="tv-link" href="${tvUrl(row.symbol)}" target="_blank" rel="noopener noreferrer">TradingView</a>
       </div>
     `;
   };
-  const emptyRow = (message) => `<div class="table-row openx-row openx-empty-row"><span>${message}</span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>`;
+  const emptyRow = (message) => `<div class="table-row openx-row openx-empty-row"><span>${message}</span>${"<span></span>".repeat(11)}</div>`;
   const load = async () => {
     try {
       const response = await fetch(`/api/open-extreme-scanner?ts=${Date.now()}`, { cache: "no-store" });

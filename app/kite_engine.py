@@ -51,6 +51,17 @@ ACCELERATION_VOLUME_LOOKBACK_SESSIONS = 10
 ACCELERATION_HIT_TTL_SECONDS = 120
 DHAN_SCRIP_MASTER_MAX_CACHE_DAYS = 7
 NSE_INTRADAY_SESSION_MINUTES = 375
+OPENING_CANDLE_TIME = dtime(9, 15)
+NIFTY_50_SYMBOLS = {
+    "INFY", "TECHM", "HCLTECH", "TITAN", "SBILIFE", "TCS", "ETERNAL", "JIOFIN",
+    "EICHERMOT", "SHRIRAMFIN", "BHARTIARTL", "BAJAJ-AUTO", "HDFCBANK", "JSWSTEEL",
+    "BAJFINANCE", "BAJAJFINSV", "HDFCLIFE", "MARUTI", "SBIN", "AXISBANK",
+    "SUNPHARMA", "ULTRACEMCO", "WIPRO", "POWERGRID", "ADANIPORTS", "MAXHEALTH",
+    "HINDUNILVR", "ONGC", "DRREDDY", "ICICIBANK", "ITC", "M&M", "NESTLEIND",
+    "NTPC", "KOTAKBANK", "CIPLA", "TATASTEEL", "INDIGO", "ASIANPAINT",
+    "APOLLOHOSP", "RELIANCE", "TATACONSUM", "GRASIM", "HINDALCO", "BEL", "LT",
+    "TMPV", "ADANIENT", "COALINDIA", "TRENT",
+}
 HTTP_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                   "(KHTML, like Gecko) Chrome/135.0 Safari/537.36",
@@ -378,8 +389,14 @@ class DhanClient:
         )
 
     def historical_data(self, security_id, from_date, to_date, interval):
-        from_value = from_date.date().isoformat() if hasattr(from_date, "date") else str(from_date)
-        to_value = to_date.date().isoformat() if hasattr(to_date, "date") else str(to_date)
+        interval = str(interval or "day").lower()
+        is_intraday = interval not in {"day", "1day", "daily"}
+        if is_intraday:
+            from_value = from_date.strftime("%Y-%m-%d %H:%M:%S") if hasattr(from_date, "strftime") else str(from_date)
+            to_value = to_date.strftime("%Y-%m-%d %H:%M:%S") if hasattr(to_date, "strftime") else str(to_date)
+        else:
+            from_value = from_date.date().isoformat() if hasattr(from_date, "date") else str(from_date)
+            to_value = to_date.date().isoformat() if hasattr(to_date, "date") else str(to_date)
         segment = "NSE_EQ"
         instrument = "EQUITY"
         if isinstance(security_id, tuple):
@@ -393,7 +410,12 @@ class DhanClient:
             "fromDate": from_value,
             "toDate": to_value,
         }
-        data = self._post("/charts/historical", payload)
+        path = "/charts/historical"
+        if is_intraday:
+            payload.pop("expiryCode", None)
+            payload["interval"] = "1" if interval in {"minute", "1minute", "1m"} else interval
+            path = "/charts/intraday"
+        data = self._post(path, payload)
         return self._candles_from_dhan_response(data)
 
     def _candles_from_dhan_response(self, data):
@@ -585,6 +607,9 @@ class MarketEngine:
         self.acceleration_closes = defaultdict(dict)
         self.acceleration_hits = defaultdict(list)
         self.acceleration_volume_sma_cache = {}
+        self.opening_candle_cache = {}
+        self.opening_candle_lock = threading.Lock()
+        self.opening_candle_thread = None
         self.swing_scanner_lock = threading.Lock()
         self.swing_scanner_thread = None
         self.swing_scanner_status = {
@@ -866,6 +891,15 @@ class MarketEngine:
         thread.start()
         return thread
 
+    def _ensure_dhan_universe_ready_for_cache(self):
+        if self.broker != "dhan" or not self.kite:
+            return {"required": False, "ready": True, "rebuilt": False}
+        restored = self._has_dhan_universe_ready() or self._restore_dhan_universe_cache(self.sector_names)
+        if restored and self._has_dhan_universe_ready():
+            return {"required": True, "ready": True, "rebuilt": False}
+        self.build_universe(self.kite, self.sector_names or [], warm_dashboard=False)
+        return {"required": True, "ready": self._has_dhan_universe_ready(), "rebuilt": True}
+
     def _chunked(self, items, size):
         for idx in range(0, len(items), size):
             yield items[idx:idx + size]
@@ -1019,21 +1053,47 @@ class MarketEngine:
             latest_rows = {symbol: dict(row) for symbol, row in self.latest.items()}
         if not sector_rows and include_fallback:
             sector_rows = self._sector_rows_from_stock_rows(latest_rows)
-        ranked = sorted(
-            [row for row in sector_rows if row.get("change") is not None],
+        valid_rows = [row for row in sector_rows if row.get("sector") and row.get("change") is not None]
+        gainers = sorted(
+            [row for row in valid_rows if float(row.get("change") or 0) > 0],
             key=lambda item: float(item.get("change") or 0),
             reverse=True,
         )
-        return {
-            str(row.get("sector") or "").upper(): {
+        losers = sorted(
+            [row for row in valid_rows if float(row.get("change") or 0) < 0],
+            key=lambda item: float(item.get("change") or 0),
+        )
+        flat_ranked = sorted(valid_rows, key=lambda item: float(item.get("change") or 0), reverse=True)
+        ranking_map = {}
+        for idx, row in enumerate(gainers, start=1):
+            ranking_map[str(row.get("sector") or "").upper()] = {
                 "sector": row.get("sector"),
                 "sector_change": round(float(row.get("change") or 0), 2),
                 "sector_rank": idx,
-                "sector_count": len(ranked),
+                "sector_count": len(gainers),
+                "sector_side": "gainer",
             }
-            for idx, row in enumerate(ranked, start=1)
-            if row.get("sector")
-        }
+        for idx, row in enumerate(losers, start=1):
+            ranking_map[str(row.get("sector") or "").upper()] = {
+                "sector": row.get("sector"),
+                "sector_change": round(float(row.get("change") or 0), 2),
+                "sector_rank": idx,
+                "sector_count": len(losers),
+                "sector_side": "loser",
+            }
+        for idx, row in enumerate(flat_ranked, start=1):
+            key = str(row.get("sector") or "").upper()
+            ranking_map.setdefault(
+                key,
+                {
+                    "sector": row.get("sector"),
+                    "sector_change": round(float(row.get("change") or 0), 2),
+                    "sector_rank": idx,
+                    "sector_count": len(flat_ranked),
+                    "sector_side": "flat",
+                },
+            )
+        return ranking_map
 
     def _sector_context_for_symbol(self, symbol, latest=None, rankings=None):
         symbol = str(symbol or "").upper()
@@ -1058,6 +1118,7 @@ class MarketEngine:
                 "sector_change": context.get("sector_change"),
                 "sector_rank": context.get("sector_rank"),
                 "sector_count": context.get("sector_count"),
+                "sector_side": context.get("sector_side"),
             }
         sector_name = sectors[0]
         return {
@@ -1513,6 +1574,170 @@ class MarketEngine:
                 count += 1
         return count
 
+    def _candle_datetime(self, candle):
+        if not isinstance(candle, dict):
+            return None
+        value = candle.get("date") or candle.get("time") or candle.get("timestamp")
+        if isinstance(value, datetime):
+            return value.astimezone(IST) if value.tzinfo else value.replace(tzinfo=IST)
+        if isinstance(value, (int, float)):
+            return datetime.fromtimestamp(int(value), tz=IST)
+        if isinstance(value, str) and value:
+            try:
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                return parsed.astimezone(IST) if parsed.tzinfo else parsed.replace(tzinfo=IST)
+            except ValueError:
+                return None
+        return None
+
+    def _fetch_intraday_candles(self, symbol, from_dt, to_dt, interval=1):
+        if not self.kite or not symbol:
+            return []
+        token = self.symbol_to_token.get(symbol)
+        if not token:
+            return []
+        if self.broker == "dhan" and self._is_historical_rate_limited():
+            return []
+        with self.historical_fetch_lock:
+            elapsed = time.monotonic() - self.last_historical_fetch_ts
+            if elapsed < HISTORICAL_DAY_REQUEST_DELAY_SECONDS:
+                time.sleep(HISTORICAL_DAY_REQUEST_DELAY_SECONDS - elapsed)
+            try:
+                request_token = token
+                request_interval = "minute"
+                if self.broker == "dhan":
+                    request_token = (
+                        self.dhan_security_to_segment.get(int(token), "NSE_EQ"),
+                        str(token),
+                        self.dhan_security_to_instrument.get(int(token), "EQUITY"),
+                    )
+                    request_interval = str(int(interval or 1))
+                candles = self.kite.historical_data(request_token, from_dt, to_dt, request_interval)
+            except DhanRateLimitError as exc:
+                self._mark_historical_rate_limited(exc)
+                self.last_historical_fetch_ts = time.monotonic()
+                return []
+            except Exception as exc:
+                self.last_error = str(exc)
+                self.last_historical_fetch_ts = time.monotonic()
+                return []
+            self.last_historical_fetch_ts = time.monotonic()
+            return candles or []
+
+    def _opening_bucket_key(self, session_date=None):
+        session_date = session_date or datetime.now(IST).date()
+        opening_dt = datetime.combine(session_date, OPENING_CANDLE_TIME, tzinfo=IST)
+        return opening_dt.isoformat()
+
+    def _opening_candle_from_live_bucket(self, symbol, session_date):
+        bucket = self._opening_bucket_key(session_date)
+        with self.acceleration_lock:
+            candle = dict((self.acceleration_closes.get(symbol) or {}).get((1, bucket)) or {})
+        volume = self._coerce_volume(candle.get("candle_volume"))
+        close = self._float_or_none(candle.get("close"))
+        if volume in (None, 0) or close in (None, 0):
+            return None
+        return {
+            "date": bucket,
+            "open": candle.get("open"),
+            "high": candle.get("high"),
+            "low": candle.get("low"),
+            "close": close,
+            "volume": volume,
+        }
+
+    def _opening_candle_for_symbol(self, symbol, allow_fetch=True):
+        symbol = str(symbol or "").upper()
+        if not symbol:
+            return None
+        session_date = datetime.now(IST).date()
+        cache_key = f"opening-v3:{self._current_broker()}:{session_date.isoformat()}:{symbol}"
+        cached = self.opening_candle_cache.get(cache_key)
+        if isinstance(cached, dict):
+            return cached
+        live_candle = self._opening_candle_from_live_bucket(symbol, session_date)
+        if live_candle:
+            self.opening_candle_cache[cache_key] = live_candle
+            return live_candle
+        if not allow_fetch:
+            return None
+        from_dt = datetime.combine(session_date, OPENING_CANDLE_TIME, tzinfo=IST)
+        if self.broker == "dhan":
+            from_dt -= timedelta(minutes=1)
+        to_dt = from_dt + timedelta(minutes=3)
+        candles = self._fetch_intraday_candles(symbol, from_dt, to_dt, interval=1)
+        accepted_times = {OPENING_CANDLE_TIME}
+        if self.broker == "dhan":
+            accepted_times.add((datetime.combine(session_date, OPENING_CANDLE_TIME) - timedelta(minutes=1)).time())
+        for candle in candles:
+            candle_dt = self._candle_datetime(candle)
+            if candle_dt and candle_dt.astimezone(IST).time().replace(second=0, microsecond=0) in accepted_times:
+                opening = dict(candle)
+                self.opening_candle_cache[cache_key] = opening
+                return opening
+        return None
+
+    def _valid_opening_candle(self, candle, reference_price=None):
+        if not isinstance(candle, dict):
+            return False
+        close = self._float_or_none(candle.get("close"))
+        high = self._float_or_none(candle.get("high"))
+        low = self._float_or_none(candle.get("low"))
+        open_price = self._float_or_none(candle.get("open"))
+        if close in (None, 0):
+            return False
+        if high not in (None, 0) and low not in (None, 0) and high < low:
+            return False
+        reference = self._float_or_none(reference_price)
+        if reference not in (None, 0):
+            for value in (open_price, high, low, close):
+                if value in (None, 0):
+                    continue
+                ratio = max(value / reference, reference / value)
+                if ratio > 2:
+                    return False
+        return True
+
+    def _opening_candle_context(self, symbol, reference_price=None, allow_fetch=True):
+        candle = self._opening_candle_for_symbol(symbol, allow_fetch=allow_fetch)
+        if candle and not self._valid_opening_candle(candle, reference_price=reference_price):
+            candle = None
+        volume = self._candle_volume(candle) if candle else None
+        close = self._float_or_none((candle or {}).get("close"))
+        volume_sma = self._acceleration_volume_sma(symbol)
+        multiplier = None
+        if volume not in (None, 0) and volume_sma not in (None, 0):
+            multiplier = volume / volume_sma
+        turnover = self._calculate_turnover(close, volume) if volume not in (None, 0, 1) else None
+        return {
+            "opening_candle_volume": int(volume) if volume is not None else None,
+            "opening_candle_close": round(close, 2) if close is not None else None,
+            "opening_volume_sma": round(volume_sma, 2) if volume_sma is not None else None,
+            "opening_volume_sma_multiplier": round(multiplier, 2) if multiplier is not None else None,
+            "opening_turnover": turnover,
+        }
+
+    def _ensure_opening_candle_background_refresh(self, symbols):
+        symbols = [str(symbol or "").upper() for symbol in symbols or [] if symbol]
+        symbols = list(dict.fromkeys(symbols))
+        if not symbols or not self.kite:
+            return False
+        with self.opening_candle_lock:
+            if self.opening_candle_thread and self.opening_candle_thread.is_alive():
+                return False
+            thread = threading.Thread(target=self._refresh_opening_candles_background, args=(symbols,), daemon=True)
+            self.opening_candle_thread = thread
+            thread.start()
+            return True
+
+    def _refresh_opening_candles_background(self, symbols):
+        try:
+            for symbol in symbols[:40]:
+                self._opening_candle_for_symbol(symbol, allow_fetch=True)
+        finally:
+            with self.opening_candle_lock:
+                self.opening_candle_thread = None
+
     def _acceleration_hit_day_key(self, moment=None):
         moment = moment or datetime.now(IST)
         if moment.tzinfo is None:
@@ -1800,6 +2025,7 @@ class MarketEngine:
                 enriched["open_equals_high"] = True
             enriched = self._apply_open_extreme_flags(enriched)
             enriched.update(self._sector_context_for_symbol(symbol, latest=enriched, rankings=rankings))
+            enriched["is_nifty50"] = symbol in NIFTY_50_SYMBOLS
             prepared.append(enriched)
 
         open_low = sorted(
@@ -1817,6 +2043,18 @@ class MarketEngine:
             ],
             key=lambda item: float(item.get("change") or 0),
         )[:20]
+        missing_opening_candles = []
+        for row in open_low + open_high:
+            opening_context = self._opening_candle_context(
+                row.get("symbol"),
+                reference_price=row.get("price"),
+                allow_fetch=False,
+            )
+            row.update(opening_context)
+            if opening_context.get("opening_candle_volume") is None:
+                missing_opening_candles.append(row.get("symbol"))
+        if missing_opening_candles:
+            self._ensure_opening_candle_background_refresh(missing_opening_candles)
         return {
             "open_low_gainers": open_low,
             "open_high_losers": open_high,
@@ -2725,6 +2963,21 @@ class MarketEngine:
         self._save_previous_day_badges_cache()
         return change
 
+    def _valid_previous_day_levels(self, levels, price=None):
+        if not isinstance(levels, dict):
+            return False
+        high = self._float_or_none(levels.get("high"))
+        low = self._float_or_none(levels.get("low"))
+        if high in (None, 0) or low in (None, 0) or high < low:
+            return False
+        current_price = self._float_or_none(price)
+        if current_price not in (None, 0):
+            max_level = max(high, low)
+            min_level = min(high, low)
+            if max_level / current_price > 5 or current_price / min_level > 5:
+                return False
+        return True
+
     def _get_previous_day_levels(self, symbol):
         symbol = (symbol or "").upper()
         if not symbol:
@@ -2732,9 +2985,14 @@ class MarketEngine:
         self._restore_previous_day_levels_cache()
         cache_marker = self._completed_session_cache_marker()
         cached = self.previous_day_levels_cache.get(symbol)
-        if cached and cached.get("cache_marker") == cache_marker and self._payload_matches_broker(cached):
+        if (
+            cached
+            and cached.get("cache_marker") == cache_marker
+            and self._payload_matches_broker(cached)
+            and self._valid_previous_day_levels(cached)
+        ):
             return cached
-        cached = cached if cached and self._payload_matches_broker(cached) else None
+        cached = cached if cached and self._payload_matches_broker(cached) and self._valid_previous_day_levels(cached) else None
         token = self.symbol_to_token.get(symbol)
         if not token or not self.kite:
             return cached
@@ -2775,6 +3033,8 @@ class MarketEngine:
             "close": round(float(close), 2) if close not in (None, 0) else None,
             "date": self._format_candle_date(candle),
         }
+        if not self._valid_previous_day_levels(levels):
+            return cached
         self.previous_day_levels_cache[symbol] = levels
         self._save_previous_day_levels_cache()
         return levels
@@ -2903,6 +3163,10 @@ class MarketEngine:
             price = row.get("price")
             if price in (None, 0):
                 continue
+            if not self._valid_previous_day_levels(levels, price=price):
+                self.previous_day_levels_cache.pop(symbol, None)
+                missing_levels += 1
+                continue
             base = {
                 "symbol": symbol,
                 "name": row.get("name") or self.symbol_to_name.get(symbol, symbol),
@@ -2961,8 +3225,36 @@ class MarketEngine:
             "error": None if scanner_rows else self.last_error,
         }
 
+    def _sanitize_pdh_pdl_payload(self, payload):
+        if not isinstance(payload, dict):
+            return payload
+        sanitized = dict(payload)
+
+        def valid_row(row):
+            if not isinstance(row, dict):
+                return False
+            price = row.get("price")
+            levels = {
+                "high": row.get("previous_high"),
+                "low": row.get("previous_low"),
+            }
+            return self._valid_previous_day_levels(levels, price=price)
+
+        rows = [dict(row) for row in sanitized.get("rows") or [] if valid_row(row)]
+        valid_symbols = {row.get("symbol") for row in rows}
+        sanitized["rows"] = rows
+        sanitized["pdh_breaks"] = [
+            dict(row) for row in sanitized.get("pdh_breaks") or []
+            if valid_row(row) and row.get("symbol") in valid_symbols
+        ]
+        sanitized["pdl_breaks"] = [
+            dict(row) for row in sanitized.get("pdl_breaks") or []
+            if valid_row(row) and row.get("symbol") in valid_symbols
+        ]
+        return sanitized
+
     def _apply_scanner_filters(self, payload, level="all", side="all", min_pct=None, max_pct=None):
-        filtered = dict(payload or {})
+        filtered = dict(self._sanitize_pdh_pdl_payload(payload) or {})
         rows = list(filtered.get("rows") or [])
         level = (level or "all").lower()
         side = (side or "all").lower()
@@ -2996,7 +3288,7 @@ class MarketEngine:
         return filtered
 
     def get_pdh_pdl_scanner(self, level="all", side="all", min_pct=None, max_pct=None, cached_only=True):
-        payload = self._build_pdh_pdl_scanner_payload()
+        payload = self._sanitize_pdh_pdl_payload(self._build_pdh_pdl_scanner_payload())
         has_live_rows = bool(payload.get("rows"))
         missing_levels = int(payload.get("missing_levels") or 0)
         if (not has_live_rows or missing_levels) and self.kite:
@@ -3004,7 +3296,7 @@ class MarketEngine:
         if cached_only and (not has_live_rows or missing_levels):
             cached = self._cached_scanner_payload()
             if cached and cached.get("rows"):
-                payload = dict(cached)
+                payload = self._sanitize_pdh_pdl_payload(cached)
                 payload["cache_pending"] = True
                 payload["cache_stale"] = True
                 payload["market_open"] = self._is_market_open()
@@ -4667,6 +4959,15 @@ class MarketEngine:
             market_open_ready=False,
         )
         try:
+            universe_summary = self._ensure_dhan_universe_ready_for_cache()
+            if universe_summary.get("required"):
+                self._update_history_cache_status(
+                    message=(
+                        "Dhan universe cache ready; caching previous close, volume baselines and scanner history..."
+                        if universe_summary.get("ready")
+                        else "Dhan universe cache is not ready; continuing with available symbols..."
+                    )
+                )
             stock_summary = self._warm_market_open_stock_cache(cache_marker, force=force)
             rrg_payload = self._warm_relative_rotation_graph_cache(cache_marker, force=force)
             self._update_history_cache_status(
@@ -4684,7 +4985,9 @@ class MarketEngine:
                 processed=total,
                 total=total,
                 message=(
-                    f"Premarket sync ready: cached {stock_summary['previous_close_updated']} previous closes, "
+                    f"Premarket sync ready: "
+                    f"{'Dhan universe ready, ' if universe_summary.get('required') and universe_summary.get('ready') else ''}"
+                    f"cached {stock_summary['previous_close_updated']} previous closes, "
                     f"{stock_summary['badge_updated']} badge rows, {stock_summary['volume_updated']} volume baselines and "
                     f"{len(rrg_payload.get('items') or [])} RRG sectors, "
                     f"{len(swing_payload.get('rows') or [])} swing rows for {cache_marker}."
