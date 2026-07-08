@@ -1319,7 +1319,7 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertEqual(rows[0]["repeat_count"], 2)
         self.assertEqual(rows[1]["repeat_count"], 2)
 
-    def test_acceleration_hit_expires_after_two_minutes_unless_kept(self):
+    def test_acceleration_hit_expires_after_ten_minutes_unless_kept(self):
         engine = MarketEngine(redis_client=None)
         engine._restore_acceleration_hits_cache = lambda: None
         engine._save_acceleration_hits_cache = lambda: None
@@ -1337,11 +1337,11 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         }
 
         engine._remember_acceleration_hit(row, min_gain=0.5, now=now)
-        active_rows = engine._acceleration_hits_for_day(timeframe=1, min_gain=0.5, now=now + timedelta(seconds=119))
-        expired_rows = engine._acceleration_hits_for_day(timeframe=1, min_gain=0.5, now=now + timedelta(seconds=121))
+        active_rows = engine._acceleration_hits_for_day(timeframe=1, min_gain=0.5, now=now + timedelta(seconds=599))
+        expired_rows = engine._acceleration_hits_for_day(timeframe=1, min_gain=0.5, now=now + timedelta(seconds=601))
 
         self.assertEqual(len(active_rows), 1)
-        self.assertEqual(active_rows[0]["ttl_seconds"], 120)
+        self.assertEqual(active_rows[0]["ttl_seconds"], 600)
         self.assertEqual(expired_rows, [])
 
     def test_acceleration_hit_keep_and_delete_actions(self):
@@ -2247,6 +2247,118 @@ class MarketSnapshotApiIntegrationTests(unittest.TestCase):
         self.assertIn("Class Playlist", response.text)
         self.assertIn("Scanner Basics", response.text)
         self.assertIn("https://www.youtube.com/embed/dQw4w9WgXcQ", response.text)
+
+    def test_ione_power_api_hides_open_extreme_details_for_non_admin(self):
+        with patch.object(
+            main_module.engine,
+            "get_open_extreme_scanner",
+            return_value={
+                "open_low_gainers": [
+                    {
+                        "symbol": "INFY",
+                        "name": "Infosys",
+                        "opening_turnover": 115000000,
+                        "opening_volume_sma_multiplier": 2.6,
+                        "sector_rank": 1,
+                        "first_hit_at": "2026-07-07T09:16:00+05:30",
+                        "day_open": 1000,
+                        "day_low": 1000,
+                    }
+                ],
+                "open_high_losers": [],
+                "updated_at": "2026-07-07T09:16:00+05:30",
+                "market_open": True,
+                "error": None,
+            },
+        ):
+            with TestClient(main_module.app) as client:
+                response = client.get("/api/open-extreme-scanner")
+
+        payload = response.json()
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("open_low_gainers", payload)
+        self.assertNotIn("open_high_losers", payload)
+        self.assertEqual(payload["ione_power_long"][0]["symbol"], "INFY")
+        self.assertEqual(payload["ione_power_long"][0]["rating"], 5)
+        self.assertNotIn("day_open", payload["ione_power_long"][0])
+
+    def test_ione_power_rating_rules(self):
+        self.assertEqual(main_module.ione_power_rating({"opening_turnover": 5000000}), 1)
+        self.assertEqual(main_module.ione_power_rating({"opening_turnover": 15000000}), 2)
+        self.assertEqual(
+            main_module.ione_power_rating(
+                {"opening_turnover": 25000000, "opening_volume_sma_multiplier": 2.1}
+            ),
+            3,
+        )
+        self.assertEqual(
+            main_module.ione_power_rating(
+                {"opening_turnover": 35000000, "opening_volume_sma_multiplier": 3, "sector_rank": 2}
+            ),
+            4,
+        )
+        self.assertEqual(
+            main_module.ione_power_rating(
+                {"opening_turnover": 110000000, "opening_volume_sma_multiplier": 2.6}
+            ),
+            5,
+        )
+
+    def test_blaster_api_filters_and_hides_acceleration_details_for_non_admin(self):
+        with patch.object(
+            main_module.engine,
+            "get_acceleration_scanner",
+            return_value={
+                "rows": [
+                    {
+                        "symbol": "OLD",
+                        "name": "Old Hit",
+                        "volume_sma_multiplier": 5.5,
+                        "turnover": 20_000_000,
+                        "appearance_time": "2026-07-07T09:16:00+05:30",
+                        "appearance_time_display": "09:16:00 AM",
+                        "candle_volume": 100000,
+                    },
+                    {
+                        "symbol": "NEW",
+                        "name": "New Hit",
+                        "volume_sma_multiplier": 6,
+                        "turnover": 15_000_000,
+                        "appearance_time": "2026-07-07T09:20:00+05:30",
+                        "appearance_time_display": "09:20:00 AM",
+                        "candle_volume": 100000,
+                    },
+                    {
+                        "symbol": "SMALL",
+                        "name": "Small Hit",
+                        "volume_sma_multiplier": 6,
+                        "turnover": 900_000,
+                        "appearance_time": "2026-07-07T09:21:00+05:30",
+                    },
+                    {
+                        "symbol": "SLOW",
+                        "name": "Slow Hit",
+                        "volume_sma_multiplier": 4.9,
+                        "turnover": 20_000_000,
+                        "appearance_time": "2026-07-07T09:22:00+05:30",
+                    },
+                ],
+                "timeframe": 1,
+                "updated_at": "2026-07-07T09:22:00+05:30",
+                "market_open": True,
+                "error": None,
+            },
+        ):
+            with TestClient(main_module.app) as client:
+                response = client.get("/api/acceleration-scanner?timeframe=1")
+
+        payload = response.json()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([row["symbol"] for row in payload["rows"]], ["NEW", "OLD"])
+        self.assertEqual(payload["rows"][0]["status"], "Blast")
+        self.assertNotIn("volume_sma_multiplier", payload["rows"][0])
+        self.assertNotIn("turnover", payload["rows"][0])
+        self.assertNotIn("candle_volume", payload["rows"][0])
 
 
 if __name__ == "__main__":

@@ -48,7 +48,7 @@ ACCELERATION_SCANNER_MIN_GAIN_PERCENT = 0.5
 ACCELERATION_TIMEFRAMES = {1, 5, 15}
 ACCELERATION_VOLUME_SMA_SESSIONS = 5
 ACCELERATION_VOLUME_LOOKBACK_SESSIONS = 10
-ACCELERATION_HIT_TTL_SECONDS = 120
+ACCELERATION_HIT_TTL_SECONDS = 600
 DHAN_SCRIP_MASTER_MAX_CACHE_DAYS = 7
 NSE_INTRADAY_SESSION_MINUTES = 375
 OPENING_CANDLE_TIME = dtime(9, 15)
@@ -610,6 +610,7 @@ class MarketEngine:
         self.opening_candle_cache = {}
         self.opening_candle_lock = threading.Lock()
         self.opening_candle_thread = None
+        self.open_extreme_first_hits = {}
         self.swing_scanner_lock = threading.Lock()
         self.swing_scanner_thread = None
         self.swing_scanner_status = {
@@ -2043,6 +2044,8 @@ class MarketEngine:
             ],
             key=lambda item: float(item.get("change") or 0),
         )[:20]
+        self._stamp_open_extreme_first_hits(open_low, "long")
+        self._stamp_open_extreme_first_hits(open_high, "short")
         missing_opening_candles = []
         for row in open_low + open_high:
             opening_context = self._opening_candle_context(
@@ -2064,6 +2067,21 @@ class MarketEngine:
             "snapshot_source": self.last_snapshot_source,
             "error": None if prepared else "Open high/low scanner rows are warming. Wait for live/API OHLC data.",
         }
+
+    def _stamp_open_extreme_first_hits(self, rows, side):
+        now = datetime.now(IST)
+        day_key = now.date().isoformat()
+        for key in list(self.open_extreme_first_hits.keys()):
+            if not key.startswith(f"{day_key}:"):
+                self.open_extreme_first_hits.pop(key, None)
+        for row in rows or []:
+            symbol = str(row.get("symbol") or "").upper()
+            if not symbol:
+                continue
+            key = f"{day_key}:{side}:{symbol}"
+            if key not in self.open_extreme_first_hits:
+                self.open_extreme_first_hits[key] = now.isoformat(timespec="seconds")
+            row["first_hit_at"] = self.open_extreme_first_hits[key]
 
     def place_acceleration_market_order(
         self,

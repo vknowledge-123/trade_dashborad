@@ -68,7 +68,7 @@ from app.config import (
     HCAPTCHA_SITE_KEY,
     HCAPTCHA_SECRET,
 )
-from app.kite_engine import MarketEngine
+from app.kite_engine import IST, MarketEngine
 from app.security import hash_password, verify_password, should_upgrade_password_hash
 
 app = FastAPI()
@@ -307,10 +307,108 @@ def youtube_embed_url(url):
     return ""
 
 
+def ione_power_rating(row):
+    try:
+        turnover_crore = float(row.get("opening_turnover") or 0) / 10_000_000
+    except (TypeError, ValueError):
+        turnover_crore = 0
+    try:
+        multiplier = float(row.get("opening_volume_sma_multiplier") or 0)
+    except (TypeError, ValueError):
+        multiplier = 0
+    try:
+        sector_rank = int(row.get("sector_rank") or 0)
+    except (TypeError, ValueError):
+        sector_rank = 0
+
+    if turnover_crore > 10 and multiplier > 2.5:
+        return 5
+    if turnover_crore > 3 and turnover_crore < 4 and multiplier >= 3 and sector_rank in {1, 2}:
+        return 4
+    if turnover_crore > 2 and turnover_crore < 3 and multiplier > 2:
+        return 3
+    if turnover_crore > 1 and turnover_crore <= 2:
+        return 2
+    return 1
+
+
+def format_ione_hit_time(value):
+    if not value:
+        return "-"
+    try:
+        parsed = datetime.fromisoformat(str(value))
+        if parsed.tzinfo:
+            parsed = parsed.astimezone(IST)
+        return parsed.strftime("%I:%M %p")
+    except Exception:
+        return str(value)
+
+
+def ione_power_row(row):
+    symbol = str(row.get("symbol") or "").upper()
+    return {
+        "symbol": symbol,
+        "name": row.get("name") or symbol,
+        "first_hit_time": format_ione_hit_time(row.get("first_hit_at") or row.get("updated_at")),
+        "rating": ione_power_rating(row),
+        "chart_url": f"https://www.tradingview.com/chart/?symbol=NSE%3A{symbol}",
+    }
+
+
+def ione_power_payload(scanner):
+    return {
+        "ione_power_long": [ione_power_row(row) for row in scanner.get("open_low_gainers") or []],
+        "ione_power_short": [ione_power_row(row) for row in scanner.get("open_high_losers") or []],
+        "updated_at": scanner.get("updated_at"),
+        "market_open": scanner.get("market_open"),
+        "error": scanner.get("error"),
+    }
+
+
+def blaster_hit_time(row):
+    return format_ione_hit_time(row.get("appearance_time") or row.get("updated_at"))
+
+
+def blaster_intraday_row(row):
+    symbol = str(row.get("symbol") or "").upper()
+    return {
+        "symbol": symbol,
+        "name": row.get("name") or symbol,
+        "status": "Blast",
+        "hit_time": blaster_hit_time(row),
+        "chart_url": f"https://www.tradingview.com/chart/?symbol=NSE%3A{symbol}",
+    }
+
+
+def blaster_intraday_payload(scanner):
+    rows = []
+    for row in scanner.get("rows") or []:
+        try:
+            multiplier = float(row.get("volume_sma_multiplier") or 0)
+        except (TypeError, ValueError):
+            multiplier = 0
+        try:
+            turnover = float(row.get("turnover") or 0)
+        except (TypeError, ValueError):
+            turnover = 0
+        if multiplier >= 5 and turnover >= 10_000_000:
+            rows.append(row)
+    rows.sort(key=lambda item: item.get("appearance_time") or "", reverse=True)
+    return {
+        "rows": [blaster_intraday_row(row) for row in rows],
+        "timeframe": scanner.get("timeframe"),
+        "updated_at": scanner.get("updated_at"),
+        "market_open": scanner.get("market_open"),
+        "error": scanner.get("error"),
+    }
+
+
 templates.env.globals["format_compact_volume"] = format_compact_volume
 templates.env.globals["format_crores"] = format_crores
 templates.env.globals["youtube_embed_url"] = youtube_embed_url
 templates.env.globals["csrf_token"] = csrf_token
+templates.env.globals["ione_power_rating"] = ione_power_rating
+templates.env.globals["format_ione_hit_time"] = format_ione_hit_time
 
 @app.on_event("startup")
 def on_startup():
@@ -750,15 +848,17 @@ def swing_scanner(request: Request):
 def acceleration_scanner(request: Request):
     user = current_user(request)
     admin = current_admin(request)
+    scanner = engine.get_acceleration_scanner(timeframe=1, min_gain=0.5)
     return templates.TemplateResponse(
         request,
         "acceleration_scanner.html",
         {
-            "title": "Acceleration Scanner",
+            "title": "Acceleration Scanner" if admin else "Blaster Intraday Scan",
             "user": user,
             "admin": admin,
             "public_mode": True if not user and not admin else False,
-            "scanner": engine.get_acceleration_scanner(timeframe=1, min_gain=0.5),
+            "scanner": scanner,
+            "blaster_scanner": blaster_intraday_payload(scanner),
         },
     )
 
@@ -767,15 +867,17 @@ def acceleration_scanner(request: Request):
 def open_extreme_scanner(request: Request):
     user = current_user(request)
     admin = current_admin(request)
+    scanner = engine.get_open_extreme_scanner()
     return templates.TemplateResponse(
         request,
         "open_extreme_scanner.html",
         {
-            "title": "Open High Low Scanner",
+            "title": "Ione Power",
             "user": user,
             "admin": admin,
             "public_mode": True if not user and not admin else False,
-            "scanner": engine.get_open_extreme_scanner(),
+            "scanner": scanner,
+            "ione_scanner": ione_power_payload(scanner),
         },
     )
 
@@ -862,8 +964,18 @@ def acceleration_scanner_data(
     timeframe: int = 1,
     min_gain: float = 0.5,
 ):
+    scanner = engine.get_acceleration_scanner(timeframe=timeframe, min_gain=min_gain)
+    if not current_admin(request):
+        return JSONResponse(
+            blaster_intraday_payload(scanner),
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            },
+        )
     return JSONResponse(
-        engine.get_acceleration_scanner(timeframe=timeframe, min_gain=min_gain),
+        scanner,
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",
@@ -874,8 +986,18 @@ def acceleration_scanner_data(
 
 @app.get("/api/open-extreme-scanner")
 def open_extreme_scanner_data(request: Request):
+    scanner = engine.get_open_extreme_scanner()
+    if not current_admin(request):
+        return JSONResponse(
+            ione_power_payload(scanner),
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            },
+        )
     return JSONResponse(
-        engine.get_open_extreme_scanner(),
+        scanner,
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",

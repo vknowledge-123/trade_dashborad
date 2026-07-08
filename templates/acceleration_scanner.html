@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 
+{% if admin %}
 <section class="accel-shell">
   <div class="accel-header">
     <div>
@@ -621,5 +622,206 @@
   load();
 })();
 </script>
+
+{% else %}
+
+<section class="blaster-shell">
+  <div class="blaster-header">
+    <h1>Blaster Intraday Scan</h1>
+  </div>
+
+  <div class="panel blaster-controls">
+    <div class="panel-header">
+      <h3>Scan Mode</h3>
+      <span class="pill positive" id="blaster-count">{{ blaster_scanner.rows|length }}</span>
+    </div>
+    <div class="blaster-filter-grid">
+      <label>
+        Timeframe
+        <select id="blaster-timeframe">
+          <option value="1">1 min</option>
+          <option value="5">5 min</option>
+          <option value="15">15 min</option>
+        </select>
+      </label>
+      <button class="btn btn-primary btn-mini" id="blaster-apply" type="button">Apply</button>
+    </div>
+  </div>
+
+  {% if blaster_scanner.error %}
+    <div class="accel-alert" id="blaster-alert">{{ blaster_scanner.error }}</div>
+  {% else %}
+    <div class="accel-alert" id="blaster-alert" hidden></div>
+  {% endif %}
+
+  <div class="panel">
+    <div class="table blaster-table" id="blaster-body">
+      <div class="table-row table-head blaster-row">
+        <span>Symbol Name</span>
+        <span>Status</span>
+        <span>Time Of Hit</span>
+        <span>Chart</span>
+      </div>
+      {% for row in blaster_scanner.rows or [] %}
+        <div class="table-row blaster-row" data-symbol="{{ row.symbol }}">
+          <span class="cell-symbol">
+            <span class="cell-symbol-main">{{ row.symbol }}</span>
+            <span class="sector-stock-name">{{ row.name }}</span>
+          </span>
+          <span><span class="blast-status">{{ row.status }}</span></span>
+          <span class="mono">{{ row.hit_time }}</span>
+          <a class="tv-link" href="{{ row.chart_url }}" target="_blank" rel="noopener noreferrer">TradingView</a>
+        </div>
+      {% else %}
+        <div class="table-row blaster-row blaster-empty">
+          <span>No blast candidates yet.</span><span></span><span></span><span></span>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<style>
+.blaster-shell {
+  display: grid;
+  gap: 14px;
+}
+.blaster-header {
+  padding: 14px;
+  border: 1px solid rgba(129, 201, 149, 0.18);
+  background: rgba(18, 24, 32, 0.72);
+  border-radius: 12px;
+}
+.blaster-header h1 {
+  margin: 0;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 28px;
+  letter-spacing: 0;
+}
+.blaster-controls {
+  display: grid;
+  gap: 10px;
+}
+.blaster-filter-grid {
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) auto;
+  gap: 10px;
+  align-items: end;
+}
+.blaster-filter-grid label {
+  display: grid;
+  gap: 6px;
+  color: #8ca5c8;
+  font-size: 12px;
+}
+.blaster-filter-grid select {
+  width: 100%;
+  min-height: 38px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(8,12,24,0.76);
+  color: #e8f0fe;
+  padding: 8px 10px;
+}
+.blaster-row {
+  grid-template-columns: minmax(190px, 1fr) 0.5fr 0.65fr auto;
+  align-items: center;
+}
+.blast-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  color: #102033;
+  background: #81c995;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.blaster-empty span:first-child {
+  grid-column: 1 / -1;
+  color: #8ca5c8;
+}
+@media (max-width: 760px) {
+  .blaster-filter-grid {
+    grid-template-columns: 1fr;
+  }
+  .blaster-row:not(.table-head) {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px 10px;
+  }
+  .blaster-row:not(.table-head) > span:first-child,
+  .blaster-row:not(.table-head) > .tv-link {
+    grid-column: 1 / -1;
+  }
+  .blaster-row:not(.table-head) > span:nth-child(2)::before {
+    content: "Status ";
+    color: #6b7fa3;
+  }
+  .blaster-row:not(.table-head) > span:nth-child(3)::before {
+    content: "Time ";
+    color: #6b7fa3;
+  }
+}
+</style>
+
+<script>
+(function () {
+  const body = document.getElementById("blaster-body");
+  const count = document.getElementById("blaster-count");
+  const alertBox = document.getElementById("blaster-alert");
+  const timeframe = document.getElementById("blaster-timeframe");
+  const apply = document.getElementById("blaster-apply");
+  if (!body) return;
+
+  const head = body.querySelector(".table-head")?.outerHTML || "";
+  const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  }[char]));
+  const rowHtml = (row) => `
+    <div class="table-row blaster-row" data-symbol="${escapeHtml(row.symbol)}">
+      <span class="cell-symbol">
+        <span class="cell-symbol-main">${escapeHtml(row.symbol)}</span>
+        <span class="sector-stock-name">${escapeHtml(row.name || row.symbol || "")}</span>
+      </span>
+      <span><span class="blast-status">${escapeHtml(row.status || "Blast")}</span></span>
+      <span class="mono">${escapeHtml(row.hit_time || "-")}</span>
+      <a class="tv-link" href="${escapeHtml(row.chart_url)}" target="_blank" rel="noopener noreferrer">TradingView</a>
+    </div>
+  `;
+  const emptyRow = () => `<div class="table-row blaster-row blaster-empty"><span>No blast candidates yet.</span><span></span><span></span><span></span></div>`;
+  const load = async () => {
+    const params = new URLSearchParams();
+    params.set("timeframe", timeframe?.value || "1");
+    params.set("min_gain", "0.5");
+    params.set("ts", Date.now().toString());
+    try {
+      const response = await fetch(`/api/acceleration-scanner?${params.toString()}`, { cache: "no-store" });
+      if (!response.ok) return;
+      const data = await response.json();
+      const rows = data.rows || [];
+      body.innerHTML = head + (rows.length ? rows.map(rowHtml).join("") : emptyRow());
+      if (count) count.textContent = rows.length;
+      if (alertBox) {
+        alertBox.hidden = rows.length || !data.error;
+        alertBox.textContent = data.error || "";
+      }
+    } catch (error) {}
+  };
+  if (timeframe) timeframe.addEventListener("change", load);
+  if (apply) apply.addEventListener("click", load);
+  setInterval(load, 3000);
+  load();
+})();
+</script>
+
+{% endif %}
 
 {% endblock %}

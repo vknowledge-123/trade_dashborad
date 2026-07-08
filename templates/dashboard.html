@@ -90,12 +90,6 @@
                   <span class="prev-rise-badge">Prev +{{ "%.2f"|format(g.previous_day_change) }}%</span>
                 </span>
               {% endif %}
-              {% if g.open_equals_low or g.open_equals_high %}
-                <span class="cell-symbol-badges">
-                  {% if g.open_equals_low %}<span class="ohlc-badge open-low">OPEN=LOW</span>{% endif %}
-                  {% if g.open_equals_high %}<span class="ohlc-badge open-high">OPEN=HIGH</span>{% endif %}
-                </span>
-              {% endif %}
             </span>
             <span class="mono">{{ g.price }}</span>
             <span class="mono">{{ format_compact_volume(g.volume if g.volume is defined else none) }}</span>
@@ -134,12 +128,6 @@
               {% if l.previous_day_positive %}
                 <span class="cell-symbol-badges">
                   <span class="prev-rise-badge">Prev +{{ "%.2f"|format(l.previous_day_change) }}%</span>
-                </span>
-              {% endif %}
-              {% if l.open_equals_low or l.open_equals_high %}
-                <span class="cell-symbol-badges">
-                  {% if l.open_equals_low %}<span class="ohlc-badge open-low">OPEN=LOW</span>{% endif %}
-                  {% if l.open_equals_high %}<span class="ohlc-badge open-high">OPEN=HIGH</span>{% endif %}
                 </span>
               {% endif %}
             </span>

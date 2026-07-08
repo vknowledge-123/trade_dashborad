@@ -2007,8 +2007,8 @@ h3,
         </button>
         <a class="nav-link" href="/dashboard">Dashboard</a>
         <a class="nav-link" href="/pdh-pdl-scanner">PDH/PDL</a>
-        <a class="nav-link" href="/open-extreme-scanner">O=H/L</a>
-        <a class="nav-link" href="/acceleration-scanner">Accel</a>
+        <a class="nav-link" href="/open-extreme-scanner">Ione Power</a>
+        <a class="nav-link" href="/acceleration-scanner">Blaster</a>
         <a class="nav-link" href="/swing-scanner">Swing</a>
         <a class="nav-link" href="/relative-rotation">RRG</a>
         <a class="nav-link" href="/free-course">Free Course</a>
@@ -2034,8 +2034,8 @@ h3,
         </button>
         <a class="nav-link" href="/dashboard">Dashboard</a>
         <a class="nav-link" href="/pdh-pdl-scanner">PDH/PDL</a>
-        <a class="nav-link" href="/open-extreme-scanner">O=H/L</a>
-        <a class="nav-link" href="/acceleration-scanner">Accel</a>
+        <a class="nav-link" href="/open-extreme-scanner">Ione Power</a>
+        <a class="nav-link" href="/acceleration-scanner">Blaster</a>
         <a class="nav-link" href="/swing-scanner">Swing</a>
         <a class="nav-link" href="/relative-rotation">RRG</a>
         <a class="nav-link" href="/free-course">Free Course</a>
@@ -2061,8 +2061,8 @@ h3,
         </button>
         <a class="nav-link" href="/dashboard">Dashboard</a>
         <a class="nav-link" href="/pdh-pdl-scanner">PDH/PDL</a>
-        <a class="nav-link" href="/open-extreme-scanner">O=H/L</a>
-        <a class="nav-link" href="/acceleration-scanner">Accel</a>
+        <a class="nav-link" href="/open-extreme-scanner">Ione Power</a>
+        <a class="nav-link" href="/acceleration-scanner">Blaster</a>
         <a class="nav-link" href="/swing-scanner">Swing</a>
         <a class="nav-link" href="/relative-rotation">RRG</a>
         <a class="nav-link" href="/free-course">Free Course</a>
@@ -2320,14 +2320,9 @@ h3,
       const prevBadge = row.previous_day_positive
         ? `<span class="prev-rise-badge">Prev ${formatSignedPercent(row.previous_day_change)}</span>`
         : "";
-      const ohlcBadges = [
-        row.open_equals_low ? '<span class="ohlc-badge open-low">OPEN=LOW</span>' : "",
-        row.open_equals_high ? '<span class="ohlc-badge open-high">OPEN=HIGH</span>' : "",
-      ].filter(Boolean).join("");
       return `
         <span class="cell-symbol-main">${escapeHtml(row.symbol)} ${fno}</span>
         ${prevBadge ? `<span class="cell-symbol-badges">${prevBadge}</span>` : ""}
-        ${ohlcBadges ? `<span class="cell-symbol-badges">${ohlcBadges}</span>` : ""}
       `;
     };
 
@@ -2475,10 +2470,6 @@ h3,
       stocks.forEach((stock) => {
         const sign = stock.change > 0 ? "+" : "";
         const cls = stock.change > 0 ? "positive" : stock.change < 0 ? "negative" : "neutral";
-        const ohlcBadges = [
-          stock.open_equals_low ? '<span class="ohlc-badge open-low">OPEN=LOW</span>' : "",
-          stock.open_equals_high ? '<span class="ohlc-badge open-high">OPEN=HIGH</span>' : "",
-        ].filter(Boolean).join("");
         const row = document.createElement("div");
         row.className = "sector-stock-row";
         row.innerHTML = `
@@ -2487,7 +2478,6 @@ h3,
             <span>
               <span class="cell-symbol-main">${escapeHtml(stock.symbol)}${stock.is_fno ? ' <span class="fno-tag">F&O</span>' : ""}</span>
               ${stock.previous_day_positive ? `<span class="cell-symbol-badges"><span class="prev-rise-badge">Prev ${formatSignedPercent(stock.previous_day_change)}</span></span>` : ""}
-              ${ohlcBadges ? `<span class="cell-symbol-badges">${ohlcBadges}</span>` : ""}
               ${stock.name ? `<span class="sector-stock-name">${escapeHtml(stock.name)}</span>` : ""}
             </span>
           </span>
