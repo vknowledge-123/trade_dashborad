@@ -22,6 +22,34 @@
     <div class="openx-alert" id="openx-alert" hidden></div>
   {% endif %}
 
+  <div class="panel openx-order-panel">
+    <div class="panel-header">
+      <div>
+        <h3>Ione Power Trade Settings</h3>
+        <div class="panel-sub">Admin only limit orders. Quantity is locked from risk at click time.</div>
+      </div>
+    </div>
+    <div class="openx-order-grid">
+      <label>
+        Per Trade Risk
+        <input id="openx-risk" type="number" min="1" step="50" value="800" />
+      </label>
+      <label>
+        Stop Loss %
+        <input id="openx-sl-pct" type="number" min="0.01" step="0.05" value="0.6" />
+      </label>
+      <label>
+        Equity Limit Offset %
+        <input id="openx-limit-offset" type="number" min="0" step="0.01" value="0.01" />
+      </label>
+      <label>
+        Option Limit Offset %
+        <input id="openx-option-offset" type="number" min="0" step="0.05" value="0.1" />
+      </label>
+    </div>
+  </div>
+  <div class="openx-alert" id="openx-order-status" hidden></div>
+
   <div class="openx-grid">
     <div class="panel">
       <div class="panel-header">
@@ -44,6 +72,7 @@
           <span>Vol x</span>
           <span>9:15 TO</span>
           <span>Change %</span>
+          <span>Trade</span>
           <span>Chart</span>
         </div>
         {% for row in scanner.open_low_gainers or [] %}
@@ -69,6 +98,11 @@
             <span class="mono">{{ row.opening_volume_sma_multiplier ~ 'x' if row.opening_volume_sma_multiplier else '-' }}</span>
             <span class="mono">{{ format_crores(row.opening_turnover if row.opening_turnover is defined else none) }}</span>
             <span class="positive mono">+{{ row.change }}%</span>
+            <span class="openx-trade-actions">
+              <button class="btn btn-primary btn-mini openx-order-btn" type="button" data-kind="equity" data-side="BUY" data-symbol="{{ row.symbol }}" data-price="{{ row.price }}">Buy</button>
+              <button class="btn btn-ghost btn-mini openx-order-btn" type="button" data-kind="option" data-option-side="CALL" data-symbol="{{ row.symbol }}" data-price="{{ row.price }}">Call Buy</button>
+              <button class="btn btn-ghost btn-mini openx-order-btn" type="button" data-kind="option" data-option-side="PUT" data-symbol="{{ row.symbol }}" data-price="{{ row.price }}">Put Buy</button>
+            </span>
             <a class="tv-link" href="https://www.tradingview.com/chart/?symbol=NSE%3A{{ row.symbol | urlencode }}" target="_blank" rel="noopener noreferrer">TradingView</a>
           </div>
         {% endfor %}
@@ -96,6 +130,7 @@
           <span>Vol x</span>
           <span>9:15 TO</span>
           <span>Change %</span>
+          <span>Trade</span>
           <span>Chart</span>
         </div>
         {% for row in scanner.open_high_losers or [] %}
@@ -121,6 +156,11 @@
             <span class="mono">{{ row.opening_volume_sma_multiplier ~ 'x' if row.opening_volume_sma_multiplier else '-' }}</span>
             <span class="mono">{{ format_crores(row.opening_turnover if row.opening_turnover is defined else none) }}</span>
             <span class="negative mono">{{ row.change }}%</span>
+            <span class="openx-trade-actions">
+              <button class="btn btn-ghost btn-mini openx-order-btn sell" type="button" data-kind="equity" data-side="SELL" data-symbol="{{ row.symbol }}" data-price="{{ row.price }}">Sell</button>
+              <button class="btn btn-ghost btn-mini openx-order-btn" type="button" data-kind="option" data-option-side="CALL" data-symbol="{{ row.symbol }}" data-price="{{ row.price }}">Call Buy</button>
+              <button class="btn btn-ghost btn-mini openx-order-btn" type="button" data-kind="option" data-option-side="PUT" data-symbol="{{ row.symbol }}" data-price="{{ row.price }}">Put Buy</button>
+            </span>
             <a class="tv-link" href="https://www.tradingview.com/chart/?symbol=NSE%3A{{ row.symbol | urlencode }}" target="_blank" rel="noopener noreferrer">TradingView</a>
           </div>
         {% endfor %}
@@ -163,9 +203,46 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
 }
+.openx-order-panel {
+  display: grid;
+  gap: 10px;
+}
+.openx-order-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+.openx-order-grid label {
+  display: grid;
+  gap: 6px;
+  color: #8ca5c8;
+  font-size: 12px;
+}
+.openx-order-grid input {
+  width: 100%;
+  min-height: 38px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(8,12,24,0.76);
+  color: #e8f0fe;
+  padding: 8px 10px;
+}
 .openx-row {
-  grid-template-columns: 0.34fr 1.12fr 0.58fr 0.58fr 0.58fr 0.9fr 0.64fr 0.64fr 0.48fr 0.68fr 0.62fr auto;
+  grid-template-columns: 0.34fr 1.12fr 0.58fr 0.58fr 0.58fr 0.9fr 0.64fr 0.64fr 0.48fr 0.68fr 0.62fr 1.15fr auto;
   align-items: center;
+}
+.openx-trade-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.openx-order-btn {
+  min-width: 58px;
+  padding: 7px 9px;
+}
+.openx-order-btn.sell {
+  border-color: rgba(242, 139, 130, 0.28);
+  color: #ffd2ce;
 }
 .nifty50-tag {
   display: inline-flex;
@@ -185,6 +262,9 @@
 }
 @media (max-width: 860px) {
   .openx-grid {
+    grid-template-columns: 1fr;
+  }
+  .openx-order-grid {
     grid-template-columns: 1fr;
   }
   .openx-row:not(.table-head) {
@@ -208,6 +288,7 @@
   .openx-row:not(.table-head) > span:nth-child(9)::before { content: "Vol x "; color: #6b7fa3; }
   .openx-row:not(.table-head) > span:nth-child(10)::before { content: "9:15 TO "; color: #6b7fa3; }
   .openx-row:not(.table-head) > span:nth-child(11)::before { content: "Change "; color: #6b7fa3; }
+  .openx-row:not(.table-head) > span:nth-child(12)::before { content: "Trade "; color: #6b7fa3; }
 }
 </style>
 
@@ -219,7 +300,24 @@
   const highCount = document.getElementById("open-high-count");
   const updatedAt = document.getElementById("openx-updated-at");
   const alertBox = document.getElementById("openx-alert");
+  const orderStatus = document.getElementById("openx-order-status");
+  const riskInput = document.getElementById("openx-risk");
+  const slInput = document.getElementById("openx-sl-pct");
+  const limitOffsetInput = document.getElementById("openx-limit-offset");
+  const optionOffsetInput = document.getElementById("openx-option-offset");
   if (!lowBody || !highBody) return;
+  const settings = [
+    [riskInput, "openx_per_trade_risk", "800"],
+    [slInput, "openx_stop_loss_pct", "0.6"],
+    [limitOffsetInput, "openx_limit_offset_pct", "0.01"],
+    [optionOffsetInput, "openx_option_offset_pct", "0.1"],
+  ];
+  settings.forEach(([input, key, fallback]) => {
+    if (!input) return;
+    const stored = localStorage.getItem(key);
+    if (stored !== null && stored !== "") input.value = stored;
+    input.addEventListener("change", () => localStorage.setItem(key, input.value || fallback));
+  });
   const lowHead = lowBody.querySelector(".table-head")?.outerHTML || "";
   const highHead = highBody.querySelector(".table-head")?.outerHTML || "";
   const tvUrl = (symbol) => `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(`NSE:${symbol}`)}`;
@@ -246,6 +344,36 @@
     const number = Number(value);
     return Number.isFinite(number) ? `${number.toFixed(2)}x` : "-";
   };
+  const setOrderStatus = (message, isError = false) => {
+    if (!orderStatus) return;
+    orderStatus.hidden = false;
+    orderStatus.textContent = message;
+    orderStatus.style.borderColor = isError ? "rgba(242, 139, 130, 0.32)" : "rgba(129, 201, 149, 0.22)";
+    orderStatus.style.background = isError ? "rgba(242, 139, 130, 0.10)" : "rgba(129, 201, 149, 0.08)";
+    orderStatus.style.color = isError ? "#ffd2ce" : "#dffbe8";
+  };
+  const quantityForRisk = (price) => {
+    const risk = Number(riskInput?.value || 800);
+    const slPct = Number(slInput?.value || 0.6);
+    const ltp = Number(price);
+    const perShareRisk = ltp * (slPct / 100);
+    if (!Number.isFinite(risk) || !Number.isFinite(slPct) || !Number.isFinite(ltp) || perShareRisk <= 0) return 0;
+    return Math.floor(risk / perShareRisk);
+  };
+  const tradeButtons = (row, type) => {
+    const symbol = escapeHtml(row.symbol);
+    const price = escapeHtml(row.price ?? "");
+    const equityButton = type === "low"
+      ? `<button class="btn btn-primary btn-mini openx-order-btn" type="button" data-kind="equity" data-side="BUY" data-symbol="${symbol}" data-price="${price}">Buy</button>`
+      : `<button class="btn btn-ghost btn-mini openx-order-btn sell" type="button" data-kind="equity" data-side="SELL" data-symbol="${symbol}" data-price="${price}">Sell</button>`;
+    return `
+      <span class="openx-trade-actions">
+        ${equityButton}
+        <button class="btn btn-ghost btn-mini openx-order-btn" type="button" data-kind="option" data-option-side="CALL" data-symbol="${symbol}" data-price="${price}">Call Buy</button>
+        <button class="btn btn-ghost btn-mini openx-order-btn" type="button" data-kind="option" data-option-side="PUT" data-symbol="${symbol}" data-price="${price}">Put Buy</button>
+      </span>
+    `;
+  };
   const rowHtml = (row, index, type) => {
     const extreme = type === "low" ? row.day_low : row.day_high;
     const change = Number(row.change);
@@ -271,11 +399,71 @@
         <span class="mono">${multiplier(row.opening_volume_sma_multiplier)}</span>
         <span class="mono">${formatCrores(row.opening_turnover)}</span>
         <span class="${change >= 0 ? "positive" : "negative"} mono">${change >= 0 ? "+" : ""}${Number.isFinite(change) ? change : "-"}%</span>
+        ${tradeButtons(row, type)}
         <a class="tv-link" href="${tvUrl(row.symbol)}" target="_blank" rel="noopener noreferrer">TradingView</a>
       </div>
     `;
   };
-  const emptyRow = (message) => `<div class="table-row openx-row openx-empty-row"><span>${message}</span>${"<span></span>".repeat(11)}</div>`;
+  const emptyRow = (message) => `<div class="table-row openx-row openx-empty-row"><span>${message}</span>${"<span></span>".repeat(12)}</div>`;
+  const placeOrder = async (button) => {
+    const symbol = button.dataset.symbol;
+    const kind = button.dataset.kind || "equity";
+    const price = Number(button.dataset.price);
+    if (!symbol || !Number.isFinite(price) || price <= 0) {
+      setOrderStatus("Live price is not available for this row.", true);
+      return;
+    }
+    const payload = {
+      order_kind: kind,
+      symbol,
+      price,
+      limit_offset_pct: Number(limitOffsetInput?.value || 0.01),
+      option_limit_offset_pct: Number(optionOffsetInput?.value || 0.1),
+    };
+    let confirmText = "";
+    if (kind === "option") {
+      payload.option_side = button.dataset.optionSide;
+      confirmText = `Buy 1 lot ATM ${payload.option_side} option for ${symbol} at limit ${payload.option_limit_offset_pct}% above premium?`;
+    } else {
+      const quantity = quantityForRisk(price);
+      if (quantity <= 0) {
+        setOrderStatus("Quantity is zero. Increase risk or reduce stop loss percent.", true);
+        return;
+      }
+      payload.side = button.dataset.side;
+      payload.per_trade_risk = Number(riskInput?.value || 800);
+      payload.stop_loss_pct = Number(slInput?.value || 0.6);
+      payload.quantity = quantity;
+      confirmText = `${payload.side} ${symbol}, locked quantity ${quantity}, limit ${payload.limit_offset_pct}% from LTP?`;
+    }
+    if (!window.confirm(confirmText)) return;
+    button.disabled = true;
+    const oldText = button.textContent;
+    button.textContent = "Sending...";
+    try {
+      const response = await fetch("/api/admin/ione-power-order", {
+        method: "POST",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json", "Cache-Control": "no-cache" },
+        body: JSON.stringify(payload),
+      });
+      const text = await response.text();
+      let result = {};
+      try {
+        result = text ? JSON.parse(text) : {};
+      } catch (error) {
+        result = { ok: false, error: text || `HTTP ${response.status}` };
+      }
+      if (!response.ok || !result.ok) throw new Error(result.error || "Order failed.");
+      const optionText = result.option_side ? ` ${result.option_side} ${result.strike} ${result.expiry}` : "";
+      setOrderStatus(`${result.side} ${result.symbol}${optionText} placed: ${result.quantity} qty at limit ${result.limit_price}${result.order_id ? `, order ${result.order_id}` : ""}.`);
+    } catch (error) {
+      setOrderStatus(error.message || "Order failed.", true);
+    } finally {
+      button.disabled = false;
+      button.textContent = oldText;
+    }
+  };
   const load = async () => {
     try {
       const response = await fetch(`/api/open-extreme-scanner?ts=${Date.now()}`, { cache: "no-store" });
@@ -294,6 +482,10 @@
       }
     } catch (error) {}
   };
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest(".openx-order-btn");
+    if (button) placeOrder(button);
+  });
   setInterval(load, 12000);
 })();
 </script>

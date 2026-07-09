@@ -1036,6 +1036,49 @@ def admin_acceleration_order(
     )
 
 
+@app.post("/api/admin/ione-power-order")
+def admin_ione_power_order(
+    request: Request,
+    payload: dict = Body(...),
+):
+    admin = require_admin(request)
+    if not admin:
+        return JSONResponse({"ok": False, "error": "Admin authentication required."}, status_code=403)
+    try:
+        order_kind = str(payload.get("order_kind") or "equity").lower()
+        if order_kind == "option":
+            result = engine.place_ione_power_option_order(
+                symbol=payload.get("symbol"),
+                option_side=payload.get("option_side"),
+                client_price=payload.get("price"),
+                option_ltp=payload.get("option_ltp"),
+                limit_offset_pct=payload.get("option_limit_offset_pct", 0.1),
+                retry_attempts=2,
+            )
+        else:
+            result = engine.place_ione_power_equity_order(
+                symbol=payload.get("symbol"),
+                side=payload.get("side"),
+                per_trade_risk=payload.get("per_trade_risk", 800),
+                stop_loss_pct=payload.get("stop_loss_pct", 0.6),
+                client_price=payload.get("price"),
+                locked_quantity=payload.get("quantity"),
+                limit_offset_pct=payload.get("limit_offset_pct", 0.01),
+                retry_attempts=2,
+            )
+    except Exception as exc:
+        result = {"ok": False, "error": str(exc) or "Order placement failed."}
+    return JSONResponse(
+        result,
+        status_code=200 if result.get("ok") else 400,
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
+
+
 @app.post("/api/acceleration-hit")
 def acceleration_hit_action(
     request: Request,

@@ -343,6 +343,21 @@ class DhanClient:
         data = self._post("/marketfeed/ohlc", securities).get("data") or {}
         return data.get("data") if isinstance(data.get("data"), dict) else data
 
+    def option_expiry_list(self, underlying_security_id, underlying_segment):
+        payload = {
+            "UnderlyingScrip": int(float(underlying_security_id)),
+            "UnderlyingSeg": str(underlying_segment or "NSE_FNO"),
+        }
+        return self._post("/optionchain/expirylist", payload)
+
+    def option_chain(self, underlying_security_id, underlying_segment, expiry):
+        payload = {
+            "UnderlyingScrip": int(float(underlying_security_id)),
+            "UnderlyingSeg": str(underlying_segment or "NSE_FNO"),
+            "Expiry": str(expiry),
+        }
+        return self._post("/optionchain", payload)
+
     def place_order(self, security_id, transaction_type, quantity, exchange_segment="NSE_EQ", product_type="INTRADAY", order_type="MARKET", price=0.0, correlation_id=""):
         transaction_type = str(transaction_type or "").upper()
         if transaction_type not in {"BUY", "SELL"}:
@@ -2189,6 +2204,372 @@ class MarketEngine:
             "order_id": order_id,
             "response": response,
         }
+
+    def _extract_order_id(self, response):
+        order_id = response if isinstance(response, str) else None
+        if isinstance(response, dict):
+            order_id = response.get("orderId") or response.get("order_id")
+            data = response.get("data")
+            if isinstance(data, dict):
+                order_id = order_id or data.get("orderId") or data.get("order_id")
+        return order_id
+
+    def _is_order_response_failed(self, response):
+        if not isinstance(response, dict):
+            return False
+        status = str(response.get("orderStatus") or response.get("status") or "").upper()
+        if status in {"REJECTED", "FAILED", "CANCELLED"}:
+            return True
+        data = response.get("data")
+        if isinstance(data, dict):
+            data_status = str(data.get("orderStatus") or data.get("status") or "").upper()
+            if data_status in {"REJECTED", "FAILED", "CANCELLED"}:
+                return True
+        return False
+
+    def _latest_price_for_symbol(self, symbol, client_price=None):
+        symbol = (symbol or "").strip().upper()
+        with self.lock:
+            latest = dict(self.latest.get(symbol) or {})
+        price = self._float_or_none(latest.get("price"))
+        if price in (None, 0):
+            price = self._float_or_none(client_price)
+        return price
+
+    def _quote_ltp_for_security(self, segment, security_id):
+        if not isinstance(self.kite, DhanClient):
+            return None
+        try:
+            data = self.kite.marketfeed_quote({str(segment): [int(float(security_id))]})
+        except Exception:
+            return None
+        candidates = []
+        if isinstance(data, dict):
+            candidates.append(data.get(str(security_id)))
+            segment_payload = data.get(str(segment)) or data.get(segment)
+            if isinstance(segment_payload, dict):
+                candidates.append(segment_payload.get(str(security_id)))
+                candidates.append(segment_payload.get(int(float(security_id))) if str(security_id).replace(".", "", 1).isdigit() else None)
+        for payload in candidates:
+            if not isinstance(payload, dict):
+                continue
+            for key in ("last_price", "ltp", "LTP", "lastTradedPrice", "last_price"):
+                price = self._float_or_none(payload.get(key))
+                if price not in (None, 0):
+                    return price
+        return None
+
+    def place_ione_power_equity_order(
+        self,
+        symbol,
+        side,
+        per_trade_risk=800,
+        stop_loss_pct=0.6,
+        client_price=None,
+        locked_quantity=None,
+        limit_offset_pct=0.01,
+        retry_attempts=2,
+    ):
+        symbol = (symbol or "").strip().upper()
+        side = (side or "").strip().upper()
+        if side not in {"BUY", "SELL"}:
+            return {"ok": False, "error": "Order side must be BUY or SELL."}
+        active_broker = self._current_broker()
+        if active_broker not in {"dhan", "kite"} or not self.kite:
+            return {"ok": False, "error": "Order placement requires an authenticated Dhan or Kite broker."}
+        token = self.symbol_to_token.get(symbol)
+        if not token:
+            return {"ok": False, "error": f"{symbol} is not available in broker universe yet."}
+        if active_broker == "dhan":
+            segment = self.dhan_security_to_segment.get(int(token), "NSE_EQ")
+            instrument = self.dhan_security_to_instrument.get(int(token), "EQUITY")
+            if segment != "NSE_EQ" or instrument != "EQUITY":
+                return {"ok": False, "error": f"{symbol} is not an NSE equity instrument."}
+        price = self._latest_price_for_symbol(symbol, client_price=client_price)
+        if price in (None, 0):
+            return {"ok": False, "error": f"Live price is not available for {symbol}."}
+        try:
+            risk = float(per_trade_risk or 0)
+            sl_pct = float(stop_loss_pct or 0)
+        except (TypeError, ValueError):
+            risk = 0
+            sl_pct = 0
+        if risk <= 0 or sl_pct <= 0:
+            return {"ok": False, "error": "Per trade risk and stop loss percent must be greater than zero."}
+        if locked_quantity not in (None, ""):
+            quantity = int(float(locked_quantity))
+        else:
+            per_share_risk = price * (sl_pct / 100)
+            quantity = int(risk // per_share_risk) if per_share_risk > 0 else 0
+        if quantity <= 0:
+            return {"ok": False, "error": f"Risk {risk:.2f} is too low for {symbol} at {price:.2f}."}
+        try:
+            offset = max(0.0, float(limit_offset_pct if limit_offset_pct is not None else 0.01))
+        except (TypeError, ValueError):
+            offset = 0.01
+        attempts = []
+        max_attempts = max(1, min(2, int(retry_attempts or 2)))
+        response = None
+        for attempt in range(max_attempts):
+            attempt_price = self._latest_price_for_symbol(symbol, client_price=price) or price
+            multiplier = 1 + (offset / 100) if side == "BUY" else 1 - (offset / 100)
+            limit_price = round(attempt_price * multiplier, 2)
+            if limit_price <= 0:
+                return {"ok": False, "error": "Limit price must be greater than zero."}
+            try:
+                correlation_id = f"IP{side[:1]}{symbol}{int(time.time())}{attempt + 1}"[:30]
+                if active_broker == "dhan":
+                    response = self.kite.place_order(
+                        security_id=token,
+                        transaction_type=side,
+                        quantity=quantity,
+                        exchange_segment="NSE_EQ",
+                        product_type="INTRADAY",
+                        order_type="LIMIT",
+                        price=limit_price,
+                        correlation_id=correlation_id,
+                    )
+                    product_type = "INTRADAY"
+                else:
+                    response = self.kite.place_order(
+                        variety="regular",
+                        exchange="NSE",
+                        tradingsymbol=symbol,
+                        transaction_type=side,
+                        quantity=quantity,
+                        product="MIS",
+                        order_type="LIMIT",
+                        price=limit_price,
+                    )
+                    product_type = "MIS"
+                attempts.append({"attempt": attempt + 1, "limit_price": limit_price, "ok": not self._is_order_response_failed(response)})
+                if not self._is_order_response_failed(response):
+                    return {
+                        "ok": True,
+                        "symbol": symbol,
+                        "side": side,
+                        "quantity": quantity,
+                        "price": round(price, 2),
+                        "limit_price": limit_price,
+                        "limit_offset_pct": round(offset, 3),
+                        "per_trade_risk": round(risk, 2),
+                        "stop_loss_pct": round(sl_pct, 3),
+                        "product_type": product_type,
+                        "order_type": "LIMIT",
+                        "broker": active_broker,
+                        "order_id": self._extract_order_id(response),
+                        "attempts": attempts,
+                        "response": response,
+                    }
+            except Exception as exc:
+                self.last_error = str(exc)
+                attempts.append({"attempt": attempt + 1, "limit_price": limit_price, "ok": False, "error": str(exc)})
+                if attempt >= max_attempts - 1:
+                    return {"ok": False, "error": str(exc), "attempts": attempts}
+        return {"ok": False, "error": "Order failed after retry.", "attempts": attempts, "response": response}
+
+    def _extract_expiry_dates(self, response):
+        payload = response.get("data") if isinstance(response, dict) else response
+        if isinstance(payload, dict):
+            for key in ("data", "expiryDates", "expiryList", "expiries", "expiry"):
+                if isinstance(payload.get(key), list):
+                    payload = payload[key]
+                    break
+        if not isinstance(payload, list):
+            return []
+        dates = []
+        for item in payload:
+            value = item
+            if isinstance(item, dict):
+                value = item.get("expiry") or item.get("Expiry") or item.get("date") or item.get("expiryDate")
+            if value:
+                dates.append(str(value)[:10])
+        return sorted(set(dates))
+
+    def _current_month_expiry(self, expiries):
+        today = datetime.now(IST).date()
+        parsed = []
+        for value in expiries or []:
+            try:
+                dt = datetime.fromisoformat(str(value)[:10]).date()
+            except (TypeError, ValueError):
+                continue
+            if dt >= today:
+                parsed.append(dt)
+        same_month = [dt for dt in parsed if dt.year == today.year and dt.month == today.month]
+        selected = min(same_month or parsed) if (same_month or parsed) else None
+        return selected.isoformat() if selected else None
+
+    def _flatten_option_chain_rows(self, payload):
+        data = payload.get("data") if isinstance(payload, dict) else payload
+        if isinstance(data, dict) and isinstance(data.get("data"), (dict, list)):
+            data = data["data"]
+        if isinstance(data, dict) and isinstance(data.get("oc"), dict):
+            rows = []
+            for strike, value in data["oc"].items():
+                if isinstance(value, dict):
+                    row = dict(value)
+                    row.setdefault("strike_price", strike)
+                    rows.append(row)
+            return rows
+        if isinstance(data, dict):
+            for key in ("records", "rows", "optionChain", "option_chain"):
+                if isinstance(data.get(key), list):
+                    return data[key]
+        return data if isinstance(data, list) else []
+
+    def _nested_first(self, payload, *keys):
+        if not isinstance(payload, dict):
+            return None
+        for key in keys:
+            if key in payload and payload.get(key) not in (None, ""):
+                return payload.get(key)
+        for value in payload.values():
+            if isinstance(value, dict):
+                found = self._nested_first(value, *keys)
+                if found not in (None, ""):
+                    return found
+        return None
+
+    def _option_candidate_from_row(self, row, option_side):
+        if not isinstance(row, dict):
+            return None
+        strike = self._float_or_none(
+            row.get("strike_price") or row.get("strikePrice") or row.get("StrikePrice") or row.get("strike")
+        )
+        side_payload = None
+        side_keys = ("ce", "CE", "call", "CALL", "Call") if option_side == "CALL" else ("pe", "PE", "put", "PUT", "Put")
+        for key in side_keys:
+            if isinstance(row.get(key), dict):
+                side_payload = row[key]
+                break
+        source = side_payload if isinstance(side_payload, dict) else row
+        security_id = self._nested_first(
+            source,
+            "security_id",
+            "securityId",
+            "SecurityId",
+            "call_security_id" if option_side == "CALL" else "put_security_id",
+            "callSecurityId" if option_side == "CALL" else "putSecurityId",
+        )
+        ltp = self._float_or_none(
+            self._nested_first(source, "ltp", "LTP", "last_price", "lastTradedPrice", "last_price")
+        )
+        lot_size = self._nested_first(source, "lot_size", "lotSize", "minimumLotSize", "lot")
+        try:
+            lot_size = int(float(lot_size or 1))
+        except (TypeError, ValueError):
+            lot_size = 1
+        if security_id in (None, "") or strike is None:
+            return None
+        return {
+            "security_id": str(int(float(security_id))),
+            "strike": strike,
+            "ltp": ltp,
+            "lot_size": max(1, lot_size),
+        }
+
+    def _atm_option_contract(self, symbol, option_side, spot_price):
+        if self._current_broker() != "dhan" or not isinstance(self.kite, DhanClient):
+            return None, "Option orders currently require active Dhan broker."
+        symbol = (symbol or "").strip().upper()
+        underlying_id = self.symbol_to_token.get(symbol)
+        if not underlying_id:
+            return None, f"{symbol} is not available in Dhan universe yet."
+        try:
+            expiries = self._extract_expiry_dates(self.kite.option_expiry_list(underlying_id, "NSE_FNO"))
+            expiry = self._current_month_expiry(expiries)
+            if not expiry:
+                return None, f"No current-month option expiry found for {symbol}."
+            chain = self.kite.option_chain(underlying_id, "NSE_FNO", expiry)
+        except Exception as exc:
+            return None, str(exc)
+        candidates = []
+        for row in self._flatten_option_chain_rows(chain):
+            candidate = self._option_candidate_from_row(row, option_side)
+            if candidate:
+                candidates.append(candidate)
+        if not candidates:
+            return None, f"No {option_side} option contract found for {symbol}."
+        contract = min(candidates, key=lambda item: abs(float(item["strike"]) - float(spot_price)))
+        contract["expiry"] = expiry
+        contract["option_side"] = option_side
+        return contract, None
+
+    def place_ione_power_option_order(
+        self,
+        symbol,
+        option_side,
+        client_price=None,
+        option_ltp=None,
+        limit_offset_pct=0.1,
+        retry_attempts=2,
+    ):
+        symbol = (symbol or "").strip().upper()
+        option_side = (option_side or "").strip().upper()
+        if option_side not in {"CALL", "PUT"}:
+            return {"ok": False, "error": "Option side must be CALL or PUT."}
+        spot_price = self._latest_price_for_symbol(symbol, client_price=client_price)
+        if spot_price in (None, 0):
+            return {"ok": False, "error": f"Live price is not available for {symbol}."}
+        contract, error = self._atm_option_contract(symbol, option_side, spot_price)
+        if error:
+            return {"ok": False, "error": error}
+        premium = self._float_or_none(option_ltp) or contract.get("ltp")
+        if premium in (None, 0):
+            premium = self._quote_ltp_for_security("NSE_FNO", contract["security_id"])
+        if premium in (None, 0):
+            return {"ok": False, "error": f"Option premium is not available for {symbol} {option_side}."}
+        try:
+            offset = max(0.0, float(limit_offset_pct if limit_offset_pct is not None else 0.1))
+        except (TypeError, ValueError):
+            offset = 0.1
+        max_attempts = max(1, min(2, int(retry_attempts or 2)))
+        attempts = []
+        response = None
+        quantity = int(contract.get("lot_size") or 1)
+        for attempt in range(max_attempts):
+            current_premium = self._quote_ltp_for_security("NSE_FNO", contract["security_id"]) or premium
+            limit_price = round(current_premium * (1 + (offset / 100)), 2)
+            try:
+                response = self.kite.place_order(
+                    security_id=contract["security_id"],
+                    transaction_type="BUY",
+                    quantity=quantity,
+                    exchange_segment="NSE_FNO",
+                    product_type="INTRADAY",
+                    order_type="LIMIT",
+                    price=limit_price,
+                    correlation_id=f"IPOPT{symbol}{option_side[:1]}{int(time.time())}{attempt + 1}"[:30],
+                )
+                attempts.append({"attempt": attempt + 1, "limit_price": limit_price, "ok": not self._is_order_response_failed(response)})
+                if not self._is_order_response_failed(response):
+                    return {
+                        "ok": True,
+                        "symbol": symbol,
+                        "side": "BUY",
+                        "option_side": option_side,
+                        "security_id": contract["security_id"],
+                        "strike": contract["strike"],
+                        "expiry": contract["expiry"],
+                        "quantity": quantity,
+                        "lot_size": quantity,
+                        "premium": round(float(premium), 2),
+                        "limit_price": limit_price,
+                        "limit_offset_pct": round(offset, 3),
+                        "product_type": "INTRADAY",
+                        "order_type": "LIMIT",
+                        "broker": "dhan",
+                        "order_id": self._extract_order_id(response),
+                        "attempts": attempts,
+                        "response": response,
+                    }
+            except Exception as exc:
+                self.last_error = str(exc)
+                attempts.append({"attempt": attempt + 1, "ok": False, "error": str(exc)})
+                if attempt >= max_attempts - 1:
+                    return {"ok": False, "error": str(exc), "attempts": attempts}
+        return {"ok": False, "error": "Option order failed after retry.", "attempts": attempts, "response": response}
 
     def _cached_snapshot(self):
         return load_market_cache(SNAPSHOT_CACHE_KEY)

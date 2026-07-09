@@ -60,6 +60,21 @@ class FakeSession:
         return self.response
 
 
+class FakeSequenceSession:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.headers = {}
+        self.payloads = []
+        self.urls = []
+
+    def post(self, url, json, timeout):
+        self.urls.append(url)
+        self.payloads.append(json)
+        if not self.responses:
+            return FakeResponse({})
+        return self.responses.pop(0)
+
+
 class RateLimitedDhan:
     def marketfeed_quote(self, securities):
         from app.kite_engine import DhanRateLimitError
@@ -1630,6 +1645,73 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertEqual(fake_kite.last_payload["product"], "MIS")
         self.assertEqual(fake_kite.last_payload["order_type"], "LIMIT")
         self.assertEqual(fake_kite.last_payload["price"], 490.0)
+
+    def test_ione_power_equity_order_uses_risk_quantity_and_limit_offset(self):
+        from app.kite_engine import DhanClient
+
+        fake_session = FakeSession(FakeResponse({"status": "success", "orderId": "IP123"}))
+        engine = MarketEngine(redis_client=None)
+        engine.broker = "dhan"
+        engine.kite = DhanClient("client-1", "token", http_session=fake_session)
+        engine.symbol_to_token = {"INFY": 1594}
+        engine.dhan_security_to_segment = {1594: "NSE_EQ"}
+        engine.dhan_security_to_instrument = {1594: "EQUITY"}
+        engine.latest = {"INFY": {"price": 1000.0}}
+
+        result = engine.place_ione_power_equity_order(
+            "INFY",
+            "BUY",
+            per_trade_risk=800,
+            stop_loss_pct=0.6,
+            limit_offset_pct=0.01,
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["quantity"], 133)
+        self.assertEqual(result["limit_price"], 1000.1)
+        self.assertEqual(result["order_id"], "IP123")
+        self.assertEqual(fake_session.last_payload["orderType"], "LIMIT")
+        self.assertEqual(fake_session.last_payload["price"], 1000.1)
+
+    def test_ione_power_option_order_picks_atm_call_and_places_one_lot_limit(self):
+        from app.kite_engine import DhanClient
+
+        fake_session = FakeSequenceSession(
+            [
+                FakeResponse({"status": "success", "data": ["2026-07-30", "2026-08-27"]}),
+                FakeResponse(
+                    {
+                        "status": "success",
+                        "data": {
+                            "oc": {
+                                "980": {"ce": {"security_id": "9001", "ltp": 12.0, "lot_size": 750}},
+                                "1000": {"ce": {"security_id": "9002", "ltp": 10.0, "lot_size": 750}},
+                                "1020": {"ce": {"security_id": "9003", "ltp": 8.0, "lot_size": 750}},
+                            }
+                        },
+                    }
+                ),
+                FakeResponse({"status": "success", "data": {"NSE_FNO": {"9002": {"ltp": 10.0}}}}),
+                FakeResponse({"status": "success", "orderId": "OPT123"}),
+            ]
+        )
+        engine = MarketEngine(redis_client=None)
+        engine.broker = "dhan"
+        engine.kite = DhanClient("client-1", "token", http_session=fake_session)
+        engine.symbol_to_token = {"INFY": 1594}
+        engine.latest = {"INFY": {"price": 1004.0}}
+
+        result = engine.place_ione_power_option_order("INFY", "CALL", limit_offset_pct=0.1)
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["security_id"], "9002")
+        self.assertEqual(result["strike"], 1000.0)
+        self.assertEqual(result["quantity"], 750)
+        self.assertEqual(result["limit_price"], 10.01)
+        self.assertEqual(fake_session.payloads[-1]["exchangeSegment"], "NSE_FNO")
+        self.assertEqual(fake_session.payloads[-1]["securityId"], "9002")
+        self.assertEqual(fake_session.payloads[-1]["orderType"], "LIMIT")
+        self.assertEqual(fake_session.payloads[-1]["price"], 10.01)
 
     def test_dhan_historical_parser_accepts_sdk_style_rows_with_volume(self):
         from app.kite_engine import DhanClient

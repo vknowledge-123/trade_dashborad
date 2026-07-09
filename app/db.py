@@ -14,9 +14,9 @@ DB_PATH = Path(
 )
 
 DEFAULT_COURSE_SETTINGS = {
-    "four_month_price": 5000,
-    "one_year_price": 10000,
-    "support_text": "Priority support, live Q&A sessions, and direct mentorship guidance with Owner Amol Charpe.",
+    "four_month_price": 2000,
+    "one_year_price": 5500,
+    "support_text": "Premium Strategy Course access, dashboard support, and guidance from Amol Sir for practical equity cash trading.",
     "payment_qr_path": "",
     "free_course_title": "Free Trading Foundation Course",
     "free_course_description": "Start with the basics of scanner workflow, risk discipline, and practical market preparation.",
@@ -386,6 +386,21 @@ def init_db():
             DEFAULT_COURSE_SETTINGS["free_course_title"],
             DEFAULT_COURSE_SETTINGS["free_course_description"],
             DEFAULT_COURSE_SETTINGS["free_course_youtube_url"],
+            now,
+        ),
+    )
+    cur.execute(
+        """
+        UPDATE course_settings
+        SET four_month_price = ?, one_year_price = ?, support_text = ?, updated_at = ?
+        WHERE id = 1
+          AND four_month_price = 5000
+          AND one_year_price = 10000
+        """,
+        (
+            DEFAULT_COURSE_SETTINGS["four_month_price"],
+            DEFAULT_COURSE_SETTINGS["one_year_price"],
+            DEFAULT_COURSE_SETTINGS["support_text"],
             now,
         ),
     )

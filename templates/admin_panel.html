@@ -219,12 +219,12 @@
       <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}" />
       <div class="course-settings-grid">
         <label>
-          4 Months Price
-          <input type="number" name="four_month_price" min="0" step="1" value="{{ course_settings['four_month_price'] if course_settings else 5000 }}" required />
+          Monthly Price
+          <input type="number" name="four_month_price" min="0" step="1" value="{{ course_settings['four_month_price'] if course_settings else 2000 }}" required />
         </label>
         <label>
-          1 Year Price
-          <input type="number" name="one_year_price" min="0" step="1" value="{{ course_settings['one_year_price'] if course_settings else 10000 }}" required />
+          Yearly Price
+          <input type="number" name="one_year_price" min="0" step="1" value="{{ course_settings['one_year_price'] if course_settings else 5500 }}" required />
         </label>
       </div>
       <label>
@@ -430,11 +430,11 @@
         </label>
         <label>
           Plan Name
-          <input type="text" name="plan_name" value="4 Months Premium + Academy" required />
+          <input type="text" name="plan_name" value="Monthly Premium Strategy Course + Dashboard" required />
         </label>
         <label>
           Duration Days
-          <input type="number" name="duration_days" min="1" step="1" value="120" required />
+          <input type="number" name="duration_days" min="1" step="1" value="30" required />
         </label>
         <label>
           Notes
