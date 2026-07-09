@@ -1,20 +1,20 @@
 {% extends "base.html" %}
 {% block content %}
 
-<div class="dash-shell">
+<div class="dash-shell" data-mobile-panel="gainers">
   <section class="dash-hero">
     <div class="hero-badge">
       {% if guest_trial %}
         {% if guest_trial.stage == "fresh" %}
           <div class="trial-chip active">
             <span class="trial-cta">Guest dashboard access is live instantly.</span>
-            Explore the market dashboard freely. We will ask you to register after 1 day.
+            Explore the market dashboard freely for 24 hours. Register to start your 3 trading-day free trial.
             <a href="/register" class="trial-link">Create account now</a>
           </div>
         {% elif guest_trial.stage == "register" %}
           <div class="trial-chip register-stage">
             <span class="trial-cta">It is time to register on the platform.</span>
-            Your dashboard access continues, but create your account now so your journey stays connected before the premium invitation starts after 1 week.
+            Create your account now to start your 3 trading-day free trial.
             <a href="/register" class="trial-link">Register now</a>
           </div>
         {% else %}
@@ -26,9 +26,9 @@
       {% elif trial %}
         <div class="trial-chip {{ 'active' if trial.active else 'expired' }}">
           {% if trial.active %}
-            Platform trial · {{ trial.remaining_days }} days left (ends {{ trial.end_date }})
+            Free trial - {{ trial.remaining_days }} trading days left (ends {{ trial.end_date }})
           {% else %}
-            Your 1-week platform trial is complete. Contact support to continue platform access.
+            Your free trial is complete. Contact support to continue platform access.
           {% endif %}
         </div>
       {% endif %}
@@ -47,6 +47,12 @@
       </div>
     </div>
   </section>
+
+  <nav class="mobile-dashboard-tabs" aria-label="Dashboard sections">
+    <button type="button" class="mobile-dashboard-tab active" data-dashboard-panel-tab="gainers" aria-selected="true">Gainers</button>
+    <button type="button" class="mobile-dashboard-tab" data-dashboard-panel-tab="losers" aria-selected="false">Losers</button>
+    <button type="button" class="mobile-dashboard-tab" data-dashboard-panel-tab="sectors" aria-selected="false">Sectors</button>
+  </nav>
 
   <section class="dash-grid">
     <div class="panel panel-gainers">
@@ -234,6 +240,9 @@
 }
 .dash-hero { margin: 0 !important; padding: 0 !important; }
 .promo-strip { margin: 6px 8px !important; border-radius: 12px !important; }
+.mobile-dashboard-tabs {
+  display: none;
+}
 .dash-grid {
   padding: 0 !important;
   gap: 12px;
@@ -573,6 +582,48 @@
     padding: 4px !important;
     overflow-x: hidden;
     overflow-y: visible;
+  }
+
+  .mobile-dashboard-tabs {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 4px;
+    margin: 4px;
+    padding: 3px;
+    border: 1px solid rgba(232, 234, 237, 0.10);
+    border-radius: 10px;
+    background: #111720;
+    box-shadow: var(--shadow-sm);
+  }
+
+  .mobile-dashboard-tab {
+    min-width: 0;
+    min-height: 32px;
+    padding: 6px 4px;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    background: transparent;
+    color: #9fb2cf;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0;
+    text-align: center;
+    cursor: pointer;
+  }
+
+  .mobile-dashboard-tab.active {
+    border-color: rgba(0, 212, 255, 0.28);
+    background: rgba(0, 212, 255, 0.12);
+    color: #e9f8ff;
+  }
+
+  .dash-shell[data-mobile-panel="gainers"] .panel-losers,
+  .dash-shell[data-mobile-panel="gainers"] .panel-sector,
+  .dash-shell[data-mobile-panel="losers"] .panel-gainers,
+  .dash-shell[data-mobile-panel="losers"] .panel-sector,
+  .dash-shell[data-mobile-panel="sectors"] .panel-gainers,
+  .dash-shell[data-mobile-panel="sectors"] .panel-losers {
+    display: none !important;
   }
 
   .hero-badge {
@@ -1006,5 +1057,48 @@
   }
 }
 </style>
+
+<script>
+(function () {
+  var shell = document.querySelector(".dash-shell");
+  var tabs = Array.prototype.slice.call(document.querySelectorAll("[data-dashboard-panel-tab]"));
+  if (!shell || !tabs.length) {
+    return;
+  }
+
+  var allowedPanels = ["gainers", "losers", "sectors"];
+
+  function setMobilePanel(panel, shouldStore) {
+    if (allowedPanels.indexOf(panel) === -1) {
+      panel = "gainers";
+    }
+    shell.dataset.mobilePanel = panel;
+    tabs.forEach(function (tab) {
+      var isActive = tab.dataset.dashboardPanelTab === panel;
+      tab.classList.toggle("active", isActive);
+      tab.setAttribute("aria-selected", isActive ? "true" : "false");
+    });
+    if (shouldStore) {
+      try {
+        window.localStorage.setItem("dashboard_mobile_panel", panel);
+      } catch (error) {
+        // Ignore private browsing/storage failures.
+      }
+    }
+  }
+
+  tabs.forEach(function (tab) {
+    tab.addEventListener("click", function () {
+      setMobilePanel(tab.dataset.dashboardPanelTab, true);
+    });
+  });
+
+  try {
+    setMobilePanel(window.localStorage.getItem("dashboard_mobile_panel") || "gainers", false);
+  } catch (error) {
+    setMobilePanel("gainers", false);
+  }
+})();
+</script>
 
 {% endblock %}

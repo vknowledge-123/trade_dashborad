@@ -68,7 +68,7 @@ from app.config import (
     HCAPTCHA_SITE_KEY,
     HCAPTCHA_SECRET,
 )
-from app.kite_engine import IST, MarketEngine
+from app.kite_engine import IST, MarketEngine, NSE_TRADING_HOLIDAYS
 from app.security import hash_password, verify_password, should_upgrade_password_hash
 
 app = FastAPI()
@@ -237,8 +237,7 @@ engine.fno_override = SIMULATION_FNO_STOCKS
 engine.nifty500_set = {s.upper() for s in NIFTY_500_STOCKS}
 engine.demo_mode = False
 GUEST_REGISTER_PROMPT_HOURS = 24
-GUEST_PREMIUM_PROMPT_DAYS = 7
-USER_PREMIUM_PROMPT_DAYS = 7
+REGISTERED_TRIAL_TRADING_DAYS = 3
 
 
 def utcnow():
@@ -598,18 +597,57 @@ def require_admin(request: Request):
 def trial_status(user_row):
     start = datetime.fromisoformat(user_row["trial_start"])
     days = int(user_row["trial_days"])
-    if not user_row["is_admin"]:
-        days = max(days, USER_PREMIUM_PROMPT_DAYS)
-    end = start + timedelta(days=days)
     now = utcnow()
-    remaining_seconds = max(0, int((end - now).total_seconds()))
-    remaining_days = math.ceil(remaining_seconds / 86400) if remaining_seconds else 0
+    if user_row["is_admin"]:
+        end = start + timedelta(days=days)
+        remaining_seconds = max(0, int((end - now).total_seconds()))
+        remaining_days = math.ceil(remaining_seconds / 86400) if remaining_seconds else 0
+        return {
+            "active": now <= end,
+            "end_date": end.strftime("%Y-%m-%d"),
+            "remaining_days": remaining_days,
+            "total_days": days,
+        }
+
+    trial_days = max(days, REGISTERED_TRIAL_TRADING_DAYS)
+    start_date = ist_date_from_utc_naive(start)
+    now_date = ist_date_from_utc_naive(now)
+    end_date = add_trading_days(start_date, trial_days)
     return {
-        "active": now <= end,
-        "end_date": end.strftime("%Y-%m-%d"),
-        "remaining_days": remaining_days,
-        "total_days": days,
+        "active": now_date <= end_date,
+        "end_date": end_date.isoformat(),
+        "remaining_days": count_trading_days(now_date, end_date) if now_date <= end_date else 0,
+        "total_days": trial_days,
     }
+
+
+def ist_date_from_utc_naive(moment):
+    return moment.replace(tzinfo=timezone.utc).astimezone(IST).date()
+
+
+def is_trial_trading_day(session_date):
+    return session_date.weekday() < 5 and session_date.isoformat() not in NSE_TRADING_HOLIDAYS
+
+
+def add_trading_days(start_date, trading_days):
+    current = start_date
+    counted = 0
+    while True:
+        if is_trial_trading_day(current):
+            counted += 1
+            if counted >= trading_days:
+                return current
+        current += timedelta(days=1)
+
+
+def count_trading_days(start_date, end_date):
+    current = start_date
+    count = 0
+    while current <= end_date:
+        if is_trial_trading_day(current):
+            count += 1
+        current += timedelta(days=1)
+    return count
 
 
 def guest_dashboard_status(request: Request):
@@ -626,17 +664,13 @@ def guest_dashboard_status(request: Request):
         request.session["guest_dashboard_started_at"] = started_at.isoformat(timespec="seconds")
 
     register_prompt_at = started_at + timedelta(hours=GUEST_REGISTER_PROMPT_HOURS)
-    premium_prompt_at = started_at + timedelta(days=GUEST_PREMIUM_PROMPT_DAYS)
     register_remaining_seconds = max(0, int((register_prompt_at - now).total_seconds()))
     hours_left = register_remaining_seconds // 3600
     minutes_left = max(1, register_remaining_seconds // 60) if register_remaining_seconds else 0
 
-    if now >= premium_prompt_at:
-        stage = "premium"
-        remaining_text = "Premium invitation active"
-    elif now >= register_prompt_at:
+    if now >= register_prompt_at:
         stage = "register"
-        remaining_text = "Registration recommended"
+        remaining_text = "Registration required"
     elif hours_left >= 1:
         stage = "fresh"
         remaining_text = f"{hours_left}h before registration prompt"
@@ -647,7 +681,6 @@ def guest_dashboard_status(request: Request):
     return {
         "started_at": started_at.isoformat(timespec="seconds"),
         "register_prompt_at": register_prompt_at.isoformat(timespec="seconds"),
-        "premium_prompt_at": premium_prompt_at.isoformat(timespec="seconds"),
         "stage": stage,
         "remaining_text": remaining_text,
     }
@@ -689,7 +722,16 @@ def home(request: Request):
 
 @app.get("/register", response_class=HTMLResponse)
 def register_get(request: Request):
-    return templates.TemplateResponse(request, "register.html", {"error": None, "user": None, "admin": None})
+    return templates.TemplateResponse(
+        request,
+        "register.html",
+        {
+            "error": None,
+            "user": None,
+            "admin": None,
+            "guest_expired": request.query_params.get("guest") == "expired",
+        },
+    )
 
 
 @app.post("/register", response_class=HTMLResponse)
@@ -704,13 +746,21 @@ def register_post(
     require_csrf(request, csrf_token)
     password_error = password_policy_error(password)
     if password_error:
-        return templates.TemplateResponse(request, "register.html", {"error": password_error, "user": None, "admin": None})
+        return templates.TemplateResponse(
+            request,
+            "register.html",
+            {"error": password_error, "user": None, "admin": None, "guest_expired": False},
+        )
     existing = get_user_by_email(email)
     if existing:
-        return templates.TemplateResponse(request, "register.html", {"error": "Email already registered.", "user": None, "admin": None})
+        return templates.TemplateResponse(
+            request,
+            "register.html",
+            {"error": "Email already registered.", "user": None, "admin": None, "guest_expired": False},
+        )
 
     password_hash = hash_password(password)
-    user_id = create_user(full_name, email, phone, password_hash, trial_days=USER_PREMIUM_PROMPT_DAYS)
+    user_id = create_user(full_name, email, phone, password_hash, trial_days=REGISTERED_TRIAL_TRADING_DAYS)
     request.session["user_id"] = user_id
     return RedirectResponse(url="/dashboard", status_code=302)
 
@@ -768,6 +818,8 @@ def dashboard(request: Request):
     guest_trial = None
     if not user and not admin:
         guest_trial = guest_dashboard_status(request)
+        if guest_trial["stage"] == "register":
+            return RedirectResponse(url="/register?guest=expired", status_code=302)
     snapshot = engine.get_snapshot()
     trial = trial_status(user) if user else None
     course_settings = get_course_settings()

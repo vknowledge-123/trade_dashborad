@@ -3,7 +3,10 @@
 <section class="auth">
   <div class="auth-card">
     <h2>Create your account</h2>
-    <p class="muted">Start your 1-day free trial instantly.</p>
+    {% if guest_expired %}
+      <div class="alert">Your 24-hour guest preview is complete. Register now to start your 3 trading-day free trial.</div>
+    {% endif %}
+    <p class="muted">Start your 3 trading-day free trial instantly.</p>
 
     {% if error %}
       <div class="alert">{{ error }}</div>
