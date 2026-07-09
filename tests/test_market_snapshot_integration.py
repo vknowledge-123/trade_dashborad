@@ -462,6 +462,68 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
 
         self.assertEqual(row["turnover"], 185245728.0)
 
+    def test_dashboard_snapshot_filters_stocks_by_opening_turnover_and_multiplier(self):
+        engine = MarketEngine(redis_client=None)
+        engine.nifty500_set = {"BIGGAIN", "SMALLGAIN", "SLOWGAIN", "BIGLOSS", "SMALLLOSS", "SLOWLOSS"}
+        engine.latest = {
+            "BIGGAIN": {"symbol": "BIGGAIN", "price": 120, "change": 5.0, "volume": 1000},
+            "SMALLGAIN": {"symbol": "SMALLGAIN", "price": 90, "change": 6.0, "volume": 1000},
+            "SLOWGAIN": {"symbol": "SLOWGAIN", "price": 95, "change": 7.0, "volume": 1000},
+            "BIGLOSS": {"symbol": "BIGLOSS", "price": 80, "change": -4.0, "volume": 1000},
+            "SMALLLOSS": {"symbol": "SMALLLOSS", "price": 70, "change": -5.0, "volume": 1000},
+            "SLOWLOSS": {"symbol": "SLOWLOSS", "price": 75, "change": -6.0, "volume": 1000},
+        }
+        opening_turnovers = {
+            "BIGGAIN": 31_000_000,
+            "SMALLGAIN": 29_000_000,
+            "SLOWGAIN": 60_000_000,
+            "BIGLOSS": 32_000_000,
+            "SMALLLOSS": 50_000_000,
+            "SLOWLOSS": 70_000_000,
+        }
+        opening_multipliers = {
+            "BIGGAIN": 2.5,
+            "SMALLGAIN": 5.0,
+            "SLOWGAIN": 2.49,
+            "BIGLOSS": 3.0,
+            "SMALLLOSS": 1.5,
+            "SLOWLOSS": 2.0,
+        }
+        engine._opening_candle_context = lambda symbol, reference_price=None, allow_fetch=False: {
+            "opening_turnover": opening_turnovers.get(symbol),
+            "opening_volume_sma_multiplier": opening_multipliers.get(symbol),
+        }
+        engine._ensure_opening_candle_background_refresh = lambda symbols: False
+
+        snapshot = engine._build_snapshot(market_open=True)
+
+        self.assertEqual([row["symbol"] for row in snapshot["gainers"]], ["BIGGAIN"])
+        self.assertEqual([row["symbol"] for row in snapshot["losers"]], ["BIGLOSS"])
+
+    def test_dashboard_snapshot_limits_gainers_and_losers_to_ten(self):
+        engine = MarketEngine(redis_client=None)
+        engine.nifty500_set = {f"GAIN{i}" for i in range(12)} | {f"LOSS{i}" for i in range(12)}
+        engine.latest = {
+            **{
+                f"GAIN{i}": {"symbol": f"GAIN{i}", "price": 100 + i, "change": 20 - i, "volume": 1000}
+                for i in range(12)
+            },
+            **{
+                f"LOSS{i}": {"symbol": f"LOSS{i}", "price": 100 + i, "change": -20 + i, "volume": 1000}
+                for i in range(12)
+            },
+        }
+        engine._opening_candle_context = lambda symbol, reference_price=None, allow_fetch=False: {
+            "opening_turnover": 40_000_000,
+            "opening_volume_sma_multiplier": 3.0,
+        }
+        engine._ensure_opening_candle_background_refresh = lambda symbols: False
+
+        snapshot = engine._build_snapshot(market_open=True)
+
+        self.assertEqual(len(snapshot["gainers"]), 10)
+        self.assertEqual(len(snapshot["losers"]), 10)
+
     def test_decorate_snapshot_rows_backfills_cached_turnover(self):
         engine = MarketEngine(redis_client=None)
         snapshot = {
@@ -630,6 +692,10 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         engine._restore_previous_day_badges_cache = lambda: engine.previous_day_badges_cache
         engine._restore_previous_close_cache = lambda: engine.previous_close_cache
         engine._save_latest_rows_cache = lambda: None
+        engine._opening_candle_context = lambda symbol, reference_price=None, allow_fetch=False: {
+            "opening_turnover": {"INFY": 120_000_000, "HDFCBANK": 130_000_000}.get(symbol),
+            "opening_volume_sma_multiplier": 3.0,
+        }
 
         snapshot = engine._build_snapshot(market_open=False)
 
@@ -2309,26 +2375,19 @@ class MarketSnapshotApiIntegrationTests(unittest.TestCase):
         self.assertTrue(response.json()["ok"])
         self.assertEqual(response.json()["status"]["status"], "completed")
 
-    def test_free_course_page_renders_playlist_classes(self):
-        from app.db import add_free_course_class, delete_free_course_class
+    def test_removed_pages_return_not_found(self):
+        with TestClient(main_module.app) as client:
+            responses = [
+                client.get("/free-course"),
+                client.get("/services"),
+                client.get("/pdh-pdl-scanner"),
+                client.get("/swing-scanner"),
+                client.get("/api/pdh-pdl-scanner"),
+                client.get("/api/swing-scanner"),
+                client.get("/api/swing-backtest?symbol=INFY"),
+            ]
 
-        class_id = add_free_course_class(
-            "Scanner Basics",
-            "Learn how to read the dashboard scanners.",
-            "https://youtu.be/dQw4w9WgXcQ",
-            sort_order=1,
-            is_published=1,
-        )
-        try:
-            with TestClient(main_module.app) as client:
-                response = client.get("/free-course")
-        finally:
-            delete_free_course_class(class_id)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertIn("Class Playlist", response.text)
-        self.assertIn("Scanner Basics", response.text)
-        self.assertIn("https://www.youtube.com/embed/dQw4w9WgXcQ", response.text)
+        self.assertTrue(all(response.status_code == 404 for response in responses))
 
     def test_ione_power_api_hides_open_extreme_details_for_non_admin(self):
         with patch.object(
@@ -2342,6 +2401,7 @@ class MarketSnapshotApiIntegrationTests(unittest.TestCase):
                         "opening_turnover": 115000000,
                         "opening_volume_sma_multiplier": 2.6,
                         "sector_rank": 1,
+                        "is_fno": True,
                         "first_hit_at": "2026-07-07T09:16:00+05:30",
                         "day_open": 1000,
                         "day_low": 1000,
@@ -2362,6 +2422,7 @@ class MarketSnapshotApiIntegrationTests(unittest.TestCase):
         self.assertNotIn("open_high_losers", payload)
         self.assertEqual(payload["ione_power_long"][0]["symbol"], "INFY")
         self.assertEqual(payload["ione_power_long"][0]["rating"], 5)
+        self.assertTrue(payload["ione_power_long"][0]["is_fno"])
         self.assertNotIn("day_open", payload["ione_power_long"][0])
 
     def test_ione_power_rating_rules(self):
@@ -2381,10 +2442,76 @@ class MarketSnapshotApiIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(
             main_module.ione_power_rating(
+                {"opening_turnover": 60_000_000, "opening_volume_sma_multiplier": 2.5}
+            ),
+            4,
+        )
+        self.assertEqual(
+            main_module.ione_power_rating(
+                {"opening_turnover": 100_000_000, "opening_volume_sma_multiplier": 2.5}
+            ),
+            4,
+        )
+        self.assertEqual(
+            main_module.ione_power_rating(
                 {"opening_turnover": 110000000, "opening_volume_sma_multiplier": 2.6}
             ),
             5,
         )
+
+    def test_ione_power_payload_sorts_highest_rating_first(self):
+        payload = main_module.ione_power_payload(
+            {
+                "open_low_gainers": [
+                    {"symbol": "LOW", "opening_turnover": 5_000_000, "updated_at": "2026-07-07T09:15:00+05:30"},
+                    {
+                        "symbol": "HIGH",
+                        "opening_turnover": 110_000_000,
+                        "opening_volume_sma_multiplier": 2.6,
+                        "updated_at": "2026-07-07T09:16:00+05:30",
+                    },
+                    {
+                        "symbol": "MID",
+                        "opening_turnover": 60_000_000,
+                        "opening_volume_sma_multiplier": 2.5,
+                        "updated_at": "2026-07-07T09:17:00+05:30",
+                    },
+                ],
+                "open_high_losers": [],
+            }
+        )
+        self.assertEqual([row["symbol"] for row in payload["ione_power_long"]], ["HIGH", "MID", "LOW"])
+
+    def test_admin_blaster_payload_filters_strong_rows_with_details_intact(self):
+        payload = main_module.admin_blaster_payload(
+            {
+                "rows": [
+                    {
+                        "symbol": "PASS",
+                        "volume_sma_multiplier": 10.1,
+                        "turnover": 10_000_001,
+                        "appearance_time": "2026-07-07T09:20:00+05:30",
+                        "candle_volume": 100000,
+                    },
+                    {
+                        "symbol": "TEN",
+                        "volume_sma_multiplier": 10,
+                        "turnover": 20_000_000,
+                        "appearance_time": "2026-07-07T09:21:00+05:30",
+                    },
+                    {
+                        "symbol": "SMALL",
+                        "volume_sma_multiplier": 11,
+                        "turnover": 10_000_000,
+                        "appearance_time": "2026-07-07T09:22:00+05:30",
+                    },
+                ],
+                "updated_at": "2026-07-07T09:22:00+05:30",
+            }
+        )
+        self.assertEqual([row["symbol"] for row in payload["rows"]], ["PASS"])
+        self.assertIn("volume_sma_multiplier", payload["rows"][0])
+        self.assertIn("turnover", payload["rows"][0])
 
     def test_blaster_api_filters_and_hides_acceleration_details_for_non_admin(self):
         with patch.object(
@@ -2397,6 +2524,7 @@ class MarketSnapshotApiIntegrationTests(unittest.TestCase):
                         "name": "Old Hit",
                         "volume_sma_multiplier": 5.5,
                         "turnover": 20_000_000,
+                        "move_percent": -0.7,
                         "appearance_time": "2026-07-07T09:16:00+05:30",
                         "appearance_time_display": "09:16:00 AM",
                         "candle_volume": 100000,
@@ -2406,6 +2534,7 @@ class MarketSnapshotApiIntegrationTests(unittest.TestCase):
                         "name": "New Hit",
                         "volume_sma_multiplier": 6,
                         "turnover": 15_000_000,
+                        "move_percent": 1.25,
                         "appearance_time": "2026-07-07T09:20:00+05:30",
                         "appearance_time_display": "09:20:00 AM",
                         "candle_volume": 100000,
@@ -2438,6 +2567,8 @@ class MarketSnapshotApiIntegrationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual([row["symbol"] for row in payload["rows"]], ["NEW", "OLD"])
         self.assertEqual(payload["rows"][0]["status"], "Blast")
+        self.assertEqual(payload["rows"][0]["move_percent"], 1.25)
+        self.assertEqual(payload["rows"][1]["move_percent"], -0.7)
         self.assertNotIn("volume_sma_multiplier", payload["rows"][0])
         self.assertNotIn("turnover", payload["rows"][0])
         self.assertNotIn("candle_volume", payload["rows"][0])

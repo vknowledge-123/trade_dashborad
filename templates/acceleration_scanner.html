@@ -7,7 +7,7 @@
     <div>
       <div class="panel-sub">Live momentum scanner</div>
       <h1>Acceleration Scanner</h1>
-      <p class="muted">Finds stocks moving up or down beyond the selected percent, keeps fresh hits for 2 minutes, and lets you keep important rows for the full session.</p>
+      <p class="muted">Finds stocks moving up or down beyond the selected percent, keeps fresh hits for 10 minutes, and lets you keep important rows for the full session.</p>
     </div>
     <div class="status-line">
       <span class="pill">{{ scanner.tracked_count or 0 }} tracked</span>
@@ -659,6 +659,7 @@
       <div class="table-row table-head blaster-row">
         <span>Symbol Name</span>
         <span>Status</span>
+        <span>Move %</span>
         <span>Time Of Hit</span>
         <span>Chart</span>
       </div>
@@ -669,12 +670,13 @@
             <span class="sector-stock-name">{{ row.name }}</span>
           </span>
           <span><span class="blast-status">{{ row.status }}</span></span>
+          <span class="{{ 'positive' if row.move_percent is not none and row.move_percent >= 0 else 'negative' }} mono">{% if row.move_percent is not none %}{{ '+' if row.move_percent >= 0 else '' }}{{ row.move_percent }}%{% else %}-{% endif %}</span>
           <span class="mono">{{ row.hit_time }}</span>
           <a class="tv-link" href="{{ row.chart_url }}" target="_blank" rel="noopener noreferrer">TradingView</a>
         </div>
       {% else %}
         <div class="table-row blaster-row blaster-empty">
-          <span>No blast candidates yet.</span><span></span><span></span><span></span>
+          <span>No blast candidates yet.</span><span></span><span></span><span></span><span></span>
         </div>
       {% endfor %}
     </div>
@@ -724,7 +726,7 @@
   padding: 8px 10px;
 }
 .blaster-row {
-  grid-template-columns: minmax(190px, 1fr) 0.5fr 0.65fr auto;
+  grid-template-columns: minmax(190px, 1fr) 0.5fr 0.55fr 0.65fr auto;
   align-items: center;
 }
 .blast-status {
@@ -762,6 +764,10 @@
     color: #6b7fa3;
   }
   .blaster-row:not(.table-head) > span:nth-child(3)::before {
+    content: "Move ";
+    color: #6b7fa3;
+  }
+  .blaster-row:not(.table-head) > span:nth-child(4)::before {
     content: "Time ";
     color: #6b7fa3;
   }
@@ -785,6 +791,11 @@
     '"': "&quot;",
     "'": "&#39;",
   }[char]));
+  const formatSigned = (value) => {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return "-";
+    return `${number >= 0 ? "+" : ""}${number.toFixed(2)}%`;
+  };
   const rowHtml = (row) => `
     <div class="table-row blaster-row" data-symbol="${escapeHtml(row.symbol)}">
       <span class="cell-symbol">
@@ -792,11 +803,12 @@
         <span class="sector-stock-name">${escapeHtml(row.name || row.symbol || "")}</span>
       </span>
       <span><span class="blast-status">${escapeHtml(row.status || "Blast")}</span></span>
+      <span class="${Number(row.move_percent) >= 0 ? "positive" : "negative"} mono">${formatSigned(row.move_percent)}</span>
       <span class="mono">${escapeHtml(row.hit_time || "-")}</span>
       <a class="tv-link" href="${escapeHtml(row.chart_url)}" target="_blank" rel="noopener noreferrer">TradingView</a>
     </div>
   `;
-  const emptyRow = () => `<div class="table-row blaster-row blaster-empty"><span>No blast candidates yet.</span><span></span><span></span><span></span></div>`;
+  const emptyRow = () => `<div class="table-row blaster-row blaster-empty"><span>No blast candidates yet.</span><span></span><span></span><span></span><span></span></div>`;
   const load = async () => {
     const params = new URLSearchParams();
     params.set("timeframe", timeframe?.value || "1");

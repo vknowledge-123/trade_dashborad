@@ -2006,12 +2006,9 @@ h3,
           </svg>
         </button>
         <a class="nav-link" href="/dashboard">Dashboard</a>
-        <a class="nav-link" href="/pdh-pdl-scanner">PDH/PDL</a>
-        <a class="nav-link" href="/open-extreme-scanner">Ione Power</a>
+        <a class="nav-link" href="/open-extreme-scanner">Power</a>
         <a class="nav-link" href="/acceleration-scanner">Blaster</a>
-        <a class="nav-link" href="/swing-scanner">Swing</a>
         <a class="nav-link" href="/relative-rotation">RRG</a>
-        <a class="nav-link" href="/free-course">Free Course</a>
         <a class="nav-link" href="/premium">Premium</a>
         <a class="nav-link" href="/academy">Academy</a>
         <a class="nav-link" href="/admin">Admin Panel</a>
@@ -2033,15 +2030,11 @@ h3,
           </svg>
         </button>
         <a class="nav-link" href="/dashboard">Dashboard</a>
-        <a class="nav-link" href="/pdh-pdl-scanner">PDH/PDL</a>
-        <a class="nav-link" href="/open-extreme-scanner">Ione Power</a>
+        <a class="nav-link" href="/open-extreme-scanner">Power</a>
         <a class="nav-link" href="/acceleration-scanner">Blaster</a>
-        <a class="nav-link" href="/swing-scanner">Swing</a>
         <a class="nav-link" href="/relative-rotation">RRG</a>
-        <a class="nav-link" href="/free-course">Free Course</a>
         <a class="nav-link" href="/premium">Premium</a>
         <a class="nav-link" href="/academy">Academy</a>
-        <a class="nav-link" href="/services">Services</a>
         <a class="nav-link" href="/inquiry">Inquiry</a>
         <a class="nav-link" href="/logout">Logout</a>
       {% else %}
@@ -2060,14 +2053,10 @@ h3,
           </svg>
         </button>
         <a class="nav-link" href="/dashboard">Dashboard</a>
-        <a class="nav-link" href="/pdh-pdl-scanner">PDH/PDL</a>
-        <a class="nav-link" href="/open-extreme-scanner">Ione Power</a>
+        <a class="nav-link" href="/open-extreme-scanner">Power</a>
         <a class="nav-link" href="/acceleration-scanner">Blaster</a>
-        <a class="nav-link" href="/swing-scanner">Swing</a>
         <a class="nav-link" href="/relative-rotation">RRG</a>
-        <a class="nav-link" href="/free-course">Free Course</a>
         <a class="nav-link" href="/premium">Premium</a>
-        <a class="nav-link" href="/services">Services</a>
         <a class="nav-link" href="/login">Login</a>
         <a class="nav-link nav-cta" href="/register">Register</a>
       {% endif %}
@@ -2331,7 +2320,7 @@ h3,
       if (!head) {
         head = document.createElement("div");
         head.className = "table-row table-head";
-        head.innerHTML = "<span>Symbol</span><span>Price</span><span>Volume</span><span>Turnover</span><span>Change %</span><span>Chart</span>";
+        head.innerHTML = "<span>Symbol</span><span>Price</span><span>Volume</span><span>Change %</span><span>Chart</span>";
       }
       return head;
     };
@@ -2347,7 +2336,6 @@ h3,
         <span class="cell-symbol">${symbolCellHtml(row)}</span>
         <span class="cell-price">${escapeHtml(row.price)}</span>
         <span class="cell-volume">${formatVolume(row.volume)}</span>
-        <span class="cell-turnover">${formatCrores(row.turnover)}</span>
         <span class="cell-change ${positive ? "positive" : "negative"}">${escapeHtml(`${sign}${row.change}%`)}</span>
         <a class="tv-link" href="${tradingViewUrl(row.symbol)}" target="_blank" rel="noopener noreferrer">TradingView</a>
       `;
@@ -2371,13 +2359,11 @@ h3,
           const symbolCell = el.querySelector('.cell-symbol');
           const priceCell = el.querySelector('.cell-price');
           const volumeCell = el.querySelector('.cell-volume');
-          const turnoverCell = el.querySelector('.cell-turnover');
           const changeCell = el.querySelector('.cell-change');
           const chartLink = el.querySelector('.tv-link');
           if (symbolCell) symbolCell.innerHTML = symbolCellHtml(row);
           if (priceCell) priceCell.textContent = row.price;
           if (volumeCell) volumeCell.textContent = formatVolume(row.volume);
-          if (turnoverCell) turnoverCell.textContent = formatCrores(row.turnover);
           if (changeCell) {
             changeCell.className = `cell-change ${positive ? "positive" : "negative"}`;
             changeCell.textContent = `${sign}${row.change}%`;

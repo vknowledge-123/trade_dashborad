@@ -3326,6 +3326,43 @@ class MarketEngine:
         self._decorate_rows_with_turnover(snapshot.get("losers") or [])
         return snapshot
 
+    def _opening_context_for_dashboard_row(self, row):
+        if not isinstance(row, dict):
+            return None
+        existing = self._float_or_none(row.get("opening_turnover"))
+        existing_multiplier = self._float_or_none(row.get("opening_volume_sma_multiplier"))
+        if existing not in (None, 0) and existing_multiplier not in (None, 0):
+            return existing, existing_multiplier
+        symbol = str(row.get("symbol") or "").upper()
+        if not symbol:
+            return None
+        context = self._opening_candle_context(symbol, reference_price=row.get("price"), allow_fetch=False)
+        turnover = self._float_or_none(context.get("opening_turnover"))
+        multiplier = self._float_or_none(context.get("opening_volume_sma_multiplier"))
+        if turnover not in (None, 0) or multiplier not in (None, 0):
+            row.update(context)
+        if turnover in (None, 0) or multiplier in (None, 0):
+            return None
+        return turnover, multiplier
+
+    def _dashboard_opening_turnover_rows(self, sorted_rows, limit=10):
+        prepared = []
+        missing_symbols = []
+        for row in sorted_rows or []:
+            item = dict(row)
+            opening_context = self._opening_context_for_dashboard_row(item)
+            if opening_context is None and item.get("symbol"):
+                missing_symbols.append(item.get("symbol"))
+                continue
+            opening_turnover, opening_multiplier = opening_context or (None, None)
+            if opening_turnover and opening_turnover > 30_000_000 and opening_multiplier >= 2.5:
+                prepared.append(item)
+                if len(prepared) >= limit:
+                    break
+        if missing_symbols:
+            self._ensure_opening_candle_background_refresh(missing_symbols[:60])
+        return prepared
+
     def _decorate_rows_with_turnover(self, rows):
         for row in rows or []:
             if not isinstance(row, dict):
@@ -4955,8 +4992,10 @@ class MarketEngine:
             movers = list(self.latest.values())
             if self.nifty500_set:
                 movers = [m for m in movers if m["symbol"].upper() in self.nifty500_set]
-            gainers = [dict(m) for m in sorted([m for m in movers if m["change"] > 0], key=lambda x: x["change"], reverse=True)[:20]]
-            losers = [dict(m) for m in sorted([m for m in movers if m["change"] < 0], key=lambda x: x["change"])[:20]]
+            sorted_gainers = sorted([m for m in movers if m["change"] > 0], key=lambda x: x["change"], reverse=True)
+            sorted_losers = sorted([m for m in movers if m["change"] < 0], key=lambda x: x["change"])
+            gainers = self._dashboard_opening_turnover_rows(sorted_gainers, limit=10)
+            losers = self._dashboard_opening_turnover_rows(sorted_losers, limit=10)
             sectors = list(self.sector_latest.values())
             if not sectors:
                 sectors = self._sector_rows_from_constituent_changes(movers)

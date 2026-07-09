@@ -4,18 +4,6 @@
 <div class="dash-shell">
   <section class="dash-hero">
     <div class="hero-badge">
-      {% if show_free_course_prompt and course_settings %}
-        <div class="free-course-prompt" id="free-course-prompt">
-          <div>
-            <span class="trial-cta">Free course available</span>
-            <span>{{ course_settings.free_course_title or 'Free Trading Foundation Course' }}</span>
-          </div>
-          <div class="free-course-prompt-actions">
-            <a class="btn btn-primary btn-mini" href="/free-course">Watch</a>
-            <button class="btn btn-ghost btn-mini" id="free-course-dismiss" type="button">Close</button>
-          </div>
-        </div>
-      {% endif %}
       {% if guest_trial %}
         {% if guest_trial.stage == "fresh" %}
           <div class="trial-chip active">
@@ -66,8 +54,7 @@
         <div class="panel-title-group">
           <span class="panel-icon panel-icon-green">▲</span>
           <div>
-            <h3>Top 20 Gainers</h3>
-            <div class="panel-sub">Best performing stocks today</div>
+            <h3>Gainers</h3>
           </div>
         </div>
         <span class="pill positive">% vs Prev Close</span>
@@ -77,7 +64,6 @@
           <span>Symbol</span>
           <span>Price</span>
           <span>Volume</span>
-          <span>Turnover</span>
           <span>Change %</span>
           <span>Chart</span>
         </div>
@@ -93,7 +79,6 @@
             </span>
             <span class="mono">{{ g.price }}</span>
             <span class="mono">{{ format_compact_volume(g.volume if g.volume is defined else none) }}</span>
-            <span class="mono">{{ format_crores(g.turnover if g.turnover is defined else none) }}</span>
             <span class="positive mono">+{{ g.change }}%</span>
             <a class="tv-link" href="https://www.tradingview.com/chart/?symbol=NSE%3A{{ g.symbol | urlencode }}" target="_blank" rel="noopener noreferrer">TradingView</a>
           </div>
@@ -106,8 +91,7 @@
         <div class="panel-title-group">
           <span class="panel-icon panel-icon-red">▼</span>
           <div>
-            <h3>Top 20 Losers</h3>
-            <div class="panel-sub">Underperforming stocks today</div>
+            <h3>Losers</h3>
           </div>
         </div>
         <span class="pill negative">% vs Prev Close</span>
@@ -117,7 +101,6 @@
           <span>Symbol</span>
           <span>Price</span>
           <span>Volume</span>
-          <span>Turnover</span>
           <span>Change %</span>
           <span>Chart</span>
         </div>
@@ -133,7 +116,6 @@
             </span>
             <span class="mono">{{ l.price }}</span>
             <span class="mono">{{ format_compact_volume(l.volume if l.volume is defined else none) }}</span>
-            <span class="mono">{{ format_crores(l.turnover if l.turnover is defined else none) }}</span>
             <span class="negative mono">{{ l.change }}%</span>
             <a class="tv-link" href="https://www.tradingview.com/chart/?symbol=NSE%3A{{ l.symbol | urlencode }}" target="_blank" rel="noopener noreferrer">TradingView</a>
           </div>
@@ -218,30 +200,6 @@
 .trial-link { color: var(--cyan); text-decoration: none; font-weight: 600; }
 .trial-link:hover { text-decoration: underline; }
 .trial-cta { color: #ffdd66; }
-.free-course-prompt {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  width: 100%;
-  padding: 10px 12px;
-  border: 1px solid rgba(129, 201, 149, 0.24);
-  background: rgba(129, 201, 149, 0.08);
-  border-radius: 10px;
-  color: #dff8ea;
-  font-size: 13px;
-}
-.free-course-prompt > div:first-child {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-}
-.free-course-prompt-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
 .trial-chip.register-stage {
   background: rgba(255, 184, 48, 0.10);
   border: 1px solid rgba(255, 184, 48, 0.18);
@@ -310,7 +268,7 @@
 
 #gainers-body .table-row,
 #losers-body .table-row {
-  grid-template-columns: 1.45fr 0.78fr 0.9fr 0.95fr 0.78fr auto;
+  grid-template-columns: 1.45fr 0.78fr 0.9fr 0.78fr auto;
 }
 
 .hero-badge {
@@ -589,7 +547,7 @@
 
   #gainers-body .table-row,
   #losers-body .table-row {
-    grid-template-columns: 1.2fr 0.72fr 0.82fr 0.9fr 0.78fr auto;
+    grid-template-columns: 1.2fr 0.72fr 0.82fr 0.78fr auto;
   }
 
   .dash-grid {
@@ -628,20 +586,6 @@
     padding: 3px 7px !important;
     font-size: 10px !important;
     white-space: normal;
-  }
-
-  .free-course-prompt {
-    flex-direction: column;
-    align-items: flex-start;
-    font-size: 11px;
-  }
-
-  .free-course-prompt-actions {
-    width: 100%;
-  }
-
-  .free-course-prompt-actions .btn {
-    flex: 1;
   }
 
   .status-line {
@@ -787,11 +731,7 @@
   #gainers-body .table-row > span:nth-child(3),
   #losers-body .table-row > span:nth-child(3),
   #gainers-body .table-row.table-head > span:nth-child(3),
-  #losers-body .table-row.table-head > span:nth-child(3),
-  #gainers-body .table-row > span:nth-child(4),
-  #losers-body .table-row > span:nth-child(4),
-  #gainers-body .table-row.table-head > span:nth-child(4),
-  #losers-body .table-row.table-head > span:nth-child(4) {
+  #losers-body .table-row.table-head > span:nth-child(3) {
     display: none !important;
   }
 
@@ -816,14 +756,14 @@
     letter-spacing: 0;
   }
 
-  #gainers-body .table-row.table-head > span:nth-child(6),
-  #losers-body .table-row.table-head > span:nth-child(6) {
+  #gainers-body .table-row.table-head > span:nth-child(5),
+  #losers-body .table-row.table-head > span:nth-child(5) {
     display: inline !important;
     font-size: 0;
   }
 
-  #gainers-body .table-row.table-head > span:nth-child(6)::before,
-  #losers-body .table-row.table-head > span:nth-child(6)::before {
+  #gainers-body .table-row.table-head > span:nth-child(5)::before,
+  #losers-body .table-row.table-head > span:nth-child(5)::before {
     content: "TV";
     font-size: 8px;
   }
@@ -1066,23 +1006,5 @@
   }
 }
 </style>
-
-<script>
-(function () {
-  const prompt = document.getElementById("free-course-prompt");
-  const close = document.getElementById("free-course-dismiss");
-  if (!prompt || !close) return;
-  close.addEventListener("click", async () => {
-    prompt.remove();
-    try {
-      await fetch("/free-course/dismiss", {
-        method: "POST",
-        cache: "no-store",
-        headers: { "Cache-Control": "no-cache" },
-      });
-    } catch (error) {}
-  });
-})();
-</script>
 
 {% endblock %}

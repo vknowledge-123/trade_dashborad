@@ -25,7 +25,7 @@
   <div class="panel openx-order-panel">
     <div class="panel-header">
       <div>
-        <h3>Ione Power Trade Settings</h3>
+        <h3>Power Trade Settings</h3>
         <div class="panel-sub">Admin only limit orders. Quantity is locked from risk at click time.</div>
       </div>
     </div>
@@ -495,7 +495,7 @@
 <section class="ione-power-shell">
   <div class="ione-power-header">
     <div>
-      <h1>Ione Power</h1>
+      <h1>Power</h1>
     </div>
   </div>
 
@@ -508,20 +508,20 @@
   <div class="ione-power-grid">
     <div class="panel">
       <div class="panel-header">
-        <h3>Ione Power Long Scan</h3>
+        <h3>Power Long Scan</h3>
         <span class="pill positive" id="ione-long-count">{{ ione_scanner.ione_power_long|length }}</span>
       </div>
       <div class="table ione-power-table" id="ione-long-body">
         <div class="table-row table-head ione-power-row">
           <span>Symbol Name</span>
-          <span>Time Of First Hit</span>
-          <span>Ione Power Rating</span>
+          <span>Time</span>
+          <span>Power Rating</span>
           <span>Chart</span>
         </div>
         {% for row in ione_scanner.ione_power_long or [] %}
           <div class="table-row ione-power-row" data-symbol="{{ row.symbol }}">
             <span class="cell-symbol">
-              <span class="cell-symbol-main">{{ row.symbol }}</span>
+              <span class="cell-symbol-main">{{ row.symbol }}{% if row.is_fno %} <span class="fno-tag">F&amp;O</span>{% endif %}</span>
               <span class="sector-stock-name">{{ row.name }}</span>
             </span>
             <span class="mono">{{ row.first_hit_time }}</span>
@@ -540,20 +540,20 @@
 
     <div class="panel">
       <div class="panel-header">
-        <h3>Ione Power Short Scan</h3>
+        <h3>Power Short Scan</h3>
         <span class="pill negative" id="ione-short-count">{{ ione_scanner.ione_power_short|length }}</span>
       </div>
       <div class="table ione-power-table" id="ione-short-body">
         <div class="table-row table-head ione-power-row">
           <span>Symbol Name</span>
-          <span>Time Of First Hit</span>
-          <span>Ione Power Rating</span>
+          <span>Time</span>
+          <span>Power Rating</span>
           <span>Chart</span>
         </div>
         {% for row in ione_scanner.ione_power_short or [] %}
           <div class="table-row ione-power-row" data-symbol="{{ row.symbol }}">
             <span class="cell-symbol">
-              <span class="cell-symbol-main">{{ row.symbol }}</span>
+              <span class="cell-symbol-main">{{ row.symbol }}{% if row.is_fno %} <span class="fno-tag">F&amp;O</span>{% endif %}</span>
               <span class="sector-stock-name">{{ row.name }}</span>
             </span>
             <span class="mono">{{ row.first_hit_time }}</span>
@@ -661,7 +661,7 @@
   const rowHtml = (row) => `
     <div class="table-row ione-power-row" data-symbol="${escapeHtml(row.symbol)}">
       <span class="cell-symbol">
-        <span class="cell-symbol-main">${escapeHtml(row.symbol)}</span>
+        <span class="cell-symbol-main">${escapeHtml(row.symbol)}${row.is_fno ? ' <span class="fno-tag">F&O</span>' : ""}</span>
         <span class="sector-stock-name">${escapeHtml(row.name || row.symbol || "")}</span>
       </span>
       <span class="mono">${escapeHtml(row.first_hit_time || "-")}</span>

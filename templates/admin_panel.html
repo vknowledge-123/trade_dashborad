@@ -213,25 +213,17 @@
   <div class="panel panel-wide panel-accent">
     <div class="panel-header">
       <h3>Premium Course Settings</h3>
-      <span class="pill">Public pricing</span>
+      <span class="pill">Public copy</span>
     </div>
     <form class="inquiry" method="post" action="/admin/course/settings">
       <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}" />
-      <div class="course-settings-grid">
-        <label>
-          Monthly Price
-          <input type="number" name="four_month_price" min="0" step="1" value="{{ course_settings['four_month_price'] if course_settings else 2000 }}" required />
-        </label>
-        <label>
-          Yearly Price
-          <input type="number" name="one_year_price" min="0" step="1" value="{{ course_settings['one_year_price'] if course_settings else 5500 }}" required />
-        </label>
-      </div>
+      <input type="hidden" name="four_month_price" value="{{ course_settings['four_month_price'] if course_settings else 2000 }}" />
+      <input type="hidden" name="one_year_price" value="{{ course_settings['one_year_price'] if course_settings else 5500 }}" />
       <label>
         Support Highlight
         <textarea name="support_text" rows="3" required>{{ course_settings['support_text'] if course_settings else '' }}</textarea>
       </label>
-      <button class="btn btn-primary" type="submit">Save Course Pricing</button>
+      <button class="btn btn-primary" type="submit">Save Course Copy</button>
     </form>
   </div>
 
@@ -258,91 +250,6 @@
       </div>
     {% else %}
       <p class="muted">No payment QR uploaded yet.</p>
-    {% endif %}
-  </div>
-
-  <div class="panel panel-wide panel-accent">
-    <div class="panel-header">
-      <h3>Free Course</h3>
-      <span class="pill">Public playlist</span>
-    </div>
-    <form class="inquiry" method="post" action="/admin/free-course/settings">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}" />
-      <label>
-        Course Title
-        <input type="text" name="free_course_title" value="{{ course_settings['free_course_title'] if course_settings else 'Free Trading Foundation Course' }}" required />
-      </label>
-      <label>
-        Description
-        <textarea name="free_course_description" rows="3">{{ course_settings['free_course_description'] if course_settings else '' }}</textarea>
-      </label>
-      <input type="hidden" name="free_course_youtube_url" value="{{ course_settings['free_course_youtube_url'] if course_settings else '' }}" />
-      <button class="btn btn-primary" type="submit">Save Free Course Details</button>
-    </form>
-
-    <div class="panel-divider"></div>
-    <form class="inquiry" method="post" action="/admin/free-course/classes">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}" />
-      <div class="academy-video-grid">
-        <label>
-          Class Title
-          <input type="text" name="title" placeholder="Class 1: Market Basics" required />
-        </label>
-        <label>
-          YouTube Private URL
-          <input type="url" name="youtube_url" placeholder="https://www.youtube.com/watch?v=..." required />
-        </label>
-        <label>
-          Sort Order
-          <input type="number" name="sort_order" min="0" step="1" value="0" />
-        </label>
-        <label>
-          Publish Status
-          <select name="is_published">
-            <option value="1">Published</option>
-            <option value="0">Hidden</option>
-          </select>
-        </label>
-      </div>
-      <label>
-        Class Description
-        <textarea name="description" rows="2" placeholder="What this class covers"></textarea>
-      </label>
-      <button class="btn btn-primary" type="submit">Add Free Class</button>
-    </form>
-
-    {% if free_course_classes %}
-      <div class="table academy-admin-table">
-        <div class="table-row table-head free-course-class-head">
-          <span>Order</span>
-          <span>Class</span>
-          <span>Status</span>
-          <span>Link</span>
-          <span>Action</span>
-        </div>
-        {% for item in free_course_classes %}
-          <div class="table-row free-course-class-head">
-            <span class="mono">{{ item["sort_order"] }}</span>
-            <span>
-              <strong>{{ item["title"] }}</strong>
-              {% if item["description"] %}
-                <span class="muted">{{ item["description"] }}</span>
-              {% endif %}
-            </span>
-            <span>{% if item["is_published"] %}<span class="positive">Published</span>{% else %}<span class="negative">Hidden</span>{% endif %}</span>
-            <span class="mono"><a class="tv-link" href="{{ item['youtube_url'] }}" target="_blank" rel="noopener noreferrer">Open</a></span>
-            <span>
-              <form method="post" action="/admin/free-course/classes/delete">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}" />
-                <input type="hidden" name="class_id" value="{{ item['id'] }}" />
-                <button class="btn btn-ghost btn-mini" type="submit">Delete</button>
-              </form>
-            </span>
-          </div>
-        {% endfor %}
-      </div>
-    {% else %}
-      <p class="muted">No free course classes added yet.</p>
     {% endif %}
   </div>
 
@@ -430,7 +337,7 @@
         </label>
         <label>
           Plan Name
-          <input type="text" name="plan_name" value="Monthly Premium Strategy Course + Dashboard" required />
+          <input type="text" name="plan_name" value="Welcome Offer Premium Strategy Course + Dashboard" required />
         </label>
         <label>
           Duration Days

@@ -72,7 +72,7 @@ from app.kite_engine import IST, MarketEngine
 from app.security import hash_password, verify_password, should_upgrade_password_hash
 
 app = FastAPI()
-# Serve local static assets (images used in Services page, etc.)
+# Serve local static assets.
 app.mount("/static", StaticFiles(directory="static"), name="static")
 # Middleware order matters: SessionMiddleware must wrap anything that reads sessions.
 app.add_middleware(SecurityHeadersMiddleware)
@@ -323,6 +323,8 @@ def ione_power_rating(row):
 
     if turnover_crore > 10 and multiplier > 2.5:
         return 5
+    if turnover_crore >= 6 and turnover_crore <= 10 and multiplier >= 2.5:
+        return 4
     if turnover_crore > 3 and turnover_crore < 4 and multiplier >= 3 and sector_rank in {1, 2}:
         return 4
     if turnover_crore > 2 and turnover_crore < 3 and multiplier > 2:
@@ -349,6 +351,7 @@ def ione_power_row(row):
     return {
         "symbol": symbol,
         "name": row.get("name") or symbol,
+        "is_fno": bool(row.get("is_fno")),
         "first_hit_time": format_ione_hit_time(row.get("first_hit_at") or row.get("updated_at")),
         "rating": ione_power_rating(row),
         "chart_url": f"https://www.tradingview.com/chart/?symbol=NSE%3A{symbol}",
@@ -356,9 +359,13 @@ def ione_power_row(row):
 
 
 def ione_power_payload(scanner):
+    long_rows = [ione_power_row(row) for row in scanner.get("open_low_gainers") or []]
+    short_rows = [ione_power_row(row) for row in scanner.get("open_high_losers") or []]
+    long_rows.sort(key=lambda item: (item.get("rating") or 0, item.get("first_hit_time") or ""), reverse=True)
+    short_rows.sort(key=lambda item: (item.get("rating") or 0, item.get("first_hit_time") or ""), reverse=True)
     return {
-        "ione_power_long": [ione_power_row(row) for row in scanner.get("open_low_gainers") or []],
-        "ione_power_short": [ione_power_row(row) for row in scanner.get("open_high_losers") or []],
+        "ione_power_long": long_rows,
+        "ione_power_short": short_rows,
         "updated_at": scanner.get("updated_at"),
         "market_open": scanner.get("market_open"),
         "error": scanner.get("error"),
@@ -371,10 +378,15 @@ def blaster_hit_time(row):
 
 def blaster_intraday_row(row):
     symbol = str(row.get("symbol") or "").upper()
+    try:
+        move_percent = float(row.get("move_percent"))
+    except (TypeError, ValueError):
+        move_percent = None
     return {
         "symbol": symbol,
         "name": row.get("name") or symbol,
         "status": "Blast",
+        "move_percent": round(move_percent, 2) if move_percent is not None else None,
         "hit_time": blaster_hit_time(row),
         "chart_url": f"https://www.tradingview.com/chart/?symbol=NSE%3A{symbol}",
     }
@@ -401,6 +413,28 @@ def blaster_intraday_payload(scanner):
         "market_open": scanner.get("market_open"),
         "error": scanner.get("error"),
     }
+
+
+def _scanner_row_float(row, key):
+    try:
+        return float(row.get(key) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def admin_blaster_payload(scanner):
+    payload = dict(scanner or {})
+    rows = []
+    for row in payload.get("rows") or []:
+        multiplier = _scanner_row_float(row, "volume_sma_multiplier")
+        turnover = _scanner_row_float(row, "turnover")
+        if multiplier > 10 and turnover > 10_000_000:
+            rows.append(row)
+    rows.sort(key=lambda item: item.get("appearance_time") or "", reverse=True)
+    payload["rows"] = rows
+    if not rows and not payload.get("error"):
+        payload["error"] = "No strong Blaster matches yet."
+    return payload
 
 
 templates.env.globals["format_compact_volume"] = format_compact_volume
@@ -749,40 +783,14 @@ def dashboard(request: Request):
             "snapshot": snapshot,
             "public_mode": True if not user and not admin else False,
             "course_settings": course_settings,
-            "show_free_course_prompt": should_show_free_course_prompt(request, user_row=user, admin_row=admin),
+            "show_free_course_prompt": False,
         },
     )
 
 
 @app.get("/free-course", response_class=HTMLResponse)
 def free_course(request: Request):
-    user = current_user(request)
-    admin = current_admin(request)
-    course_settings = get_course_settings()
-    free_course_classes = get_free_course_classes(include_unpublished=bool(admin))
-    if not free_course_classes and course_settings.get("free_course_youtube_url"):
-        free_course_classes = [
-            {
-                "id": 0,
-                "title": course_settings.get("free_course_title") or "Free Course Class",
-                "description": course_settings.get("free_course_description") or "",
-                "youtube_url": course_settings.get("free_course_youtube_url"),
-                "sort_order": 0,
-                "is_published": 1,
-            }
-        ]
-    return templates.TemplateResponse(
-        request,
-        "free_course.html",
-        {
-            "title": "Free Course",
-            "user": user,
-            "admin": admin,
-            "public_mode": True if not user and not admin else False,
-            "course_settings": course_settings,
-            "free_course_classes": free_course_classes,
-        },
-    )
+    raise HTTPException(status_code=404, detail="Free course page removed")
 
 
 @app.post("/free-course/dismiss")
@@ -812,36 +820,12 @@ def relative_rotation(request: Request):
 
 @app.get("/pdh-pdl-scanner", response_class=HTMLResponse)
 def pdh_pdl_scanner(request: Request):
-    user = current_user(request)
-    admin = current_admin(request)
-    return templates.TemplateResponse(
-        request,
-        "pdh_pdl_scanner.html",
-        {
-            "title": "PDH PDL Scanner",
-            "user": user,
-            "admin": admin,
-            "public_mode": True if not user and not admin else False,
-            "scanner": engine.get_pdh_pdl_scanner(cached_only=True),
-        },
-    )
+    raise HTTPException(status_code=404, detail="PDH/PDL scanner removed")
 
 
 @app.get("/swing-scanner", response_class=HTMLResponse)
 def swing_scanner(request: Request):
-    user = current_user(request)
-    admin = current_admin(request)
-    return templates.TemplateResponse(
-        request,
-        "swing_scanner.html",
-        {
-            "title": "Swing Trading Scanner",
-            "user": user,
-            "admin": admin,
-            "public_mode": True if not user and not admin else False,
-            "scanner": engine.get_swing_scanner(cached_only=True),
-        },
-    )
+    raise HTTPException(status_code=404, detail="Swing scanner removed")
 
 
 @app.get("/acceleration-scanner", response_class=HTMLResponse)
@@ -849,6 +833,8 @@ def acceleration_scanner(request: Request):
     user = current_user(request)
     admin = current_admin(request)
     scanner = engine.get_acceleration_scanner(timeframe=1, min_gain=0.5)
+    if admin:
+        scanner = admin_blaster_payload(scanner)
     return templates.TemplateResponse(
         request,
         "acceleration_scanner.html",
@@ -872,7 +858,7 @@ def open_extreme_scanner(request: Request):
         request,
         "open_extreme_scanner.html",
         {
-            "title": "Ione Power",
+            "title": "Power",
             "user": user,
             "admin": admin,
             "public_mode": True if not user and not admin else False,
@@ -914,14 +900,7 @@ def pdh_pdl_scanner_data(
     min_pct: float = None,
     max_pct: float = None,
 ):
-    return JSONResponse(
-        engine.get_pdh_pdl_scanner(level=level, side=side, min_pct=min_pct, max_pct=max_pct, cached_only=True),
-        headers={
-            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-            "Pragma": "no-cache",
-            "Expires": "0",
-        },
-    )
+    raise HTTPException(status_code=404, detail="PDH/PDL scanner removed")
 
 
 @app.get("/api/swing-scanner")
@@ -931,14 +910,7 @@ def swing_scanner_data(
     min_score: float = 0,
     refresh: bool = False,
 ):
-    return JSONResponse(
-        engine.get_swing_scanner(side=side, min_score=min_score, cached_only=not refresh),
-        headers={
-            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-            "Pragma": "no-cache",
-            "Expires": "0",
-        },
-    )
+    raise HTTPException(status_code=404, detail="Swing scanner removed")
 
 
 @app.get("/api/swing-backtest")
@@ -948,14 +920,7 @@ def swing_backtest_data(
     sessions: int = 260,
     holding_days: int = 20,
 ):
-    return JSONResponse(
-        engine.backtest_swing_symbol(symbol=symbol, sessions=sessions, holding_days=holding_days),
-        headers={
-            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-            "Pragma": "no-cache",
-            "Expires": "0",
-        },
-    )
+    raise HTTPException(status_code=404, detail="Swing scanner removed")
 
 
 @app.get("/api/acceleration-scanner")
@@ -975,7 +940,7 @@ def acceleration_scanner_data(
             },
         )
     return JSONResponse(
-        scanner,
+        admin_blaster_payload(scanner),
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",
@@ -1179,18 +1144,7 @@ def inquiry(
 
 @app.get("/services", response_class=HTMLResponse)
 def services(request: Request):
-    user = current_user(request)
-    admin = current_admin(request)
-    return templates.TemplateResponse(
-        request,
-        "services.html",
-        {
-            "title": "Services",
-            "user": user,
-            "admin": admin,
-            "public_mode": True if not user and not admin else False,
-        },
-    )
+    raise HTTPException(status_code=404, detail="Services page removed")
 
 
 @app.get("/premium", response_class=HTMLResponse)
@@ -1712,15 +1666,7 @@ def admin_free_course_settings(
     free_course_youtube_url: str = Form(""),
     csrf_token: str = Form(""),
 ):
-    require_csrf(request, csrf_token)
-    admin = require_admin(request)
-    if not admin:
-        return RedirectResponse(url="/admin/login", status_code=302)
-    if free_course_youtube_url and not youtube_embed_url(free_course_youtube_url):
-        return RedirectResponse(url="/admin?free_course=invalid_url", status_code=302)
-
-    update_free_course_settings(free_course_title, free_course_description, free_course_youtube_url)
-    return RedirectResponse(url="/admin?free_course=saved", status_code=302)
+    raise HTTPException(status_code=404, detail="Free course management removed")
 
 
 @app.post("/admin/free-course/classes")
@@ -1733,26 +1679,12 @@ def admin_add_free_course_class(
     is_published: int = Form(1),
     csrf_token: str = Form(""),
 ):
-    require_csrf(request, csrf_token)
-    admin = require_admin(request)
-    if not admin:
-        return RedirectResponse(url="/admin/login", status_code=302)
-    if not youtube_embed_url(youtube_url):
-        return RedirectResponse(url="/admin?free_course=invalid_url", status_code=302)
-
-    add_free_course_class(title, description, youtube_url, sort_order, is_published)
-    return RedirectResponse(url="/admin?free_course=class_added", status_code=302)
+    raise HTTPException(status_code=404, detail="Free course management removed")
 
 
 @app.post("/admin/free-course/classes/delete")
 def admin_delete_free_course_class(request: Request, class_id: int = Form(...), csrf_token: str = Form("")):
-    require_csrf(request, csrf_token)
-    admin = require_admin(request)
-    if not admin:
-        return RedirectResponse(url="/admin/login", status_code=302)
-
-    delete_free_course_class(class_id)
-    return RedirectResponse(url="/admin?free_course=class_deleted", status_code=302)
+    raise HTTPException(status_code=404, detail="Free course management removed")
 
 
 @app.post("/admin/course/payment-qr")
