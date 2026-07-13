@@ -26,6 +26,7 @@ PREVIOUS_CLOSE_CACHE_KEY = "previous_close_map"
 PREVIOUS_DAY_BADGES_CACHE_KEY = "previous_day_badges"
 PREVIOUS_DAY_LEVELS_CACHE_KEY = "previous_day_levels"
 PDH_PDL_SCANNER_CACHE_KEY = "pdh_pdl_scanner"
+OPEN_EXTREME_SCANNER_CACHE_KEY = "open_extreme_scanner"
 RRG_CACHE_KEY = "relative_rotation_graph"
 SWING_SCANNER_CACHE_KEY = "swing_scanner"
 ACCELERATION_VOLUME_SMA_CACHE_KEY = "acceleration_volume_sma"
@@ -1719,6 +1720,8 @@ class MarketEngine:
         if candle and not self._valid_opening_candle(candle, reference_price=reference_price):
             candle = None
         volume = self._candle_volume(candle) if candle else None
+        high = self._float_or_none((candle or {}).get("high"))
+        low = self._float_or_none((candle or {}).get("low"))
         close = self._float_or_none((candle or {}).get("close"))
         volume_sma = self._acceleration_volume_sma(symbol)
         multiplier = None
@@ -1727,6 +1730,8 @@ class MarketEngine:
         turnover = self._calculate_turnover(close, volume) if volume not in (None, 0, 1) else None
         return {
             "opening_candle_volume": int(volume) if volume is not None else None,
+            "opening_candle_high": round(high, 2) if high is not None else None,
+            "opening_candle_low": round(low, 2) if low is not None else None,
             "opening_candle_close": round(close, 2) if close is not None else None,
             "opening_volume_sma": round(volume_sma, 2) if volume_sma is not None else None,
             "opening_volume_sma_multiplier": round(multiplier, 2) if multiplier is not None else None,
@@ -2007,6 +2012,19 @@ class MarketEngine:
 
     def get_open_extreme_scanner(self):
         market_open = self._is_market_open()
+        now_ist = datetime.now(IST)
+        ready_for_open_extreme = not market_open or now_ist.time() >= dtime(9, 16)
+        if not market_open:
+            with self.lock:
+                has_memory_rows = bool(self.latest)
+            if not has_memory_rows:
+                cached_scanner = self._cached_open_extreme_scanner()
+                if self._open_extreme_cache_usable(cached_scanner, market_open=False):
+                    cached = dict(cached_scanner)
+                    cached["market_open"] = False
+                    cached["snapshot_source"] = "open_extreme_cache"
+                    cached["error"] = cached.get("error")
+                    return cached
         if self.kite and self.symbol_to_token:
             self._refresh_rest_snapshot(force=True)
         with self.lock:
@@ -2035,30 +2053,48 @@ class MarketEngine:
             cached_row = cached_rows_by_symbol.get(symbol, {})
             enriched = dict(cached_row)
             enriched.update({key: value for key, value in row.items() if value is not None})
-            if not enriched.get("open_equals_low") and cached_row.get("open_equals_low"):
+            live_has_low_check = row.get("day_open") is not None and row.get("day_low") is not None
+            live_has_high_check = row.get("day_open") is not None and row.get("day_high") is not None
+            if not live_has_low_check and not enriched.get("open_equals_low") and cached_row.get("open_equals_low"):
                 enriched["open_equals_low"] = True
-            if not enriched.get("open_equals_high") and cached_row.get("open_equals_high"):
+            if not live_has_high_check and not enriched.get("open_equals_high") and cached_row.get("open_equals_high"):
                 enriched["open_equals_high"] = True
+            if live_has_low_check and not row.get("open_equals_low"):
+                enriched["open_equals_low"] = False
+                enriched["ohlc_badges"] = [
+                    badge for badge in (enriched.get("ohlc_badges") or [])
+                    if str(badge).upper() != "OPEN=LOW"
+                ]
+            if live_has_high_check and not row.get("open_equals_high"):
+                enriched["open_equals_high"] = False
+                enriched["ohlc_badges"] = [
+                    badge for badge in (enriched.get("ohlc_badges") or [])
+                    if str(badge).upper() != "OPEN=HIGH"
+                ]
             enriched = self._apply_open_extreme_flags(enriched)
             enriched.update(self._sector_context_for_symbol(symbol, latest=enriched, rankings=rankings))
             enriched["is_nifty50"] = symbol in NIFTY_50_SYMBOLS
             prepared.append(enriched)
 
-        open_low = sorted(
-            [
-                row for row in prepared
-                if row.get("open_equals_low") and float(row.get("change") or 0) > 0
-            ],
-            key=lambda item: float(item.get("change") or 0),
-            reverse=True,
-        )[:20]
-        open_high = sorted(
-            [
-                row for row in prepared
-                if row.get("open_equals_high") and float(row.get("change") or 0) < 0
-            ],
-            key=lambda item: float(item.get("change") or 0),
-        )[:20]
+        if ready_for_open_extreme:
+            open_low = sorted(
+                [
+                    row for row in prepared
+                    if row.get("open_equals_low") and float(row.get("change") or 0) > 0
+                ],
+                key=lambda item: float(item.get("change") or 0),
+                reverse=True,
+            )[:20]
+            open_high = sorted(
+                [
+                    row for row in prepared
+                    if row.get("open_equals_high") and float(row.get("change") or 0) < 0
+                ],
+                key=lambda item: float(item.get("change") or 0),
+            )[:20]
+        else:
+            open_low = []
+            open_high = []
         self._stamp_open_extreme_first_hits(open_low, "long")
         self._stamp_open_extreme_first_hits(open_high, "short")
         missing_opening_candles = []
@@ -2073,15 +2109,22 @@ class MarketEngine:
                 missing_opening_candles.append(row.get("symbol"))
         if missing_opening_candles:
             self._ensure_opening_candle_background_refresh(missing_opening_candles)
-        return {
+        payload = {
             "open_low_gainers": open_low,
             "open_high_losers": open_high,
             "tracked_count": len(prepared),
             "updated_at": self.last_update or self._utc_now(),
             "market_open": market_open,
             "snapshot_source": self.last_snapshot_source,
-            "error": None if prepared else "Open high/low scanner rows are warming. Wait for live/API OHLC data.",
+            "error": (
+                "Power scanner starts after 09:16 so the first minute can settle."
+                if prepared and not ready_for_open_extreme
+                else None if prepared else "Open high/low scanner rows are warming. Wait for live/API OHLC data."
+            ),
         }
+        if ready_for_open_extreme and (open_low or open_high):
+            self._save_open_extreme_scanner_cache(payload, market_open=market_open)
+        return payload
 
     def _stamp_open_extreme_first_hits(self, rows, side):
         now = datetime.now(IST)
@@ -2768,6 +2811,32 @@ class MarketEngine:
 
     def _cached_scanner_payload(self):
         return load_market_cache(PDH_PDL_SCANNER_CACHE_KEY)
+
+    def _open_extreme_cache_marker(self, market_open=None):
+        if market_open is None:
+            market_open = self._is_market_open()
+        now = datetime.now(IST)
+        if market_open:
+            return now.date().isoformat()
+        return self._latest_completed_session_date(now).isoformat()
+
+    def _save_open_extreme_scanner_cache(self, payload, market_open=None):
+        try:
+            cached = dict(payload or {})
+            cached["cache_marker"] = self._open_extreme_cache_marker(market_open)
+            save_market_cache(OPEN_EXTREME_SCANNER_CACHE_KEY, cached)
+        except Exception:
+            return
+
+    def _cached_open_extreme_scanner(self):
+        return load_market_cache(OPEN_EXTREME_SCANNER_CACHE_KEY)
+
+    def _open_extreme_cache_usable(self, payload, market_open=None):
+        if not payload:
+            return False
+        if payload.get("cache_marker") != self._open_extreme_cache_marker(market_open):
+            return False
+        return bool(payload.get("open_low_gainers") or payload.get("open_high_losers"))
 
     def _restore_previous_day_badges_cache(self):
         if self.previous_day_badges_cache:

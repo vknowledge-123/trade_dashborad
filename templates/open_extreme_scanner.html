@@ -498,6 +498,10 @@
       <h1>Power</h1>
       <p class="power-disclaimer">Scans are for education only, not trading or investment advice. Do your own technical and fundamental analysis and consult a SEBI registered investment advisor or research analyst for financial advice.</p>
     </div>
+    <button class="power-alert-button" type="button" id="power-alert-toggle" aria-label="Enable Power scan alerts">
+      <span aria-hidden="true">&#128276;</span>
+      <span>Alerts</span>
+    </button>
   </div>
 
   {% if ione_scanner.error %}
@@ -520,9 +524,9 @@
           <span>Chart</span>
         </div>
         {% for row in ione_scanner.ione_power_long or [] %}
-          <div class="table-row ione-power-row" data-symbol="{{ row.symbol }}">
+          <div class="table-row ione-power-row" data-symbol="{{ row.symbol }}" data-alert-key="{{ row.alert_key or '' }}">
             <span class="cell-symbol">
-              <span class="cell-symbol-main">{{ row.symbol }}{% if row.is_fno %} <span class="fno-tag">F&amp;O</span>{% endif %}</span>
+              <span class="cell-symbol-main">{{ row.symbol }}{% if row.is_fno %} <span class="fno-tag">F&amp;O</span>{% endif %}{% if row.leading_sector %} <span class="leading-sector-tag">Leading Sector</span>{% endif %}</span>
               <span class="sector-stock-name">{{ row.name }}</span>
             </span>
             <span class="mono">{{ row.first_hit_time }}</span>
@@ -552,9 +556,9 @@
           <span>Chart</span>
         </div>
         {% for row in ione_scanner.ione_power_short or [] %}
-          <div class="table-row ione-power-row" data-symbol="{{ row.symbol }}">
+          <div class="table-row ione-power-row" data-symbol="{{ row.symbol }}" data-alert-key="{{ row.alert_key or '' }}">
             <span class="cell-symbol">
-              <span class="cell-symbol-main">{{ row.symbol }}{% if row.is_fno %} <span class="fno-tag">F&amp;O</span>{% endif %}</span>
+              <span class="cell-symbol-main">{{ row.symbol }}{% if row.is_fno %} <span class="fno-tag">F&amp;O</span>{% endif %}{% if row.leading_sector %} <span class="leading-sector-tag">Leading Sector</span>{% endif %}</span>
               <span class="sector-stock-name">{{ row.name }}</span>
             </span>
             <span class="mono">{{ row.first_hit_time }}</span>
@@ -593,6 +597,34 @@
   font-family: 'Inter', system-ui, sans-serif;
   font-size: 24px;
 }
+.power-alert-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 8px 12px;
+  border: 1px solid rgba(253, 214, 99, 0.24);
+  border-radius: 10px;
+  background: rgba(253, 214, 99, 0.10);
+  color: #ffe8a3;
+  font-weight: 800;
+  cursor: pointer;
+}
+.power-alert-button.active {
+  border-color: rgba(129, 201, 149, 0.34);
+  background: rgba(129, 201, 149, 0.12);
+  color: #dffbe8;
+}
+.power-alert-button.vibrate {
+  animation: power-bell-shake 0.45s ease-in-out 2;
+}
+@keyframes power-bell-shake {
+  0%, 100% { transform: rotate(0deg); }
+  20% { transform: rotate(-8deg); }
+  40% { transform: rotate(7deg); }
+  60% { transform: rotate(-5deg); }
+  80% { transform: rotate(4deg); }
+}
 .power-disclaimer {
   margin: 6px 0 0;
   max-width: 900px;
@@ -616,6 +648,18 @@
   font-size: 16px;
   letter-spacing: 0;
   white-space: nowrap;
+}
+.leading-sector-tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  border: 1px solid rgba(129, 201, 149, 0.28);
+  color: #dffbe8;
+  background: rgba(129, 201, 149, 0.10);
+  font-size: 10px;
+  font-weight: 800;
 }
 .ione-power-empty span:first-child {
   grid-column: 1 / -1;
@@ -651,10 +695,64 @@
   const longCount = document.getElementById("ione-long-count");
   const shortCount = document.getElementById("ione-short-count");
   const alertBox = document.getElementById("ione-alert");
+  const alertToggle = document.getElementById("power-alert-toggle");
   if (!longBody || !shortBody) return;
 
   const longHead = longBody.querySelector(".table-head")?.outerHTML || "";
   const shortHead = shortBody.querySelector(".table-head")?.outerHTML || "";
+  const seenAlertKeys = new Set(
+    Array.from(document.querySelectorAll("[data-alert-key]"))
+      .map((node) => node.dataset.alertKey)
+      .filter(Boolean)
+  );
+  let audioContext = null;
+  let alertsEnabled = localStorage.getItem("power_alerts_enabled") === "1";
+  const updateAlertButton = () => {
+    if (!alertToggle) return;
+    alertToggle.classList.toggle("active", alertsEnabled);
+    alertToggle.querySelector("span:last-child").textContent = alertsEnabled ? "Alerts On" : "Alerts";
+  };
+  const unlockAlerts = () => {
+    alertsEnabled = true;
+    localStorage.setItem("power_alerts_enabled", "1");
+    try {
+      audioContext = audioContext || new (window.AudioContext || window.webkitAudioContext)();
+      if (audioContext.state === "suspended") audioContext.resume();
+    } catch (error) {}
+    updateAlertButton();
+  };
+  const playPowerAlert = (message) => {
+    if (!alertsEnabled) return;
+    try {
+      audioContext = audioContext || new (window.AudioContext || window.webkitAudioContext)();
+      const oscillator = audioContext.createOscillator();
+      const gain = audioContext.createGain();
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(880, audioContext.currentTime);
+      oscillator.frequency.setValueAtTime(1175, audioContext.currentTime + 0.12);
+      gain.gain.setValueAtTime(0.001, audioContext.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.22, audioContext.currentTime + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.35);
+      oscillator.connect(gain).connect(audioContext.destination);
+      oscillator.start();
+      oscillator.stop(audioContext.currentTime + 0.38);
+    } catch (error) {}
+    if (navigator.vibrate) navigator.vibrate([180, 80, 180]);
+    if (alertToggle) {
+      alertToggle.classList.remove("vibrate");
+      void alertToggle.offsetWidth;
+      alertToggle.classList.add("vibrate");
+    }
+    if (alertBox && message) {
+      alertBox.hidden = false;
+      alertBox.textContent = message;
+    }
+  };
+  updateAlertButton();
+  alertToggle?.addEventListener("click", unlockAlerts);
+  document.addEventListener("pointerdown", () => {
+    if (alertsEnabled) unlockAlerts();
+  }, { once: true });
   const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
     "&": "&amp;",
     "<": "&lt;",
@@ -667,9 +765,9 @@
     return `<span class="ione-rating" aria-label="${rating} star rating">${"<span>&#9733;</span>".repeat(rating)}</span>`;
   };
   const rowHtml = (row) => `
-    <div class="table-row ione-power-row" data-symbol="${escapeHtml(row.symbol)}">
+    <div class="table-row ione-power-row" data-symbol="${escapeHtml(row.symbol)}" data-alert-key="${escapeHtml(row.alert_key || "")}">
       <span class="cell-symbol">
-        <span class="cell-symbol-main">${escapeHtml(row.symbol)}${row.is_fno ? ' <span class="fno-tag">F&O</span>' : ""}</span>
+        <span class="cell-symbol-main">${escapeHtml(row.symbol)}${row.is_fno ? ' <span class="fno-tag">F&O</span>' : ""}${row.leading_sector ? ' <span class="leading-sector-tag">Leading Sector</span>' : ""}</span>
         <span class="sector-stock-name">${escapeHtml(row.name || row.symbol || "")}</span>
       </span>
       <span class="mono">${escapeHtml(row.first_hit_time || "-")}</span>
@@ -685,6 +783,11 @@
       const data = await response.json();
       const longs = data.ione_power_long || [];
       const shorts = data.ione_power_short || [];
+      longs.concat(shorts).forEach((row) => {
+        if (!row.alert_key || seenAlertKeys.has(row.alert_key)) return;
+        seenAlertKeys.add(row.alert_key);
+        playPowerAlert(row.alert_text || `${row.symbol} Power alert`);
+      });
       longBody.innerHTML = longHead + (longs.length ? longs.map(rowHtml).join("") : emptyRow("No long scan candidates yet."));
       shortBody.innerHTML = shortHead + (shorts.length ? shorts.map(rowHtml).join("") : emptyRow("No short scan candidates yet."));
       if (longCount) longCount.textContent = longs.length;

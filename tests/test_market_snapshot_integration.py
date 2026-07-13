@@ -1144,6 +1144,95 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertEqual(payload["open_high_losers"][0]["sector_name"], "NIFTY MEDIA")
         self.assertEqual(payload["open_high_losers"][0]["sector_change"], -1.5)
 
+    def test_open_extreme_scanner_waits_until_916(self):
+        class BeforeOpenExtremeTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                if tz:
+                    return datetime(2026, 7, 7, 9, 15, 30, tzinfo=tz)
+                return datetime(2026, 7, 7, 3, 45, 30)
+
+        class ReadyOpenExtremeTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                if tz:
+                    return datetime(2026, 7, 7, 9, 16, 0, tzinfo=tz)
+                return datetime(2026, 7, 7, 3, 46, 0)
+
+        engine = MarketEngine(redis_client=None)
+        engine.nifty500_set = set()
+        engine._is_market_open = lambda: True
+        engine.latest = {
+            "INFY": {
+                "symbol": "INFY",
+                "name": "Infosys",
+                "price": 101,
+                "change": 1,
+                "volume": 1000,
+                "day_open": 100,
+                "day_low": 100,
+                "day_high": 101,
+                "open_equals_low": True,
+            }
+        }
+
+        with patch("app.kite_engine.datetime", BeforeOpenExtremeTime):
+            early_payload = engine.get_open_extreme_scanner()
+        with patch("app.kite_engine.datetime", ReadyOpenExtremeTime):
+            ready_payload = engine.get_open_extreme_scanner()
+
+        self.assertEqual(early_payload["open_low_gainers"], [])
+        self.assertIn("09:16", early_payload["error"])
+        self.assertEqual(ready_payload["open_low_gainers"][0]["symbol"], "INFY")
+
+    def test_closed_open_extreme_scanner_uses_cached_latest_snapshot_without_memory_rows(self):
+        engine = MarketEngine(redis_client=None)
+        engine._is_market_open = lambda: False
+        engine.kite = object()
+        engine.symbol_to_token = {"INFY": 123}
+        engine._refresh_rest_snapshot = lambda force=False: self.fail("closed Power cache should avoid API refresh")
+        marker = engine._open_extreme_cache_marker(False)
+        engine._cached_open_extreme_scanner = lambda: {
+            "open_low_gainers": [{"symbol": "INFY", "price": 1500, "change": 2}],
+            "open_high_losers": [],
+            "tracked_count": 498,
+            "updated_at": "2026-07-07T15:30:00+05:30",
+            "market_open": True,
+            "cache_marker": marker,
+            "error": None,
+        }
+
+        payload = engine.get_open_extreme_scanner()
+
+        self.assertEqual(payload["open_low_gainers"][0]["symbol"], "INFY")
+        self.assertFalse(payload["market_open"])
+        self.assertEqual(payload["snapshot_source"], "open_extreme_cache")
+
+    def test_open_extreme_scanner_saves_latest_snapshot_for_closed_market(self):
+        engine = MarketEngine(redis_client=None)
+        engine.nifty500_set = set()
+        engine._is_market_open = lambda: False
+        engine._cached_open_extreme_scanner = lambda: None
+        saved = []
+        engine._save_open_extreme_scanner_cache = lambda payload, market_open=None: saved.append((payload, market_open))
+        engine.latest = {
+            "INFY": {
+                "symbol": "INFY",
+                "price": 101,
+                "change": 1,
+                "day_open": 100,
+                "day_low": 100,
+                "day_high": 101,
+                "open_equals_low": True,
+            }
+        }
+
+        payload = engine.get_open_extreme_scanner()
+
+        self.assertEqual(payload["open_low_gainers"][0]["symbol"], "INFY")
+        self.assertEqual(saved[0][0]["open_low_gainers"][0]["symbol"], "INFY")
+        self.assertFalse(saved[0][1])
+
     def test_open_extreme_scanner_adds_nifty50_and_opening_candle_stats(self):
         engine = MarketEngine(redis_client=None)
         engine.nifty500_set = set()
@@ -1286,6 +1375,39 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertTrue(payload["open_low_gainers"][0]["open_equals_low"])
         self.assertEqual(payload["open_low_gainers"][0]["day_open"], 1391.3)
 
+    def test_open_extreme_scanner_does_not_keep_cached_flag_when_live_ohlc_breaks_low(self):
+        engine = MarketEngine(redis_client=None)
+        engine.nifty500_set = set()
+        engine._is_market_open = lambda: False
+        engine.latest = {
+            "INFY": {
+                "symbol": "INFY",
+                "price": 101,
+                "change": 1,
+                "day_open": 100,
+                "day_low": 99.5,
+                "day_high": 101,
+                "open_equals_low": False,
+            }
+        }
+        engine._cached_latest_rows = lambda: {
+            "rows": {
+                "INFY": {
+                    "symbol": "INFY",
+                    "price": 100.5,
+                    "change": 0.5,
+                    "day_open": 100,
+                    "day_low": 100,
+                    "open_equals_low": True,
+                    "ohlc_badges": ["OPEN=LOW"],
+                }
+            }
+        }
+
+        payload = engine.get_open_extreme_scanner()
+
+        self.assertEqual(payload["open_low_gainers"], [])
+
     def test_closed_open_extreme_scanner_forces_today_quote_refresh(self):
         engine = MarketEngine(redis_client=None)
         engine.nifty500_set = set()
@@ -1343,6 +1465,7 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         engine.symbol_to_token = {"ECLERX": 1}
         engine._is_market_open = lambda: False
         engine.kite = None
+        engine._cached_open_extreme_scanner = lambda: None
         engine._cached_latest_rows = lambda: {}
         engine._rows_for_symbols_from_cache = lambda symbols: []
         engine.previous_day_levels_cache = {
@@ -2403,8 +2526,11 @@ class MarketSnapshotApiIntegrationTests(unittest.TestCase):
                         "sector_rank": 1,
                         "is_fno": True,
                         "first_hit_at": "2026-07-07T09:16:00+05:30",
+                        "price": 1012,
                         "day_open": 1000,
                         "day_low": 1000,
+                        "day_high": 1012,
+                        "opening_candle_high": 1010,
                     }
                 ],
                 "open_high_losers": [],
@@ -2423,6 +2549,9 @@ class MarketSnapshotApiIntegrationTests(unittest.TestCase):
         self.assertEqual(payload["ione_power_long"][0]["symbol"], "INFY")
         self.assertEqual(payload["ione_power_long"][0]["rating"], 5)
         self.assertTrue(payload["ione_power_long"][0]["is_fno"])
+        self.assertTrue(payload["ione_power_long"][0]["leading_sector"])
+        self.assertIn("alert_key", payload["ione_power_long"][0])
+        self.assertIn("breakout", payload["ione_power_long"][0]["alert_text"])
         self.assertNotIn("day_open", payload["ione_power_long"][0])
 
     def test_ione_power_rating_rules(self):
@@ -2431,6 +2560,12 @@ class MarketSnapshotApiIntegrationTests(unittest.TestCase):
         self.assertEqual(
             main_module.ione_power_rating(
                 {"opening_turnover": 25000000, "opening_volume_sma_multiplier": 2.1}
+            ),
+            3,
+        )
+        self.assertEqual(
+            main_module.ione_power_rating(
+                {"opening_turnover": 5_000_001, "sector_rank": 1}
             ),
             3,
         )
@@ -2459,28 +2594,41 @@ class MarketSnapshotApiIntegrationTests(unittest.TestCase):
             5,
         )
 
-    def test_ione_power_payload_sorts_highest_rating_first(self):
+    def test_ione_power_payload_sorts_by_rating_then_hidden_strength_fields(self):
         payload = main_module.ione_power_payload(
             {
                 "open_low_gainers": [
                     {"symbol": "LOW", "opening_turnover": 5_000_000, "updated_at": "2026-07-07T09:15:00+05:30"},
                     {
-                        "symbol": "HIGH",
+                        "symbol": "FIVE_LOW_TURNOVER",
                         "opening_turnover": 110_000_000,
+                        "opening_volume_sma_multiplier": 8,
+                        "change": 12,
+                        "updated_at": "2026-07-07T09:30:00+05:30",
+                    },
+                    {
+                        "symbol": "FIVE_HIGH_TURNOVER",
+                        "opening_turnover": 150_000_000,
                         "opening_volume_sma_multiplier": 2.6,
+                        "change": 2,
                         "updated_at": "2026-07-07T09:16:00+05:30",
                     },
                     {
                         "symbol": "MID",
                         "opening_turnover": 60_000_000,
                         "opening_volume_sma_multiplier": 2.5,
+                        "change": 8,
                         "updated_at": "2026-07-07T09:17:00+05:30",
                     },
                 ],
                 "open_high_losers": [],
             }
         )
-        self.assertEqual([row["symbol"] for row in payload["ione_power_long"]], ["HIGH", "MID", "LOW"])
+        self.assertEqual(
+            [row["symbol"] for row in payload["ione_power_long"]],
+            ["FIVE_HIGH_TURNOVER", "FIVE_LOW_TURNOVER", "MID", "LOW"],
+        )
+        self.assertNotIn("_sort_turnover", payload["ione_power_long"][0])
 
     def test_admin_blaster_payload_filters_strong_rows_with_details_intact(self):
         payload = main_module.admin_blaster_payload(

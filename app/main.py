@@ -320,6 +320,7 @@ def ione_power_rating(row):
     except (TypeError, ValueError):
         sector_rank = 0
 
+    leading_sector = sector_rank in {1, 2}
     if turnover_crore > 10 and multiplier > 2.5:
         return 5
     if turnover_crore >= 6 and turnover_crore <= 10 and multiplier >= 2.5:
@@ -328,9 +329,70 @@ def ione_power_rating(row):
         return 4
     if turnover_crore > 2 and turnover_crore < 3 and multiplier > 2:
         return 3
+    if leading_sector and turnover_crore > 0.5:
+        return 3
     if turnover_crore > 1 and turnover_crore <= 2:
         return 2
     return 1
+
+
+def ione_power_leading_sector(row):
+    try:
+        sector_rank = int(row.get("sector_rank") or 0)
+    except (TypeError, ValueError):
+        sector_rank = 0
+    try:
+        turnover = float(row.get("opening_turnover") or 0)
+    except (TypeError, ValueError):
+        turnover = 0
+    return sector_rank in {1, 2} and turnover > 5_000_000
+
+
+def ione_power_break_alert(row, side):
+    symbol = str(row.get("symbol") or "").upper()
+    if not symbol:
+        return {}
+    try:
+        price = float(row.get("price") or 0)
+    except (TypeError, ValueError):
+        price = 0
+    if price <= 0:
+        return {}
+
+    def level_broken(level, comparator):
+        try:
+            numeric_level = float(level)
+        except (TypeError, ValueError):
+            return False
+        if numeric_level <= 0:
+            return False
+        return comparator(price, numeric_level)
+
+    if side == "long":
+        first_candle_level = row.get("opening_candle_high")
+        day_level = row.get("day_high")
+        label = "high"
+        direction = "breakout"
+        broken = any(
+            level_broken(level, lambda price_value, level_value: price_value >= level_value)
+            for level in (first_candle_level, day_level)
+        )
+    else:
+        first_candle_level = row.get("opening_candle_low")
+        day_level = row.get("day_low")
+        label = "low"
+        direction = "breakdown"
+        broken = any(
+            level_broken(level, lambda price_value, level_value: price_value <= level_value)
+            for level in (first_candle_level, day_level)
+        )
+    if not broken:
+        return {}
+    hit_at = row.get("first_hit_at") or row.get("updated_at") or ""
+    return {
+        "alert_key": f"{symbol}:{side}:{direction}:{hit_at}",
+        "alert_text": f"{symbol} {direction} of first candle/day {label}",
+    }
 
 
 def format_ione_hit_time(value):
@@ -345,26 +407,63 @@ def format_ione_hit_time(value):
         return str(value)
 
 
-def ione_power_row(row):
+def ione_power_row(row, side="long"):
     symbol = str(row.get("symbol") or "").upper()
-    return {
+    try:
+        sort_turnover = float(row.get("opening_turnover") or 0)
+    except (TypeError, ValueError):
+        sort_turnover = 0
+    try:
+        sort_multiplier = float(row.get("opening_volume_sma_multiplier") or 0)
+    except (TypeError, ValueError):
+        sort_multiplier = 0
+    try:
+        sort_change = abs(float(row.get("change") or 0))
+    except (TypeError, ValueError):
+        sort_change = 0
+    raw_hit_time = str(row.get("first_hit_at") or row.get("updated_at") or "")
+    payload = {
         "symbol": symbol,
         "name": row.get("name") or symbol,
         "is_fno": bool(row.get("is_fno")),
-        "first_hit_time": format_ione_hit_time(row.get("first_hit_at") or row.get("updated_at")),
+        "leading_sector": ione_power_leading_sector(row),
+        "first_hit_time": format_ione_hit_time(raw_hit_time),
         "rating": ione_power_rating(row),
         "chart_url": f"https://www.tradingview.com/chart/?symbol=NSE%3A{symbol}",
+        "_sort_turnover": sort_turnover,
+        "_sort_multiplier": sort_multiplier,
+        "_sort_change": sort_change,
+        "_sort_hit_time": raw_hit_time,
     }
+    payload.update(ione_power_break_alert(row, side))
+    return payload
+
+
+def ione_power_sort_key(row):
+    return (
+        row.get("rating") or 0,
+        row.get("_sort_turnover") or 0,
+        row.get("_sort_multiplier") or 0,
+        row.get("_sort_change") or 0,
+        row.get("_sort_hit_time") or "",
+    )
+
+
+def strip_ione_power_sort_fields(rows):
+    for row in rows:
+        for key in ("_sort_turnover", "_sort_multiplier", "_sort_change", "_sort_hit_time"):
+            row.pop(key, None)
+    return rows
 
 
 def ione_power_payload(scanner):
-    long_rows = [ione_power_row(row) for row in scanner.get("open_low_gainers") or []]
-    short_rows = [ione_power_row(row) for row in scanner.get("open_high_losers") or []]
-    long_rows.sort(key=lambda item: (item.get("rating") or 0, item.get("first_hit_time") or ""), reverse=True)
-    short_rows.sort(key=lambda item: (item.get("rating") or 0, item.get("first_hit_time") or ""), reverse=True)
+    long_rows = [ione_power_row(row, "long") for row in scanner.get("open_low_gainers") or []]
+    short_rows = [ione_power_row(row, "short") for row in scanner.get("open_high_losers") or []]
+    long_rows.sort(key=ione_power_sort_key, reverse=True)
+    short_rows.sort(key=ione_power_sort_key, reverse=True)
     return {
-        "ione_power_long": long_rows,
-        "ione_power_short": short_rows,
+        "ione_power_long": strip_ione_power_sort_fields(long_rows),
+        "ione_power_short": strip_ione_power_sort_fields(short_rows),
         "updated_at": scanner.get("updated_at"),
         "market_open": scanner.get("market_open"),
         "error": scanner.get("error"),
