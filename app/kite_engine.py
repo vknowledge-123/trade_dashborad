@@ -1668,14 +1668,10 @@ class MarketEngine:
         if not symbol:
             return None
         session_date = datetime.now(IST).date()
-        cache_key = f"opening-v3:{self._current_broker()}:{session_date.isoformat()}:{symbol}"
+        cache_key = f"opening-v4:{self._current_broker()}:{session_date.isoformat()}:{symbol}"
         cached = self.opening_candle_cache.get(cache_key)
         if isinstance(cached, dict):
             return cached
-        live_candle = self._opening_candle_from_live_bucket(symbol, session_date)
-        if live_candle:
-            self.opening_candle_cache[cache_key] = live_candle
-            return live_candle
         if not allow_fetch:
             return None
         from_dt = datetime.combine(session_date, OPENING_CANDLE_TIME, tzinfo=IST)
@@ -1683,15 +1679,22 @@ class MarketEngine:
             from_dt -= timedelta(minutes=1)
         to_dt = from_dt + timedelta(minutes=3)
         candles = self._fetch_intraday_candles(symbol, from_dt, to_dt, interval=1)
-        accepted_times = {OPENING_CANDLE_TIME}
-        if self.broker == "dhan":
-            accepted_times.add((datetime.combine(session_date, OPENING_CANDLE_TIME) - timedelta(minutes=1)).time())
+        fallback_time = (datetime.combine(session_date, OPENING_CANDLE_TIME) - timedelta(minutes=1)).time()
+        fallback_candle = None
         for candle in candles:
             candle_dt = self._candle_datetime(candle)
-            if candle_dt and candle_dt.astimezone(IST).time().replace(second=0, microsecond=0) in accepted_times:
+            if not candle_dt:
+                continue
+            candle_time = candle_dt.astimezone(IST).time().replace(second=0, microsecond=0)
+            if candle_time == OPENING_CANDLE_TIME:
                 opening = dict(candle)
                 self.opening_candle_cache[cache_key] = opening
                 return opening
+            if self.broker == "dhan" and candle_time == fallback_time:
+                fallback_candle = dict(candle)
+        if fallback_candle:
+            self.opening_candle_cache[cache_key] = fallback_candle
+            return fallback_candle
         return None
 
     def _valid_opening_candle(self, candle, reference_price=None):
