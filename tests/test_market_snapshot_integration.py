@@ -1295,7 +1295,7 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertEqual(fake.calls[0][1].minute, 14)
         self.assertEqual(fake.calls[0][3], "1")
 
-    def test_dhan_opening_candle_prefers_915_over_914_fallback(self):
+    def test_dhan_opening_candle_prefers_exact_915_when_fetch_starts_at_914(self):
         class FakeDhanHistory:
             def historical_data(self, token, from_date, to_date, interval):
                 return [
@@ -1328,6 +1328,72 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
 
         self.assertEqual(candle["volume"], 589_000)
         self.assertEqual(candle["open"], 100.2)
+
+    def test_dhan_opening_candle_rejects_914_candle_for_turnover(self):
+        class FakeDhanHistory:
+            def historical_data(self, token, from_date, to_date, interval):
+                return [
+                    {
+                        "date": from_date,
+                        "open": 100,
+                        "high": 100.2,
+                        "low": 99.8,
+                        "close": 100.1,
+                        "volume": 21_900,
+                    }
+                ]
+
+        engine = MarketEngine(redis_client=None)
+        engine.broker = "dhan"
+        engine.kite = FakeDhanHistory()
+        engine.symbol_to_token = {"MRPL": 123}
+        engine.dhan_security_to_segment = {123: "NSE_EQ"}
+        engine.dhan_security_to_instrument = {123: "EQUITY"}
+
+        candle = engine._opening_candle_for_symbol("MRPL")
+
+        self.assertIsNone(candle)
+
+    def test_opening_candle_context_marks_exact_915_time(self):
+        engine = MarketEngine(redis_client=None)
+        engine._opening_candle_for_symbol = lambda symbol, allow_fetch=True: {
+            "date": datetime.now(IST).replace(hour=9, minute=15, second=0, microsecond=0),
+            "open": 100,
+            "high": 101,
+            "low": 100,
+            "close": 100.5,
+            "volume": 589_000,
+        }
+        engine._acceleration_volume_sma = lambda symbol: 100_000
+
+        context = engine._opening_candle_context("MRPL", reference_price=101)
+
+        self.assertEqual(context["opening_candle_time"], "09:15")
+        self.assertEqual(context["opening_candle_volume"], 589_000)
+
+    def test_dashboard_opening_context_refetches_unmarked_existing_turnover(self):
+        engine = MarketEngine(redis_client=None)
+        engine._opening_candle_context = lambda symbol, reference_price=None, allow_fetch=False: {
+            "opening_candle_volume": 589_000,
+            "opening_candle_time": "09:15",
+            "opening_candle_close": 168.88,
+            "opening_volume_sma": 200_000,
+            "opening_volume_sma_multiplier": 2.95,
+            "opening_turnover": 99_434_320,
+        }
+        row = {
+            "symbol": "MRPL",
+            "price": 168.88,
+            "opening_candle_volume": 21_900,
+            "opening_volume_sma_multiplier": 2.04,
+            "opening_turnover": 3_698_472,
+        }
+
+        turnover, multiplier = engine._opening_context_for_dashboard_row(row)
+
+        self.assertEqual(turnover, 99_434_320)
+        self.assertEqual(multiplier, 2.95)
+        self.assertEqual(row["opening_candle_time"], "09:15")
 
     def test_opening_candle_ignores_partial_live_bucket_for_turnover(self):
         engine = MarketEngine(redis_client=None)

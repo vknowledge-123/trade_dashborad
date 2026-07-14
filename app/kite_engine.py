@@ -26,7 +26,7 @@ PREVIOUS_CLOSE_CACHE_KEY = "previous_close_map"
 PREVIOUS_DAY_BADGES_CACHE_KEY = "previous_day_badges"
 PREVIOUS_DAY_LEVELS_CACHE_KEY = "previous_day_levels"
 PDH_PDL_SCANNER_CACHE_KEY = "pdh_pdl_scanner"
-OPEN_EXTREME_SCANNER_CACHE_KEY = "open_extreme_scanner"
+OPEN_EXTREME_SCANNER_CACHE_KEY = "open_extreme_scanner_v2"
 RRG_CACHE_KEY = "relative_rotation_graph"
 SWING_SCANNER_CACHE_KEY = "swing_scanner"
 ACCELERATION_VOLUME_SMA_CACHE_KEY = "acceleration_volume_sma"
@@ -1668,7 +1668,7 @@ class MarketEngine:
         if not symbol:
             return None
         session_date = datetime.now(IST).date()
-        cache_key = f"opening-v4:{self._current_broker()}:{session_date.isoformat()}:{symbol}"
+        cache_key = f"opening-v5:{self._current_broker()}:{session_date.isoformat()}:{symbol}"
         cached = self.opening_candle_cache.get(cache_key)
         if isinstance(cached, dict):
             return cached
@@ -1679,8 +1679,6 @@ class MarketEngine:
             from_dt -= timedelta(minutes=1)
         to_dt = from_dt + timedelta(minutes=3)
         candles = self._fetch_intraday_candles(symbol, from_dt, to_dt, interval=1)
-        fallback_time = (datetime.combine(session_date, OPENING_CANDLE_TIME) - timedelta(minutes=1)).time()
-        fallback_candle = None
         for candle in candles:
             candle_dt = self._candle_datetime(candle)
             if not candle_dt:
@@ -1690,11 +1688,6 @@ class MarketEngine:
                 opening = dict(candle)
                 self.opening_candle_cache[cache_key] = opening
                 return opening
-            if self.broker == "dhan" and candle_time == fallback_time:
-                fallback_candle = dict(candle)
-        if fallback_candle:
-            self.opening_candle_cache[cache_key] = fallback_candle
-            return fallback_candle
         return None
 
     def _valid_opening_candle(self, candle, reference_price=None):
@@ -1722,6 +1715,12 @@ class MarketEngine:
         candle = self._opening_candle_for_symbol(symbol, allow_fetch=allow_fetch)
         if candle and not self._valid_opening_candle(candle, reference_price=reference_price):
             candle = None
+        candle_dt = self._candle_datetime(candle) if candle else None
+        candle_time = (
+            candle_dt.astimezone(IST).time().replace(second=0, microsecond=0).strftime("%H:%M")
+            if candle_dt
+            else None
+        )
         volume = self._candle_volume(candle) if candle else None
         high = self._float_or_none((candle or {}).get("high"))
         low = self._float_or_none((candle or {}).get("low"))
@@ -1733,6 +1732,7 @@ class MarketEngine:
         turnover = self._calculate_turnover(close, volume) if volume not in (None, 0, 1) else None
         return {
             "opening_candle_volume": int(volume) if volume is not None else None,
+            "opening_candle_time": candle_time,
             "opening_candle_high": round(high, 2) if high is not None else None,
             "opening_candle_low": round(low, 2) if low is not None else None,
             "opening_candle_close": round(close, 2) if close is not None else None,
@@ -3403,7 +3403,8 @@ class MarketEngine:
             return None
         existing = self._float_or_none(row.get("opening_turnover"))
         existing_multiplier = self._float_or_none(row.get("opening_volume_sma_multiplier"))
-        if existing not in (None, 0) and existing_multiplier not in (None, 0):
+        existing_time = str(row.get("opening_candle_time") or "")
+        if existing_time == "09:15" and existing not in (None, 0) and existing_multiplier not in (None, 0):
             return existing, existing_multiplier
         symbol = str(row.get("symbol") or "").upper()
         if not symbol:
