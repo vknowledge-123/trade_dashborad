@@ -53,17 +53,9 @@
     </div>
     <div class="accel-order-settings">
       <div>
-        <h4>Limit Order Settings</h4>
-        <p>Buy orders use a limit above LTP. Sell orders use a limit below LTP.</p>
+        <h4>Market Order Execution</h4>
+        <p>Buy and sell buttons place intraday market orders. Quantity is calculated from per trade capital at click time.</p>
       </div>
-      <label>
-        Buy Limit Above LTP %
-        <input id="accel-buy-limit-offset" type="number" min="0" step="0.05" value="1" />
-      </label>
-      <label>
-        Sell Limit Below LTP %
-        <input id="accel-sell-limit-offset" type="number" min="0" step="0.05" value="1" />
-      </label>
     </div>
   </div>
 
@@ -324,6 +316,88 @@
   .accel-row:not(.table-head) > span:nth-child(12)::before { content: "Keep "; color: #6b7fa3; }
   .accel-table[data-admin="1"] .accel-row:not(.table-head) > span:nth-child(13)::before { content: "Trade "; color: #6b7fa3; }
 }
+
+.accel-header,
+.accel-alert,
+.accel-cache-status,
+.accel-order-status,
+.accel-order-settings,
+.accel-filter-grid select,
+.accel-filter-grid input,
+.accel-order-settings input {
+  border-radius: 8px;
+}
+
+.accel-header {
+  background: linear-gradient(180deg, rgba(24, 28, 34, 0.96), rgba(17, 20, 25, 0.96));
+  border-color: rgba(232, 238, 247, 0.11);
+}
+
+.accel-table {
+  min-width: 100%;
+}
+
+.accel-row:not(.table-head) {
+  min-height: 46px;
+}
+
+.accel-trade-actions,
+.accel-row-actions {
+  justify-content: flex-start;
+}
+
+.accel-order-btn,
+.accel-hit-btn {
+  border-radius: 7px;
+}
+
+.accel-row > span:nth-child(2),
+.accel-row > span:nth-child(3),
+.accel-row > span:nth-child(4),
+.accel-row > span:nth-child(5),
+.accel-row > span:nth-child(7),
+.accel-row > span:nth-child(8),
+.accel-row > span:nth-child(9),
+.accel-row > span:nth-child(10),
+.accel-row > span:nth-child(11),
+.accel-row > span:nth-child(12) {
+  justify-content: flex-end;
+  text-align: right;
+}
+
+.accel-row > span:nth-child(1),
+.accel-row > span:nth-child(6),
+.accel-row > span:nth-child(13) {
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.accel-row.table-head > span:nth-child(2),
+.accel-row.table-head > span:nth-child(3),
+.accel-row.table-head > span:nth-child(4),
+.accel-row.table-head > span:nth-child(5),
+.accel-row.table-head > span:nth-child(7),
+.accel-row.table-head > span:nth-child(8),
+.accel-row.table-head > span:nth-child(9),
+.accel-row.table-head > span:nth-child(10),
+.accel-row.table-head > span:nth-child(11),
+.accel-row.table-head > span:nth-child(12) {
+  justify-content: flex-end;
+}
+
+.accel-row > span,
+.accel-row.table-head > span {
+  justify-content: flex-start !important;
+  text-align: left !important;
+}
+
+.accel-row > .tv-link {
+  justify-self: start !important;
+}
+
+.accel-row .mono {
+  white-space: nowrap;
+}
 </style>
 
 <script>
@@ -337,16 +411,12 @@
   const timeframe = document.getElementById("accel-timeframe");
   const minGain = document.getElementById("accel-min-gain");
   const tradeCapital = document.getElementById("accel-trade-capital");
-  const buyLimitOffset = document.getElementById("accel-buy-limit-offset");
-  const sellLimitOffset = document.getElementById("accel-sell-limit-offset");
   const orderStatus = document.getElementById("accel-order-status");
   const apply = document.getElementById("accel-apply");
   const cacheButton = document.getElementById("accel-cache");
   if (!body) return;
   const isAdmin = body.dataset.admin === "1";
   const capitalKey = "accel_per_trade_capital";
-  const buyLimitKey = "accel_buy_limit_offset_pct";
-  const sellLimitKey = "accel_sell_limit_offset_pct";
   if (tradeCapital) {
     const storedCapital = localStorage.getItem(capitalKey);
     if (storedCapital) tradeCapital.value = storedCapital;
@@ -354,16 +424,6 @@
       localStorage.setItem(capitalKey, tradeCapital.value || "10000");
     });
   }
-  const bindStoredInput = (input, key, fallback) => {
-    if (!input) return;
-    const stored = localStorage.getItem(key);
-    if (stored !== null && stored !== "") input.value = stored;
-    input.addEventListener("change", () => {
-      localStorage.setItem(key, input.value || fallback);
-    });
-  };
-  bindStoredInput(buyLimitOffset, buyLimitKey, "1");
-  bindStoredInput(sellLimitOffset, sellLimitKey, "1");
   const head = body.querySelector(".table-head")?.outerHTML || "";
   const tvUrl = (symbol) => `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(`NSE:${symbol}`)}`;
   const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
@@ -444,14 +504,8 @@
     const side = button.dataset.side;
     const price = Number(button.dataset.price);
     const capital = Number(tradeCapital?.value || 10000);
-    const buyOffset = Number(buyLimitOffset?.value || 1);
-    const sellOffset = Number(sellLimitOffset?.value || 1);
     if (!symbol || !side || !Number.isFinite(capital) || capital <= 0) {
       setOrderStatus("Enter a valid per trade capital before placing order.", true);
-      return;
-    }
-    if (!Number.isFinite(buyOffset) || buyOffset < 0 || !Number.isFinite(sellOffset) || sellOffset < 0) {
-      setOrderStatus("Enter valid buy and sell limit percentages.", true);
       return;
     }
     const estimatedQty = Number.isFinite(price) && price > 0 ? Math.floor(capital / price) : null;
@@ -460,12 +514,7 @@
       return;
     }
     const qtyText = estimatedQty ? ` around ${estimatedQty} qty` : "";
-    const selectedOffset = side === "BUY" ? buyOffset : sellOffset;
-    const limitMultiplier = side === "BUY" ? 1 + (selectedOffset / 100) : 1 - (selectedOffset / 100);
-    const limitPrice = Number.isFinite(price) && price > 0 ? (price * limitMultiplier).toFixed(2) : null;
-    const directionText = side === "BUY" ? "above" : "below";
-    const limitText = limitPrice ? ` at limit ${limitPrice} (${selectedOffset}% ${directionText})` : ` at ${selectedOffset}% ${directionText} current price`;
-    if (!window.confirm(`${side} ${symbol}${qtyText} as intraday limit order${limitText}?`)) return;
+    if (!window.confirm(`${side} ${symbol}${qtyText} as intraday market order?`)) return;
     button.disabled = true;
     const originalText = button.textContent;
     button.textContent = "Sending...";
@@ -479,8 +528,6 @@
           side,
           capital,
           price,
-          buy_limit_offset_pct: buyOffset,
-          sell_limit_offset_pct: sellOffset,
         }),
       });
       const text = await response.text();
@@ -493,7 +540,7 @@
       if (!response.ok || !payload.ok) {
         throw new Error(payload.error || "Order failed.");
       }
-      setOrderStatus(`${payload.side} ${payload.symbol} placed: ${payload.quantity} qty ${payload.product_type || "intraday"} ${payload.order_type || "LIMIT"} order at ${payload.limit_price ?? limitPrice} (${payload.limit_offset_pct ?? selectedOffset}% ${directionText})${payload.order_id ? `, order ${payload.order_id}` : ""}.`);
+      setOrderStatus(`${payload.side} ${payload.symbol} placed: ${payload.quantity} qty ${payload.product_type || "intraday"} ${payload.order_type || "MARKET"} order${payload.order_id ? `, order ${payload.order_id}` : ""}.`);
     } catch (error) {
       setOrderStatus(error.message || "Order failed.", true);
     } finally {
@@ -771,6 +818,67 @@
     content: "Time ";
     color: #6b7fa3;
   }
+}
+
+.blaster-header,
+.blaster-filter-grid select,
+.blast-status {
+  border-radius: 8px;
+}
+
+.blaster-header {
+  background: linear-gradient(180deg, rgba(24, 28, 34, 0.96), rgba(17, 20, 25, 0.96));
+  border-color: rgba(232, 238, 247, 0.11);
+}
+
+.blaster-row:not(.table-head) {
+  min-height: 46px;
+}
+
+.blast-status {
+  color: #071016;
+  background: linear-gradient(135deg, #63d297, #ffd166);
+  letter-spacing: 0;
+}
+
+@media (max-width: 760px) {
+  .blaster-row:not(.table-head) {
+    grid-template-columns: minmax(0, 1fr) auto !important;
+  }
+}
+
+.blaster-row > span:nth-child(2) {
+  justify-content: center;
+  text-align: center;
+}
+
+.blaster-row > span:nth-child(3),
+.blaster-row > span:nth-child(4) {
+  justify-content: flex-end;
+  text-align: right;
+}
+
+.blaster-row.table-head > span:nth-child(2) {
+  justify-content: center;
+}
+
+.blaster-row.table-head > span:nth-child(3),
+.blaster-row.table-head > span:nth-child(4) {
+  justify-content: flex-end;
+}
+
+.blaster-row > span,
+.blaster-row.table-head > span {
+  justify-content: flex-start !important;
+  text-align: left !important;
+}
+
+.blaster-row > .tv-link {
+  justify-self: start !important;
+}
+
+.blaster-row .mono {
+  white-space: nowrap;
 }
 </style>
 

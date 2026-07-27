@@ -1,0 +1,236 @@
+{% extends "base.html" %}
+{% block content %}
+
+<section class="gap-scan-shell">
+  <div class="gap-scan-header">
+    <div>
+      <div class="panel-sub">Admin scanner</div>
+      <h1>Gap Reversal Scanner</h1>
+      <p class="muted">Gap-up stocks that break first candle low and recover above the latest red candle reference.</p>
+    </div>
+    <div class="status-line">
+      <span class="pill">{{ scanner.tracked_count or 0 }} tracked</span>
+      <span class="pill {{ 'positive' if scanner.market_open else 'neutral' }}">{{ 'Live session' if scanner.market_open else 'Latest snapshot' }}</span>
+      <span class="snapshot-updated-at" id="gap-scan-updated-at">{{ scanner.updated_at or '-' }}</span>
+    </div>
+  </div>
+
+  {% if scanner.error %}
+    <div class="accel-alert" id="gap-scan-alert">{{ scanner.error }}</div>
+  {% else %}
+    <div class="accel-alert" id="gap-scan-alert" hidden></div>
+  {% endif %}
+
+  <div class="panel">
+    <div class="table gap-scan-table" id="gap-scan-body">
+      <div class="table-row table-head gap-scan-row">
+        <span>Symbol</span>
+        <span>Price</span>
+        <span>Change %</span>
+        <span>Gap %</span>
+        <span>Sector</span>
+        <span>9:15 TO</span>
+        <span>Vol x</span>
+        <span>Low Break</span>
+        <span>Red High</span>
+        <span>Breakout</span>
+        <span>Chart</span>
+      </div>
+      {% for row in scanner.rows or [] %}
+        <div class="table-row gap-scan-row" data-symbol="{{ row.symbol }}">
+          <span class="cell-symbol">
+            <span class="cell-symbol-main">{{ row.symbol }}{% if row.is_fno %} <span class="fno-tag">F&amp;O</span>{% endif %}{% if row.is_nifty50 %} <span class="nifty50-tag">Nifty 50</span>{% endif %}</span>
+            <span class="sector-stock-name">{{ row.name }}</span>
+          </span>
+          <span class="mono">{{ row.price }}</span>
+          <span class="positive mono">+{{ row.change }}%</span>
+          <span class="positive mono">+{{ row.gap_up_percent }}%</span>
+          <span class="sector-meta">
+            <span>{{ row.sector_name or row.sector or 'No sector' }}</span>
+            {% if row.sector_rank %}
+              <small class="{{ 'positive' if row.sector_side != 'loser' else 'negative' }}">Rank {{ row.sector_rank }}</small>
+            {% endif %}
+          </span>
+          <span class="mono">{{ format_crores(row.opening_turnover if row.opening_turnover is defined else none) }}</span>
+          <span class="mono">{{ row.opening_volume_sma_multiplier ~ 'x' if row.opening_volume_sma_multiplier else '-' }}</span>
+          <span class="mono">{{ format_ione_hit_time(row.low_break_time) }}</span>
+          <span class="mono">{{ row.red_candle_high }}</span>
+          <span class="mono">{{ format_ione_hit_time(row.breakout_time) }}</span>
+          <a class="tv-link" href="https://www.tradingview.com/chart/?symbol=NSE%3A{{ row.symbol | urlencode }}" target="_blank" rel="noopener noreferrer">TradingView</a>
+        </div>
+      {% else %}
+        <div class="table-row gap-scan-row gap-scan-empty">
+          <span>No gap reversal candidates yet.</span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<style>
+.gap-scan-shell {
+  display: grid;
+  gap: 14px;
+}
+.gap-scan-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 14px;
+  border: 1px solid rgba(138, 180, 248, 0.18);
+  background: rgba(18, 24, 32, 0.72);
+  border-radius: 12px;
+}
+.gap-scan-header h1 {
+  margin: 0;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 34px;
+  letter-spacing: 0;
+}
+.gap-scan-table {
+  overflow-x: auto;
+}
+.gap-scan-row {
+  grid-template-columns: minmax(145px, 1.1fr) 0.58fr 0.55fr 0.52fr minmax(120px, 0.9fr) 0.65fr 0.48fr 0.66fr 0.55fr 0.66fr auto;
+  align-items: center;
+}
+.gap-scan-empty span:first-child {
+  grid-column: 1 / -1;
+  color: #8ca5c8;
+}
+@media (max-width: 980px) {
+  .gap-scan-row {
+    min-width: 980px;
+  }
+  .gap-scan-header h1 {
+    font-size: 24px;
+  }
+}
+
+.gap-scan-header {
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(24, 28, 34, 0.96), rgba(17, 20, 25, 0.96));
+  border-color: rgba(232, 238, 247, 0.11);
+}
+
+.gap-scan-row:not(.table-head) {
+  min-height: 46px;
+}
+
+@media (max-width: 760px) {
+  .gap-scan-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+.gap-scan-row > span:nth-child(2),
+.gap-scan-row > span:nth-child(3),
+.gap-scan-row > span:nth-child(4),
+.gap-scan-row > span:nth-child(6),
+.gap-scan-row > span:nth-child(7),
+.gap-scan-row > span:nth-child(8),
+.gap-scan-row > span:nth-child(9),
+.gap-scan-row > span:nth-child(10) {
+  justify-content: flex-end;
+  text-align: right;
+}
+
+.gap-scan-row > span:nth-child(1),
+.gap-scan-row > span:nth-child(5) {
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.gap-scan-row.table-head > span:nth-child(2),
+.gap-scan-row.table-head > span:nth-child(3),
+.gap-scan-row.table-head > span:nth-child(4),
+.gap-scan-row.table-head > span:nth-child(6),
+.gap-scan-row.table-head > span:nth-child(7),
+.gap-scan-row.table-head > span:nth-child(8),
+.gap-scan-row.table-head > span:nth-child(9),
+.gap-scan-row.table-head > span:nth-child(10) {
+  justify-content: flex-end;
+}
+
+.gap-scan-row > span,
+.gap-scan-row.table-head > span {
+  justify-content: flex-start !important;
+  text-align: left !important;
+}
+
+.gap-scan-row > .tv-link {
+  justify-self: start !important;
+}
+
+.gap-scan-row .mono {
+  white-space: nowrap;
+}
+</style>
+
+<script>
+(function () {
+  const body = document.getElementById("gap-scan-body");
+  const alertBox = document.getElementById("gap-scan-alert");
+  const updatedAt = document.getElementById("gap-scan-updated-at");
+  if (!body) return;
+  const head = body.querySelector(".table-head")?.outerHTML || "";
+  const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  }[char]));
+  const formatCrores = (value) => {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return "-";
+    return `${(number / 10000000).toFixed(2)} Cr`;
+  };
+  const formatTime = (value) => {
+    if (!value) return "-";
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return String(value);
+    return parsed.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" });
+  };
+  const chartUrl = (symbol) => `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(`NSE:${symbol}`)}`;
+  const rowHtml = (row) => `
+    <div class="table-row gap-scan-row" data-symbol="${escapeHtml(row.symbol)}">
+      <span class="cell-symbol">
+        <span class="cell-symbol-main">${escapeHtml(row.symbol)}${row.is_fno ? ' <span class="fno-tag">F&O</span>' : ""}${row.is_nifty50 ? ' <span class="nifty50-tag">Nifty 50</span>' : ""}</span>
+        <span class="sector-stock-name">${escapeHtml(row.name || row.symbol || "")}</span>
+      </span>
+      <span class="mono">${escapeHtml(row.price ?? "-")}</span>
+      <span class="positive mono">+${escapeHtml(row.change ?? "-")}%</span>
+      <span class="positive mono">+${escapeHtml(row.gap_up_percent ?? "-")}%</span>
+      <span class="sector-meta"><span>${escapeHtml(row.sector_name || row.sector || "No sector")}</span>${row.sector_rank ? `<small class="${row.sector_side === "loser" ? "negative" : "positive"}">Rank ${escapeHtml(row.sector_rank)}</small>` : ""}</span>
+      <span class="mono">${formatCrores(row.opening_turnover)}</span>
+      <span class="mono">${row.opening_volume_sma_multiplier ? `${escapeHtml(row.opening_volume_sma_multiplier)}x` : "-"}</span>
+      <span class="mono">${formatTime(row.low_break_time)}</span>
+      <span class="mono">${escapeHtml(row.red_candle_high ?? "-")}</span>
+      <span class="mono">${formatTime(row.breakout_time)}</span>
+      <a class="tv-link" href="${chartUrl(row.symbol)}" target="_blank" rel="noopener noreferrer">TradingView</a>
+    </div>
+  `;
+  const emptyRow = () => '<div class="table-row gap-scan-row gap-scan-empty"><span>No gap reversal candidates yet.</span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>';
+  const load = async () => {
+    try {
+      const response = await fetch(`/api/admin/gap-reversal-scanner?ts=${Date.now()}`, { cache: "no-store" });
+      if (!response.ok) return;
+      const data = await response.json();
+      const rows = data.rows || [];
+      body.innerHTML = head + (rows.length ? rows.map(rowHtml).join("") : emptyRow());
+      if (updatedAt) updatedAt.textContent = data.updated_at || "-";
+      if (alertBox) {
+        alertBox.hidden = !data.error;
+        alertBox.textContent = data.error || "";
+      }
+    } catch (error) {}
+  };
+  setInterval(load, 12000);
+})();
+</script>
+
+{% endblock %}

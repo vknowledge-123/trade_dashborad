@@ -1481,6 +1481,7 @@ class MarketEngine:
             "symbol": symbol,
             "name": self.symbol_to_name.get(symbol, symbol),
             "price": round(last_price, 2),
+            "previous_close": round(close, 2),
             "change": round(change, 2),
             "volume": int(volume) if volume not in (None, "") else None,
             "turnover": self._calculate_turnover(last_price, volume),
@@ -1542,8 +1543,14 @@ class MarketEngine:
                 first_volume = current.get("first_volume")
                 if cumulative_volume is not None and first_volume is None:
                     first_volume = cumulative_volume
+                current_open = self._float_or_none(current.get("open"))
+                current_high = self._float_or_none(current.get("high"))
+                current_low = self._float_or_none(current.get("low"))
                 current.update(
                     {
+                        "open": round(current_open if current_open is not None else price, 2),
+                        "high": round(max(current_high if current_high is not None else price, price), 2),
+                        "low": round(min(current_low if current_low is not None else price, price), 2),
                         "close": round(price, 2),
                         "updated_at": moment.isoformat(),
                     }
@@ -1722,6 +1729,7 @@ class MarketEngine:
             else None
         )
         volume = self._candle_volume(candle) if candle else None
+        open_price = self._float_or_none((candle or {}).get("open"))
         high = self._float_or_none((candle or {}).get("high"))
         low = self._float_or_none((candle or {}).get("low"))
         close = self._float_or_none((candle or {}).get("close"))
@@ -1733,6 +1741,7 @@ class MarketEngine:
         return {
             "opening_candle_volume": int(volume) if volume is not None else None,
             "opening_candle_time": candle_time,
+            "opening_candle_open": round(open_price, 2) if open_price is not None else None,
             "opening_candle_high": round(high, 2) if high is not None else None,
             "opening_candle_low": round(low, 2) if low is not None else None,
             "opening_candle_close": round(close, 2) if close is not None else None,
@@ -2013,6 +2022,186 @@ class MarketEngine:
             "error": error,
         }
 
+    def _previous_close_for_gap_scan(self, row):
+        close = self._float_or_none((row or {}).get("previous_close"))
+        if close not in (None, 0):
+            return close
+        symbol = str((row or {}).get("symbol") or "").upper()
+        cached = self._cached_previous_close("symbols", symbol)
+        if cached not in (None, 0):
+            return cached
+        price = self._float_or_none((row or {}).get("price"))
+        change = self._float_or_none((row or {}).get("change"))
+        if price in (None, 0) or change is None or change <= -99:
+            return None
+        return price / (1 + (change / 100))
+
+    def _live_one_minute_candles_for_symbol(self, symbol):
+        symbol = str(symbol or "").upper()
+        today = datetime.now(IST).date()
+        candles = []
+        with self.acceleration_lock:
+            buckets = dict(self.acceleration_closes.get(symbol) or {})
+        for key, bucket in buckets.items():
+            if not isinstance(key, tuple) or key[0] != 1 or not isinstance(bucket, dict):
+                continue
+            candle_dt = self._candle_datetime({"date": key[1]})
+            if not candle_dt or candle_dt.date() != today:
+                continue
+            if candle_dt.time().replace(second=0, microsecond=0) < OPENING_CANDLE_TIME:
+                continue
+            open_price = self._float_or_none(bucket.get("open") or bucket.get("close"))
+            close = self._float_or_none(bucket.get("close"))
+            if open_price in (None, 0) or close in (None, 0):
+                continue
+            high = self._float_or_none(bucket.get("high"))
+            low = self._float_or_none(bucket.get("low"))
+            candles.append(
+                {
+                    "date": candle_dt,
+                    "open": open_price,
+                    "high": high if high is not None else max(open_price, close),
+                    "low": low if low is not None else min(open_price, close),
+                    "close": close,
+                    "volume": self._candle_volume(bucket),
+                }
+            )
+        return sorted(candles, key=lambda item: self._candle_datetime(item) or datetime.min.replace(tzinfo=IST))
+
+    def _gap_reversal_candles(self, symbol, allow_fetch=False):
+        candles = self._live_one_minute_candles_for_symbol(symbol)
+        if candles or not allow_fetch:
+            return candles
+        now = datetime.now(IST)
+        from_dt = datetime.combine(now.date(), OPENING_CANDLE_TIME, tzinfo=IST) - timedelta(minutes=1)
+        to_dt = min(now, datetime.combine(now.date(), dtime(15, 30), tzinfo=IST))
+        if to_dt <= from_dt:
+            return []
+        return self._fetch_intraday_candles(symbol, from_dt, to_dt, interval=1)
+
+    def _detect_gap_reversal_pattern(self, symbol, opening_context, allow_fetch=False):
+        opening_low = self._float_or_none((opening_context or {}).get("opening_candle_low"))
+        if opening_low in (None, 0):
+            return None
+        candles = self._gap_reversal_candles(symbol, allow_fetch=allow_fetch)
+        if not candles:
+            return None
+        normalized = []
+        for candle in candles:
+            candle_dt = self._candle_datetime(candle)
+            if not candle_dt:
+                continue
+            candle_time = candle_dt.astimezone(IST).time().replace(second=0, microsecond=0)
+            if candle_time <= OPENING_CANDLE_TIME:
+                continue
+            open_price = self._float_or_none(candle.get("open"))
+            high = self._float_or_none(candle.get("high"))
+            low = self._float_or_none(candle.get("low"))
+            close = self._float_or_none(candle.get("close"))
+            if open_price in (None, 0) or high in (None, 0) or low in (None, 0) or close in (None, 0):
+                continue
+            normalized.append(
+                {
+                    "date": candle_dt,
+                    "open": open_price,
+                    "high": high,
+                    "low": low,
+                    "close": close,
+                }
+            )
+        low_break_candle = None
+        last_red = None
+        for candle in normalized:
+            if low_break_candle is None:
+                if candle["low"] < opening_low - 0.005:
+                    low_break_candle = candle
+                else:
+                    continue
+            if candle["close"] < candle["open"]:
+                last_red = candle
+                continue
+            if not last_red or candle["close"] <= candle["open"]:
+                continue
+            red_high = last_red["high"]
+            red_open = last_red["open"]
+            if candle["high"] >= red_high and (candle["close"] > red_high or candle["close"] > red_open):
+                return {
+                    "first_candle_low": round(opening_low, 2),
+                    "low_break_time": low_break_candle["date"].isoformat(timespec="seconds"),
+                    "red_candle_time": last_red["date"].isoformat(timespec="seconds"),
+                    "red_candle_high": round(red_high, 2),
+                    "red_candle_open": round(red_open, 2),
+                    "breakout_time": candle["date"].isoformat(timespec="seconds"),
+                    "breakout_close": round(candle["close"], 2),
+                }
+        return None
+
+    def get_gap_reversal_scanner(self, allow_fetch=True):
+        market_open = self._is_market_open()
+        if self.kite and self.symbol_to_token:
+            self._refresh_rest_snapshot(force=True)
+        with self.lock:
+            latest_rows = [dict(row) for row in self.latest.values()]
+        if self.nifty500_set:
+            latest_rows = [row for row in latest_rows if str(row.get("symbol") or "").upper() in self.nifty500_set]
+        sector_rankings = self._sector_rankings()
+        rows = []
+        missing_opening = []
+        fetched_patterns = 0
+        sorted_candidates = sorted(
+            [row for row in latest_rows if self._float_or_none(row.get("change")) is not None],
+            key=lambda item: float(item.get("change") or 0),
+            reverse=True,
+        )
+        for row in sorted_candidates:
+            symbol = str(row.get("symbol") or "").upper()
+            if not symbol:
+                continue
+            change = self._float_or_none(row.get("change"))
+            if change is None:
+                continue
+            opening_context = self._opening_candle_context(symbol, reference_price=row.get("price"), allow_fetch=False)
+            if opening_context.get("opening_candle_time") != "09:15":
+                missing_opening.append(symbol)
+                continue
+            opening_turnover = self._float_or_none(opening_context.get("opening_turnover"))
+            opening_multiplier = self._float_or_none(opening_context.get("opening_volume_sma_multiplier"))
+            if not opening_turnover or opening_turnover <= 30_000_000 or opening_multiplier is None or opening_multiplier < 2.5:
+                continue
+            previous_close = self._previous_close_for_gap_scan(row)
+            opening_open = self._float_or_none(opening_context.get("opening_candle_open") or row.get("day_open"))
+            if previous_close in (None, 0) or opening_open in (None, 0):
+                continue
+            gap_up_pct = ((opening_open - previous_close) / previous_close) * 100
+            if gap_up_pct < 1.5:
+                continue
+            pattern = self._detect_gap_reversal_pattern(symbol, opening_context, allow_fetch=False)
+            if pattern is None and allow_fetch and fetched_patterns < 40:
+                fetched_patterns += 1
+                pattern = self._detect_gap_reversal_pattern(symbol, opening_context, allow_fetch=True)
+            if pattern is None:
+                continue
+            enriched = self._apply_open_extreme_flags(dict(row))
+            enriched.update(opening_context)
+            enriched.update(self._sector_context_for_symbol(symbol, latest=enriched, rankings=sector_rankings))
+            enriched.update(pattern)
+            enriched["gap_up_percent"] = round(gap_up_pct, 2)
+            enriched["opening_turnover"] = opening_turnover
+            enriched["opening_volume_sma_multiplier"] = opening_multiplier
+            enriched["is_nifty50"] = symbol in NIFTY_50_SYMBOLS
+            rows.append(enriched)
+        if missing_opening:
+            self._ensure_opening_candle_background_refresh(missing_opening[:60])
+        rows.sort(key=lambda item: float(item.get("change") or 0), reverse=True)
+        return {
+            "rows": rows,
+            "tracked_count": len(latest_rows),
+            "updated_at": self.last_update or self._utc_now(),
+            "market_open": market_open,
+            "snapshot_source": self.last_snapshot_source,
+            "error": None if rows else "No gap reversal candidates matched the current pattern filters.",
+        }
+
     def get_open_extreme_scanner(self):
         market_open = self._is_market_open()
         now_ist = datetime.now(IST)
@@ -2184,19 +2373,6 @@ class MarketEngine:
         quantity = int(capital // price)
         if quantity <= 0:
             return {"ok": False, "error": f"Capital {capital:.2f} is lower than {symbol} price {price:.2f}."}
-        try:
-            buy_offset = max(0.0, float(buy_limit_offset_pct if buy_limit_offset_pct is not None else 1))
-        except (TypeError, ValueError):
-            buy_offset = 1.0
-        try:
-            sell_offset = max(0.0, float(sell_limit_offset_pct if sell_limit_offset_pct is not None else 1))
-        except (TypeError, ValueError):
-            sell_offset = 1.0
-        limit_offset_pct = buy_offset if side == "BUY" else sell_offset
-        limit_multiplier = 1 + (limit_offset_pct / 100) if side == "BUY" else 1 - (limit_offset_pct / 100)
-        limit_price = round(price * limit_multiplier, 2)
-        if limit_price <= 0:
-            return {"ok": False, "error": "Limit price must be greater than zero."}
         correlation_id = f"ACC{side[:1]}{symbol}{int(time.time())}"[:30]
         try:
             if active_broker == "dhan":
@@ -2206,12 +2382,12 @@ class MarketEngine:
                     quantity=quantity,
                     exchange_segment="NSE_EQ",
                     product_type="INTRADAY",
-                    order_type="LIMIT",
-                    price=limit_price,
+                    order_type="MARKET",
+                    price=0.0,
                     correlation_id=correlation_id,
                 )
                 broker_product = "INTRADAY"
-                broker_order_type = "LIMIT"
+                broker_order_type = "MARKET"
             else:
                 kite_side = "BUY" if side == "BUY" else "SELL"
                 response = self.kite.place_order(
@@ -2221,11 +2397,11 @@ class MarketEngine:
                     transaction_type=kite_side,
                     quantity=quantity,
                     product="MIS",
-                    order_type="LIMIT",
-                    price=limit_price,
+                    order_type="MARKET",
+                    price=0.0,
                 )
                 broker_product = "MIS"
-                broker_order_type = "LIMIT"
+                broker_order_type = "MARKET"
         except Exception as exc:
             self.last_error = str(exc)
             return {"ok": False, "error": str(exc)}
@@ -2241,8 +2417,6 @@ class MarketEngine:
             "side": side,
             "quantity": quantity,
             "price": round(price, 2),
-            "limit_price": limit_price,
-            "limit_offset_pct": round(limit_offset_pct, 3),
             "capital": round(capital, 2),
             "product_type": broker_product,
             "order_type": broker_order_type,
@@ -2349,19 +2523,10 @@ class MarketEngine:
             quantity = int(risk // per_share_risk) if per_share_risk > 0 else 0
         if quantity <= 0:
             return {"ok": False, "error": f"Risk {risk:.2f} is too low for {symbol} at {price:.2f}."}
-        try:
-            offset = max(0.0, float(limit_offset_pct if limit_offset_pct is not None else 0.01))
-        except (TypeError, ValueError):
-            offset = 0.01
         attempts = []
         max_attempts = max(1, min(2, int(retry_attempts or 2)))
         response = None
         for attempt in range(max_attempts):
-            attempt_price = self._latest_price_for_symbol(symbol, client_price=price) or price
-            multiplier = 1 + (offset / 100) if side == "BUY" else 1 - (offset / 100)
-            limit_price = round(attempt_price * multiplier, 2)
-            if limit_price <= 0:
-                return {"ok": False, "error": "Limit price must be greater than zero."}
             try:
                 correlation_id = f"IP{side[:1]}{symbol}{int(time.time())}{attempt + 1}"[:30]
                 if active_broker == "dhan":
@@ -2371,8 +2536,8 @@ class MarketEngine:
                         quantity=quantity,
                         exchange_segment="NSE_EQ",
                         product_type="INTRADAY",
-                        order_type="LIMIT",
-                        price=limit_price,
+                        order_type="MARKET",
+                        price=0.0,
                         correlation_id=correlation_id,
                     )
                     product_type = "INTRADAY"
@@ -2384,11 +2549,11 @@ class MarketEngine:
                         transaction_type=side,
                         quantity=quantity,
                         product="MIS",
-                        order_type="LIMIT",
-                        price=limit_price,
+                        order_type="MARKET",
+                        price=0.0,
                     )
                     product_type = "MIS"
-                attempts.append({"attempt": attempt + 1, "limit_price": limit_price, "ok": not self._is_order_response_failed(response)})
+                attempts.append({"attempt": attempt + 1, "ok": not self._is_order_response_failed(response)})
                 if not self._is_order_response_failed(response):
                     return {
                         "ok": True,
@@ -2396,12 +2561,10 @@ class MarketEngine:
                         "side": side,
                         "quantity": quantity,
                         "price": round(price, 2),
-                        "limit_price": limit_price,
-                        "limit_offset_pct": round(offset, 3),
                         "per_trade_risk": round(risk, 2),
                         "stop_loss_pct": round(sl_pct, 3),
                         "product_type": product_type,
-                        "order_type": "LIMIT",
+                        "order_type": "MARKET",
                         "broker": active_broker,
                         "order_id": self._extract_order_id(response),
                         "attempts": attempts,
@@ -2409,7 +2572,7 @@ class MarketEngine:
                     }
             except Exception as exc:
                 self.last_error = str(exc)
-                attempts.append({"attempt": attempt + 1, "limit_price": limit_price, "ok": False, "error": str(exc)})
+                attempts.append({"attempt": attempt + 1, "ok": False, "error": str(exc)})
                 if attempt >= max_attempts - 1:
                     return {"ok": False, "error": str(exc), "attempts": attempts}
         return {"ok": False, "error": "Order failed after retry.", "attempts": attempts, "response": response}
@@ -2566,17 +2729,11 @@ class MarketEngine:
             premium = self._quote_ltp_for_security("NSE_FNO", contract["security_id"])
         if premium in (None, 0):
             return {"ok": False, "error": f"Option premium is not available for {symbol} {option_side}."}
-        try:
-            offset = max(0.0, float(limit_offset_pct if limit_offset_pct is not None else 0.1))
-        except (TypeError, ValueError):
-            offset = 0.1
         max_attempts = max(1, min(2, int(retry_attempts or 2)))
         attempts = []
         response = None
         quantity = int(contract.get("lot_size") or 1)
         for attempt in range(max_attempts):
-            current_premium = self._quote_ltp_for_security("NSE_FNO", contract["security_id"]) or premium
-            limit_price = round(current_premium * (1 + (offset / 100)), 2)
             try:
                 response = self.kite.place_order(
                     security_id=contract["security_id"],
@@ -2584,11 +2741,11 @@ class MarketEngine:
                     quantity=quantity,
                     exchange_segment="NSE_FNO",
                     product_type="INTRADAY",
-                    order_type="LIMIT",
-                    price=limit_price,
+                    order_type="MARKET",
+                    price=0.0,
                     correlation_id=f"IPOPT{symbol}{option_side[:1]}{int(time.time())}{attempt + 1}"[:30],
                 )
-                attempts.append({"attempt": attempt + 1, "limit_price": limit_price, "ok": not self._is_order_response_failed(response)})
+                attempts.append({"attempt": attempt + 1, "ok": not self._is_order_response_failed(response)})
                 if not self._is_order_response_failed(response):
                     return {
                         "ok": True,
@@ -2601,10 +2758,8 @@ class MarketEngine:
                         "quantity": quantity,
                         "lot_size": quantity,
                         "premium": round(float(premium), 2),
-                        "limit_price": limit_price,
-                        "limit_offset_pct": round(offset, 3),
                         "product_type": "INTRADAY",
-                        "order_type": "LIMIT",
+                        "order_type": "MARKET",
                         "broker": "dhan",
                         "order_id": self._extract_order_id(response),
                         "attempts": attempts,
@@ -3392,6 +3547,15 @@ class MarketEngine:
     def _decorate_snapshot_rows(self, snapshot):
         if not snapshot:
             return snapshot
+        rankings = self._sector_rankings()
+        for rows in (snapshot.get("gainers") or [], snapshot.get("losers") or []):
+            for idx, row in enumerate(rows):
+                if not isinstance(row, dict):
+                    continue
+                symbol = str(row.get("symbol") or "").upper()
+                enriched = self._apply_open_extreme_flags(row)
+                enriched.update(self._sector_context_for_symbol(symbol, latest=enriched, rankings=rankings))
+                rows[idx] = enriched
         self._decorate_rows_with_previous_day_badges(snapshot.get("gainers") or [], fetch_missing=False)
         self._decorate_rows_with_previous_day_badges(snapshot.get("losers") or [], fetch_missing=False)
         self._decorate_rows_with_turnover(snapshot.get("gainers") or [])
@@ -3445,7 +3609,11 @@ class MarketEngine:
         return rows
 
     def _rank_sector_breakdown_rows(self, rows, market_open):
-        prepared = [dict(row) for row in rows or [] if isinstance(row, dict)]
+        prepared = [
+            self._apply_open_extreme_flags(dict(row))
+            for row in rows or []
+            if isinstance(row, dict)
+        ]
         self._decorate_rows_with_previous_day_badges(prepared, fetch_missing=False)
         self._decorate_rows_with_turnover(prepared)
         ranked = sorted(prepared, key=lambda item: item.get("change") or 0, reverse=True)

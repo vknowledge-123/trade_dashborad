@@ -1036,6 +1036,22 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["sector_rank"], 1)
         self.assertEqual(payload["rows"][0]["sector_count"], 2)
 
+    def test_record_acceleration_price_tracks_bucket_ohlc(self):
+        engine = MarketEngine(redis_client=None)
+        now = datetime.now(IST).replace(hour=9, minute=17, second=5, microsecond=0)
+
+        engine._record_acceleration_price("INFY", 100, moment=now, cumulative_volume=1000)
+        engine._record_acceleration_price("INFY", 104, moment=now + timedelta(seconds=10), cumulative_volume=1500)
+        engine._record_acceleration_price("INFY", 99, moment=now + timedelta(seconds=20), cumulative_volume=1900)
+
+        bucket = engine._bucket_start(now, 1).isoformat()
+        candle = engine.acceleration_closes["INFY"][(1, bucket)]
+        self.assertEqual(candle["open"], 100)
+        self.assertEqual(candle["high"], 104)
+        self.assertEqual(candle["low"], 99)
+        self.assertEqual(candle["close"], 99)
+        self.assertEqual(candle["candle_volume"], 900)
+
     def test_sector_rankings_split_gainers_and_losers(self):
         engine = MarketEngine(redis_client=None)
         engine.sector_latest = {
@@ -1143,6 +1159,82 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertEqual(payload["open_low_gainers"][0]["sector_change"], 2.5)
         self.assertEqual(payload["open_high_losers"][0]["sector_name"], "NIFTY MEDIA")
         self.assertEqual(payload["open_high_losers"][0]["sector_change"], -1.5)
+
+    def test_dashboard_snapshot_decorates_rows_with_sector_rank_and_open_badges(self):
+        engine = MarketEngine(redis_client=None)
+        engine.nifty500_set = set()
+        engine._is_market_open = lambda: True
+        engine.symbol_to_sectors = {"INFY": ["NIFTY IT"]}
+        engine.sector_latest = {"NIFTY IT": {"sector": "NIFTY IT", "price": 1000, "change": 2.5}}
+        engine.latest = {
+            "INFY": {
+                "symbol": "INFY",
+                "price": 110,
+                "previous_close": 100,
+                "change": 10.0,
+                "volume": 1000,
+                "day_open": 100,
+                "day_low": 100,
+                "day_high": 111,
+                "open_equals_low": True,
+                "sectors": ["NIFTY IT"],
+                "opening_candle_time": "09:15",
+                "opening_turnover": 40_000_000,
+                "opening_volume_sma_multiplier": 2.6,
+            }
+        }
+
+        snapshot = engine._build_snapshot(market_open=True)
+        row = snapshot["gainers"][0]
+
+        self.assertEqual(row["sector_rank"], 1)
+        self.assertEqual(row["sector_side"], "gainer")
+        self.assertTrue(row["open_equals_low"])
+        self.assertIn("OPEN=LOW", row["ohlc_badges"])
+
+    def test_gap_reversal_scanner_detects_gap_up_low_break_green_reclaim(self):
+        engine = MarketEngine(redis_client=None)
+        engine.broker = "kite"
+        engine.nifty500_set = set()
+        engine._is_market_open = lambda: True
+        engine._refresh_rest_snapshot = lambda force=False: None
+        engine._ensure_opening_candle_background_refresh = lambda symbols: False
+        engine.symbol_to_sectors = {"INFY": ["NIFTY IT"]}
+        engine.sector_latest = {"NIFTY IT": {"sector": "NIFTY IT", "price": 1000, "change": 2.0}}
+        engine.latest = {
+            "INFY": {
+                "symbol": "INFY",
+                "name": "Infosys",
+                "price": 105,
+                "previous_close": 100,
+                "change": 5,
+                "volume": 1000,
+                "is_fno": True,
+                "sectors": ["NIFTY IT"],
+            }
+        }
+        engine._opening_candle_context = lambda symbol, reference_price=None, allow_fetch=False: {
+            "opening_candle_time": "09:15",
+            "opening_candle_open": 102,
+            "opening_candle_low": 101,
+            "opening_candle_high": 103,
+            "opening_candle_close": 102.5,
+            "opening_turnover": 40_000_000,
+            "opening_volume_sma_multiplier": 2.6,
+        }
+        base = datetime.now(IST).replace(hour=9, minute=16, second=0, microsecond=0)
+        engine._gap_reversal_candles = lambda symbol, allow_fetch=False: [
+            {"date": base, "open": 102.2, "high": 102.5, "low": 100.8, "close": 101.2},
+            {"date": base + timedelta(minutes=1), "open": 101.3, "high": 101.6, "low": 100.9, "close": 101.0},
+            {"date": base + timedelta(minutes=2), "open": 101.1, "high": 101.8, "low": 101.0, "close": 101.7},
+        ]
+
+        payload = engine.get_gap_reversal_scanner(allow_fetch=False)
+
+        self.assertEqual([row["symbol"] for row in payload["rows"]], ["INFY"])
+        self.assertEqual(payload["rows"][0]["gap_up_percent"], 2.0)
+        self.assertEqual(payload["rows"][0]["sector_rank"], 1)
+        self.assertEqual(payload["rows"][0]["red_candle_high"], 101.6)
 
     def test_open_extreme_scanner_waits_until_916(self):
         class BeforeOpenExtremeTime(datetime):
@@ -1909,12 +2001,11 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertEqual(result["quantity"], 20)
         self.assertEqual(result["order_id"], "OID456")
         self.assertEqual(result["product_type"], "INTRADAY")
-        self.assertEqual(result["order_type"], "LIMIT")
-        self.assertEqual(result["limit_price"], 510.0)
-        self.assertEqual(result["limit_offset_pct"], 2)
+        self.assertEqual(result["order_type"], "MARKET")
+        self.assertNotIn("limit_price", result)
         self.assertEqual(fake_session.last_payload["quantity"], 20)
-        self.assertEqual(fake_session.last_payload["orderType"], "LIMIT")
-        self.assertEqual(fake_session.last_payload["price"], 510.0)
+        self.assertEqual(fake_session.last_payload["orderType"], "MARKET")
+        self.assertEqual(fake_session.last_payload["price"], 0.0)
 
     def test_acceleration_order_supports_kite_mis_market_order(self):
         class FakeKiteOrder:
@@ -1943,16 +2034,15 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertEqual(result["quantity"], 20)
         self.assertEqual(result["order_id"], "KITE123")
         self.assertEqual(result["product_type"], "MIS")
-        self.assertEqual(result["order_type"], "LIMIT")
-        self.assertEqual(result["limit_price"], 490.0)
-        self.assertEqual(result["limit_offset_pct"], 2)
+        self.assertEqual(result["order_type"], "MARKET")
+        self.assertNotIn("limit_price", result)
         self.assertEqual(fake_kite.last_payload["tradingsymbol"], "INFY")
         self.assertEqual(fake_kite.last_payload["transaction_type"], "SELL")
         self.assertEqual(fake_kite.last_payload["product"], "MIS")
-        self.assertEqual(fake_kite.last_payload["order_type"], "LIMIT")
-        self.assertEqual(fake_kite.last_payload["price"], 490.0)
+        self.assertEqual(fake_kite.last_payload["order_type"], "MARKET")
+        self.assertEqual(fake_kite.last_payload["price"], 0.0)
 
-    def test_ione_power_equity_order_uses_risk_quantity_and_limit_offset(self):
+    def test_ione_power_equity_order_uses_risk_quantity_and_market_order(self):
         from app.kite_engine import DhanClient
 
         fake_session = FakeSession(FakeResponse({"status": "success", "orderId": "IP123"}))
@@ -1974,12 +2064,13 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
 
         self.assertTrue(result["ok"])
         self.assertEqual(result["quantity"], 133)
-        self.assertEqual(result["limit_price"], 1000.1)
+        self.assertEqual(result["order_type"], "MARKET")
+        self.assertNotIn("limit_price", result)
         self.assertEqual(result["order_id"], "IP123")
-        self.assertEqual(fake_session.last_payload["orderType"], "LIMIT")
-        self.assertEqual(fake_session.last_payload["price"], 1000.1)
+        self.assertEqual(fake_session.last_payload["orderType"], "MARKET")
+        self.assertEqual(fake_session.last_payload["price"], 0.0)
 
-    def test_ione_power_option_order_picks_atm_call_and_places_one_lot_limit(self):
+    def test_ione_power_option_order_picks_atm_call_and_places_one_lot_market(self):
         from app.kite_engine import DhanClient
 
         fake_session = FakeSequenceSession(
@@ -2013,11 +2104,12 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertEqual(result["security_id"], "9002")
         self.assertEqual(result["strike"], 1000.0)
         self.assertEqual(result["quantity"], 750)
-        self.assertEqual(result["limit_price"], 10.01)
+        self.assertEqual(result["order_type"], "MARKET")
+        self.assertNotIn("limit_price", result)
         self.assertEqual(fake_session.payloads[-1]["exchangeSegment"], "NSE_FNO")
         self.assertEqual(fake_session.payloads[-1]["securityId"], "9002")
-        self.assertEqual(fake_session.payloads[-1]["orderType"], "LIMIT")
-        self.assertEqual(fake_session.payloads[-1]["price"], 10.01)
+        self.assertEqual(fake_session.payloads[-1]["orderType"], "MARKET")
+        self.assertEqual(fake_session.payloads[-1]["price"], 0.0)
 
     def test_dhan_historical_parser_accepts_sdk_style_rows_with_volume(self):
         from app.kite_engine import DhanClient
@@ -2641,6 +2733,8 @@ class MarketSnapshotApiIntegrationTests(unittest.TestCase):
                         "opening_turnover": 115000000,
                         "opening_volume_sma_multiplier": 2.6,
                         "sector_rank": 1,
+                        "sector_name": "NIFTY IT",
+                        "change": 3.5,
                         "is_fno": True,
                         "first_hit_at": "2026-07-07T09:16:00+05:30",
                         "price": 1012,
@@ -2667,6 +2761,8 @@ class MarketSnapshotApiIntegrationTests(unittest.TestCase):
         self.assertEqual(payload["ione_power_long"][0]["rating"], 5)
         self.assertTrue(payload["ione_power_long"][0]["is_fno"])
         self.assertTrue(payload["ione_power_long"][0]["leading_sector"])
+        self.assertEqual(payload["ione_power_long"][0]["change"], 3.5)
+        self.assertEqual(payload["ione_power_long"][0]["sector_rank"], 1)
         self.assertIn("alert_key", payload["ione_power_long"][0])
         self.assertIn("breakout", payload["ione_power_long"][0]["alert_text"])
         self.assertNotIn("day_open", payload["ione_power_long"][0])

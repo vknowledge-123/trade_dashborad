@@ -427,6 +427,11 @@ def ione_power_row(row, side="long"):
         "name": row.get("name") or symbol,
         "is_fno": bool(row.get("is_fno")),
         "leading_sector": ione_power_leading_sector(row),
+        "leading_sector_label": "Leading Sector" if side == "long" else "Most Fall Sector",
+        "change": row.get("change"),
+        "sector_rank": row.get("sector_rank"),
+        "sector_side": row.get("sector_side"),
+        "sector_name": row.get("sector_name") or row.get("sector"),
         "first_hit_time": format_ione_hit_time(raw_hit_time),
         "rating": ione_power_rating(row),
         "chart_url": f"https://www.tradingview.com/chart/?symbol=NSE%3A{symbol}",
@@ -1000,6 +1005,25 @@ def acceleration_scanner(request: Request):
     )
 
 
+@app.get("/gap-reversal-scanner", response_class=HTMLResponse)
+def gap_reversal_scanner(request: Request):
+    admin = current_admin(request)
+    if not admin:
+        raise HTTPException(status_code=404, detail="Scanner not found")
+    scanner = engine.get_gap_reversal_scanner()
+    return templates.TemplateResponse(
+        request,
+        "gap_reversal_scanner.html",
+        {
+            "title": "Gap Reversal",
+            "user": None,
+            "admin": admin,
+            "public_mode": False,
+            "scanner": scanner,
+        },
+    )
+
+
 @app.get("/open-extreme-scanner", response_class=HTMLResponse)
 def open_extreme_scanner(request: Request):
     user = current_user(request)
@@ -1100,6 +1124,20 @@ def acceleration_scanner_data(
     )
 
 
+@app.get("/api/admin/gap-reversal-scanner")
+def gap_reversal_scanner_data(request: Request):
+    if not current_admin(request):
+        return JSONResponse({"ok": False, "error": "Admin authentication required."}, status_code=403)
+    return JSONResponse(
+        engine.get_gap_reversal_scanner(),
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
+
+
 @app.get("/api/open-extreme-scanner")
 def open_extreme_scanner_data(request: Request):
     scanner = engine.get_open_extreme_scanner()
@@ -1136,8 +1174,6 @@ def admin_acceleration_order(
             side=payload.get("side"),
             per_trade_capital=payload.get("capital", 10000),
             client_price=payload.get("price"),
-            buy_limit_offset_pct=payload.get("buy_limit_offset_pct", 1),
-            sell_limit_offset_pct=payload.get("sell_limit_offset_pct", 1),
         )
     except Exception as exc:
         result = {"ok": False, "error": str(exc) or "Order placement failed."}
@@ -1168,7 +1204,6 @@ def admin_ione_power_order(
                 option_side=payload.get("option_side"),
                 client_price=payload.get("price"),
                 option_ltp=payload.get("option_ltp"),
-                limit_offset_pct=payload.get("option_limit_offset_pct", 0.1),
                 retry_attempts=2,
             )
         else:
@@ -1179,7 +1214,6 @@ def admin_ione_power_order(
                 stop_loss_pct=payload.get("stop_loss_pct", 0.6),
                 client_price=payload.get("price"),
                 locked_quantity=payload.get("quantity"),
-                limit_offset_pct=payload.get("limit_offset_pct", 0.01),
                 retry_attempts=2,
             )
     except Exception as exc:

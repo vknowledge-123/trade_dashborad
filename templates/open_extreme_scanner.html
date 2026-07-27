@@ -26,7 +26,7 @@
     <div class="panel-header">
       <div>
         <h3>Power Trade Settings</h3>
-        <div class="panel-sub">Admin only limit orders. Quantity is locked from risk at click time.</div>
+        <div class="panel-sub">Admin only market orders. Equity quantity is locked from risk at click time.</div>
       </div>
     </div>
     <div class="openx-order-grid">
@@ -37,14 +37,6 @@
       <label>
         Stop Loss %
         <input id="openx-sl-pct" type="number" min="0.01" step="0.05" value="0.6" />
-      </label>
-      <label>
-        Equity Limit Offset %
-        <input id="openx-limit-offset" type="number" min="0" step="0.01" value="0.01" />
-      </label>
-      <label>
-        Option Limit Offset %
-        <input id="openx-option-offset" type="number" min="0" step="0.05" value="0.1" />
       </label>
     </div>
   </div>
@@ -290,6 +282,105 @@
   .openx-row:not(.table-head) > span:nth-child(11)::before { content: "Change "; color: #6b7fa3; }
   .openx-row:not(.table-head) > span:nth-child(12)::before { content: "Trade "; color: #6b7fa3; }
 }
+
+.openx-header,
+.openx-alert,
+.openx-order-grid input,
+.openx-order-status,
+.nifty50-tag {
+  border-radius: 8px;
+}
+
+.openx-header {
+  background: linear-gradient(180deg, rgba(24, 28, 34, 0.96), rgba(17, 20, 25, 0.96));
+  border-color: rgba(232, 238, 247, 0.11);
+}
+
+.openx-table {
+  min-width: 100%;
+}
+
+.openx-row:not(.table-head) {
+  min-height: 46px;
+}
+
+.openx-trade-actions {
+  justify-content: flex-start;
+}
+
+.openx-order-btn {
+  border-radius: 7px;
+}
+
+.openx-row > span:nth-child(1),
+.openx-row > span:nth-child(3),
+.openx-row > span:nth-child(4),
+.openx-row > span:nth-child(5),
+.openx-row > span:nth-child(7),
+.openx-row > span:nth-child(8),
+.openx-row > span:nth-child(9),
+.openx-row > span:nth-child(10),
+.openx-row > span:nth-child(11) {
+  justify-content: flex-end;
+  text-align: right;
+}
+
+.openx-row > span:nth-child(2),
+.openx-row > span:nth-child(6),
+.openx-row > span:nth-child(12) {
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.openx-row.table-head > span:nth-child(1),
+.openx-row.table-head > span:nth-child(3),
+.openx-row.table-head > span:nth-child(4),
+.openx-row.table-head > span:nth-child(5),
+.openx-row.table-head > span:nth-child(7),
+.openx-row.table-head > span:nth-child(8),
+.openx-row.table-head > span:nth-child(9),
+.openx-row.table-head > span:nth-child(10),
+.openx-row.table-head > span:nth-child(11) {
+  justify-content: flex-end;
+}
+
+.openx-row.table-head > span:nth-child(2),
+.openx-row.table-head > span:nth-child(6),
+.openx-row.table-head > span:nth-child(12) {
+  justify-content: flex-start;
+}
+
+.openx-row,
+.openx-row:not(.table-head) {
+  grid-template-columns:
+    minmax(48px, 0.34fr)
+    minmax(170px, 1.15fr)
+    minmax(82px, 0.58fr)
+    minmax(82px, 0.58fr)
+    minmax(82px, 0.58fr)
+    minmax(150px, 0.92fr)
+    minmax(86px, 0.64fr)
+    minmax(86px, 0.64fr)
+    minmax(62px, 0.48fr)
+    minmax(88px, 0.68fr)
+    minmax(78px, 0.62fr)
+    minmax(150px, 1.15fr)
+    minmax(96px, auto) !important;
+}
+
+.openx-row > span,
+.openx-row.table-head > span {
+  justify-content: flex-start !important;
+  text-align: left !important;
+}
+
+.openx-row > .tv-link {
+  justify-self: start !important;
+}
+
+.openx-row .mono {
+  white-space: nowrap;
+}
 </style>
 
 <script>
@@ -303,14 +394,10 @@
   const orderStatus = document.getElementById("openx-order-status");
   const riskInput = document.getElementById("openx-risk");
   const slInput = document.getElementById("openx-sl-pct");
-  const limitOffsetInput = document.getElementById("openx-limit-offset");
-  const optionOffsetInput = document.getElementById("openx-option-offset");
   if (!lowBody || !highBody) return;
   const settings = [
     [riskInput, "openx_per_trade_risk", "800"],
     [slInput, "openx_stop_loss_pct", "0.6"],
-    [limitOffsetInput, "openx_limit_offset_pct", "0.01"],
-    [optionOffsetInput, "openx_option_offset_pct", "0.1"],
   ];
   settings.forEach(([input, key, fallback]) => {
     if (!input) return;
@@ -417,13 +504,11 @@
       order_kind: kind,
       symbol,
       price,
-      limit_offset_pct: Number(limitOffsetInput?.value || 0.01),
-      option_limit_offset_pct: Number(optionOffsetInput?.value || 0.1),
     };
     let confirmText = "";
     if (kind === "option") {
       payload.option_side = button.dataset.optionSide;
-      confirmText = `Buy 1 lot ATM ${payload.option_side} option for ${symbol} at limit ${payload.option_limit_offset_pct}% above premium?`;
+      confirmText = `Buy 1 lot ATM ${payload.option_side} option for ${symbol} with market order?`;
     } else {
       const quantity = quantityForRisk(price);
       if (quantity <= 0) {
@@ -434,7 +519,7 @@
       payload.per_trade_risk = Number(riskInput?.value || 800);
       payload.stop_loss_pct = Number(slInput?.value || 0.6);
       payload.quantity = quantity;
-      confirmText = `${payload.side} ${symbol}, locked quantity ${quantity}, limit ${payload.limit_offset_pct}% from LTP?`;
+      confirmText = `${payload.side} ${symbol}, locked quantity ${quantity}, with market order?`;
     }
     if (!window.confirm(confirmText)) return;
     button.disabled = true;
@@ -456,7 +541,7 @@
       }
       if (!response.ok || !result.ok) throw new Error(result.error || "Order failed.");
       const optionText = result.option_side ? ` ${result.option_side} ${result.strike} ${result.expiry}` : "";
-      setOrderStatus(`${result.side} ${result.symbol}${optionText} placed: ${result.quantity} qty at limit ${result.limit_price}${result.order_id ? `, order ${result.order_id}` : ""}.`);
+      setOrderStatus(`${result.side} ${result.symbol}${optionText} placed: ${result.quantity} qty ${result.order_type || "MARKET"} order${result.order_id ? `, order ${result.order_id}` : ""}.`);
     } catch (error) {
       setOrderStatus(error.message || "Order failed.", true);
     } finally {
@@ -520,16 +605,20 @@
         <div class="table-row table-head ione-power-row">
           <span>Symbol Name</span>
           <span>Time</span>
+          <span>Change %</span>
+          <span>Sector Rank</span>
           <span>Power Rating</span>
           <span>Chart</span>
         </div>
         {% for row in ione_scanner.ione_power_long or [] %}
           <div class="table-row ione-power-row" data-symbol="{{ row.symbol }}" data-alert-key="{{ row.alert_key or '' }}">
             <span class="cell-symbol">
-              <span class="cell-symbol-main">{{ row.symbol }}{% if row.is_fno %} <span class="fno-tag">F&amp;O</span>{% endif %}{% if row.leading_sector %} <span class="leading-sector-tag">Leading Sector</span>{% endif %}</span>
+              <span class="cell-symbol-main">{{ row.symbol }}{% if row.is_fno %} <span class="fno-tag">F&amp;O</span>{% endif %}{% if row.leading_sector %} <span class="leading-sector-tag">{{ row.leading_sector_label or 'Leading Sector' }}</span>{% endif %}</span>
               <span class="sector-stock-name">{{ row.name }}</span>
             </span>
             <span class="mono">{{ row.first_hit_time }}</span>
+            <span class="{{ 'positive' if row.change is not none and row.change >= 0 else 'negative' }} mono">{{ '+' if row.change is not none and row.change >= 0 else '' }}{{ row.change if row.change is not none else '-' }}{% if row.change is not none %}%{% endif %}</span>
+            <span class="mono">{% if row.sector_rank %}Rank {{ row.sector_rank }}{% else %}-{% endif %}</span>
             <span class="ione-rating" aria-label="{{ row.rating }} star rating">
               {% for _ in range(row.rating) %}<span>&#9733;</span>{% endfor %}
             </span>
@@ -537,7 +626,7 @@
           </div>
         {% else %}
           <div class="table-row ione-power-row ione-power-empty">
-            <span>No long scan candidates yet.</span><span></span><span></span><span></span>
+            <span>No long scan candidates yet.</span><span></span><span></span><span></span><span></span><span></span>
           </div>
         {% endfor %}
       </div>
@@ -552,16 +641,20 @@
         <div class="table-row table-head ione-power-row">
           <span>Symbol Name</span>
           <span>Time</span>
+          <span>Change %</span>
+          <span>Sector Rank</span>
           <span>Power Rating</span>
           <span>Chart</span>
         </div>
         {% for row in ione_scanner.ione_power_short or [] %}
           <div class="table-row ione-power-row" data-symbol="{{ row.symbol }}" data-alert-key="{{ row.alert_key or '' }}">
             <span class="cell-symbol">
-              <span class="cell-symbol-main">{{ row.symbol }}{% if row.is_fno %} <span class="fno-tag">F&amp;O</span>{% endif %}{% if row.leading_sector %} <span class="leading-sector-tag">Leading Sector</span>{% endif %}</span>
+              <span class="cell-symbol-main">{{ row.symbol }}{% if row.is_fno %} <span class="fno-tag">F&amp;O</span>{% endif %}{% if row.leading_sector %} <span class="leading-sector-tag">{{ row.leading_sector_label or 'Most Fall Sector' }}</span>{% endif %}</span>
               <span class="sector-stock-name">{{ row.name }}</span>
             </span>
             <span class="mono">{{ row.first_hit_time }}</span>
+            <span class="{{ 'positive' if row.change is not none and row.change >= 0 else 'negative' }} mono">{{ '+' if row.change is not none and row.change >= 0 else '' }}{{ row.change if row.change is not none else '-' }}{% if row.change is not none %}%{% endif %}</span>
+            <span class="mono">{% if row.sector_rank %}Rank {{ row.sector_rank }}{% else %}-{% endif %}</span>
             <span class="ione-rating" aria-label="{{ row.rating }} star rating">
               {% for _ in range(row.rating) %}<span>&#9733;</span>{% endfor %}
             </span>
@@ -569,7 +662,7 @@
           </div>
         {% else %}
           <div class="table-row ione-power-row ione-power-empty">
-            <span>No short scan candidates yet.</span><span></span><span></span><span></span>
+            <span>No short scan candidates yet.</span><span></span><span></span><span></span><span></span><span></span>
           </div>
         {% endfor %}
       </div>
@@ -638,7 +731,7 @@
   gap: 14px;
 }
 .ione-power-row {
-  grid-template-columns: minmax(180px, 1fr) 0.7fr 0.85fr auto;
+  grid-template-columns: minmax(180px, 1fr) 0.62fr 0.58fr 0.62fr 0.85fr auto;
   align-items: center;
 }
 .ione-rating {
@@ -670,7 +763,7 @@
     grid-template-columns: 1fr;
   }
   .ione-power-row:not(.table-head) {
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) auto auto;
     gap: 8px 10px;
   }
   .ione-power-row:not(.table-head) > span:first-child,
@@ -682,8 +775,107 @@
     color: #6b7fa3;
   }
   .ione-power-row:not(.table-head) > span:nth-child(3)::before {
+    content: "Change ";
+    color: #6b7fa3;
+  }
+  .ione-power-row:not(.table-head) > span:nth-child(4)::before {
+    content: "Sector ";
+    color: #6b7fa3;
+  }
+  .ione-power-row:not(.table-head) > span:nth-child(5)::before {
     content: "Rating ";
     color: #6b7fa3;
+  }
+}
+
+.ione-power-header,
+.power-alert-button {
+  border-radius: 8px;
+}
+
+.ione-power-header {
+  background: linear-gradient(180deg, rgba(24, 28, 34, 0.96), rgba(17, 20, 25, 0.96));
+  border-color: rgba(232, 238, 247, 0.11);
+}
+
+.power-disclaimer {
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 209, 102, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 209, 102, 0.055);
+}
+
+.ione-power-row:not(.table-head) {
+  min-height: 46px;
+}
+
+.ione-rating {
+  padding: 2px 0;
+}
+
+.leading-sector-tag {
+  border-radius: 7px;
+}
+
+@media (max-width: 860px) {
+  .ione-power-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .ione-power-row:not(.table-head) {
+    grid-template-columns: minmax(0, 1fr) auto !important;
+  }
+
+  .ione-power-row:not(.table-head) > span:nth-child(5) {
+    grid-column: 1 / -1;
+  }
+}
+
+.ione-power-row > span:nth-child(2),
+.ione-power-row > span:nth-child(3),
+.ione-power-row > span:nth-child(4),
+.ione-power-row > span:nth-child(5) {
+  justify-content: flex-end;
+  text-align: right;
+}
+
+.ione-power-row.table-head > span:nth-child(2),
+.ione-power-row.table-head > span:nth-child(3),
+.ione-power-row.table-head > span:nth-child(4),
+.ione-power-row.table-head > span:nth-child(5) {
+  justify-content: flex-end;
+}
+
+.ione-power-row,
+.ione-power-row:not(.table-head) {
+  grid-template-columns:
+    minmax(190px, 1.15fr)
+    minmax(78px, 0.55fr)
+    minmax(80px, 0.58fr)
+    minmax(90px, 0.62fr)
+    minmax(110px, 0.72fr)
+    minmax(96px, auto) !important;
+}
+
+.ione-power-row > span,
+.ione-power-row.table-head > span {
+  justify-content: flex-start !important;
+  text-align: left !important;
+}
+
+.ione-power-row > .tv-link {
+  justify-self: start !important;
+}
+
+.ione-power-row .mono,
+.ione-rating {
+  white-space: nowrap;
+}
+
+@media (max-width: 860px) {
+  .ione-power-row:not(.table-head) {
+    grid-template-columns: minmax(0, 1fr) auto !important;
   }
 }
 </style>
@@ -767,15 +959,17 @@
   const rowHtml = (row) => `
     <div class="table-row ione-power-row" data-symbol="${escapeHtml(row.symbol)}" data-alert-key="${escapeHtml(row.alert_key || "")}">
       <span class="cell-symbol">
-        <span class="cell-symbol-main">${escapeHtml(row.symbol)}${row.is_fno ? ' <span class="fno-tag">F&O</span>' : ""}${row.leading_sector ? ' <span class="leading-sector-tag">Leading Sector</span>' : ""}</span>
+        <span class="cell-symbol-main">${escapeHtml(row.symbol)}${row.is_fno ? ' <span class="fno-tag">F&O</span>' : ""}${row.leading_sector ? ` <span class="leading-sector-tag">${escapeHtml(row.leading_sector_label || "Leading Sector")}</span>` : ""}</span>
         <span class="sector-stock-name">${escapeHtml(row.name || row.symbol || "")}</span>
       </span>
       <span class="mono">${escapeHtml(row.first_hit_time || "-")}</span>
+      <span class="${Number(row.change) >= 0 ? "positive" : "negative"} mono">${Number.isFinite(Number(row.change)) ? `${Number(row.change) >= 0 ? "+" : ""}${Number(row.change).toFixed(2)}%` : "-"}</span>
+      <span class="mono">${row.sector_rank ? `Rank ${escapeHtml(row.sector_rank)}` : "-"}</span>
       ${ratingHtml(row.rating)}
       <a class="tv-link" href="${escapeHtml(row.chart_url)}" target="_blank" rel="noopener noreferrer">TradingView</a>
     </div>
   `;
-  const emptyRow = (message) => `<div class="table-row ione-power-row ione-power-empty"><span>${escapeHtml(message)}</span><span></span><span></span><span></span></div>`;
+  const emptyRow = (message) => `<div class="table-row ione-power-row ione-power-empty"><span>${escapeHtml(message)}</span><span></span><span></span><span></span><span></span><span></span></div>`;
   const load = async () => {
     try {
       const response = await fetch(`/api/open-extreme-scanner?ts=${Date.now()}`, { cache: "no-store" });
