@@ -13,3 +13,4 @@ venv/
 build/
 dist/
 *.egg-info/
+app/trade_dashboard.db
