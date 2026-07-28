@@ -975,6 +975,52 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertEqual(cached["session_minutes"], 5 * 375)
         self.assertEqual(cached["volume_sma"], round(sum(c["volume"] for c in candles) / (5 * 375), 2))
 
+    def test_market_history_cache_skips_symbols_already_ready_for_session(self):
+        engine = MarketEngine(redis_client=None)
+        engine.symbol_to_token = {"INFY": 1, "TCS": 2}
+        engine.nifty500_set = {"INFY", "TCS"}
+        engine._completed_session_cache_marker = lambda: "2026-06-25"
+        engine._save_previous_close_cache = lambda: None
+        engine._save_previous_day_badges_cache = lambda: None
+        engine._save_acceleration_volume_sma_cache = lambda: None
+        engine.previous_close_cache = {
+            "symbols": {
+                "INFY": {"cache_marker": "2026-06-25", "broker": "kite", "close": 100}
+            }
+        }
+        engine.previous_day_badges_cache = {
+            "INFY": {"cache_marker": "2026-06-25", "broker": "kite", "change": 1.0}
+        }
+        engine.acceleration_volume_sma_cache = {
+            "INFY": {"cache_marker": "2026-06-25", "broker": "kite", "volume_sma": 123}
+        }
+        engine._restore_previous_close_cache = lambda: engine.previous_close_cache
+        engine._restore_previous_day_badges_cache = lambda: None
+        engine._restore_acceleration_volume_sma_cache = lambda: engine.acceleration_volume_sma_cache
+        fetched = []
+
+        def fake_fetch(token, from_date, to_date, limit=None):
+            fetched.append(token)
+            return [
+                {"date": "2026-06-19", "close": 95.0, "volume": 100000},
+                {"date": "2026-06-22", "close": 96.0, "volume": 110000},
+                {"date": "2026-06-23", "close": 97.0, "volume": 120000},
+                {"date": "2026-06-24", "close": 98.0, "volume": 130000},
+                {"date": "2026-06-25", "close": 99.0, "volume": 140000},
+            ]
+
+        engine._fetch_recent_day_candles = fake_fetch
+
+        summary = engine._warm_market_open_stock_cache("2026-06-25", force=True)
+
+        self.assertEqual(fetched, [2])
+        self.assertEqual(summary["skipped_ready"], 1)
+        self.assertEqual(summary["previous_close_available"], 2)
+        self.assertEqual(summary["badge_available"], 2)
+        self.assertEqual(summary["volume_available"], 2)
+        self.assertEqual(summary["ready_symbols"], 2)
+        self.assertEqual(summary["failed"], 0)
+
     def test_acceleration_scanner_keeps_intraday_hits_after_current_move_fades(self):
         engine = MarketEngine(redis_client=None)
         engine.broker = "kite"

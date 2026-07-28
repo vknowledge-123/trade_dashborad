@@ -2371,6 +2371,88 @@ textarea:focus {
     min-height: 34px;
   }
 }
+
+/* Final mobile navigation pass: keep every page link reachable on phones. */
+@media (max-width: 760px) {
+  .topbar {
+    position: sticky;
+    top: 0;
+    z-index: 1100;
+    align-items: stretch !important;
+    gap: 8px !important;
+    padding: 8px 10px 10px !important;
+    overflow: visible !important;
+    background: rgba(8, 11, 16, 0.98) !important;
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+  }
+
+  .brand {
+    width: 100%;
+    justify-content: flex-start !important;
+    padding: 2px 0 !important;
+  }
+
+  .brand-mark {
+    flex: 0 0 auto;
+    width: 34px;
+    height: 34px;
+  }
+
+  .brand-name {
+    font-size: 15px !important;
+  }
+
+  .brand-tag {
+    font-size: 10px !important;
+  }
+
+  .nav {
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    justify-content: flex-start !important;
+    align-items: center !important;
+    width: 100%;
+    max-width: 100%;
+    gap: 6px !important;
+    padding: 6px !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    scroll-snap-type: x proximity;
+    border-radius: 10px !important;
+  }
+
+  .nav-user,
+  .nav-contact,
+  .nav-link,
+  .nav-tool {
+    flex: 0 0 auto !important;
+    grid-column: auto !important;
+    min-width: max-content;
+    scroll-snap-align: start;
+  }
+
+  .nav-user {
+    max-width: 130px;
+    justify-content: flex-start;
+  }
+
+  .nav-link,
+  .nav-contact {
+    min-height: 34px;
+    padding: 8px 11px !important;
+    border-radius: 9px !important;
+    font-size: 11px !important;
+    line-height: 1 !important;
+    white-space: nowrap;
+  }
+
+  .nav-tool {
+    width: 34px !important;
+    height: 34px !important;
+    min-width: 34px;
+  }
+}
   </style>
 </head>
 <body data-public="{{ 1 if public_mode is defined and public_mode else 0 }}">

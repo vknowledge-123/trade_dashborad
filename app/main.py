@@ -88,6 +88,10 @@ app.add_middleware(
 templates = Jinja2Templates(directory="templates")
 
 redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB, password=REDIS_PASSWORD)
+premarket_scheduler_started = False
+premarket_scheduler_lock = threading.Lock()
+PREMARKET_CACHE_HOUR = 8
+PREMARKET_CACHE_MINUTE = 45
 
 SECTOR_INDICES = [
     "NIFTY METAL",
@@ -547,9 +551,46 @@ templates.env.globals["csrf_token"] = csrf_token
 templates.env.globals["ione_power_rating"] = ione_power_rating
 templates.env.globals["format_ione_hit_time"] = format_ione_hit_time
 
+
+def start_premarket_cache_scheduler():
+    global premarket_scheduler_started
+    with premarket_scheduler_lock:
+        if premarket_scheduler_started:
+            return
+        premarket_scheduler_started = True
+
+    def run():
+        last_ready_date = None
+        while True:
+            now = datetime.now(IST)
+            scheduled_at = now.replace(
+                hour=PREMARKET_CACHE_HOUR,
+                minute=PREMARKET_CACHE_MINUTE,
+                second=0,
+                microsecond=0,
+            )
+            if now >= scheduled_at and last_ready_date != now.date() and engine.kite:
+                current_status = engine.get_history_cache_status()
+                next_retry_at = current_status.get("next_retry_at")
+                retry_ready = True
+                if next_retry_at:
+                    try:
+                        retry_ready = datetime.fromisoformat(next_retry_at) <= now
+                    except (TypeError, ValueError):
+                        retry_ready = True
+                if not current_status.get("is_running") and retry_ready:
+                    status = engine.start_daily_market_history_cache(force=False)
+                    if status.get("market_open_ready"):
+                        last_ready_date = now.date()
+            threading.Event().wait(60)
+
+    threading.Thread(target=run, daemon=True).start()
+
+
 @app.on_event("startup")
 def on_startup():
     init_db()
+    start_premarket_cache_scheduler()
     active_broker = get_active_broker()
     if active_broker == "dhan":
         dhan_creds = get_dhan_credentials()

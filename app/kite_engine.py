@@ -44,6 +44,9 @@ RRG_FETCH_SESSIONS = 30
 RRG_TRAIL_POINTS = 14
 RRG_NORMALIZATION_WINDOW = 14
 HISTORICAL_DAY_REQUEST_DELAY_SECONDS = 0.35
+DHAN_HISTORY_BATCH_SIZE = 50
+DHAN_HISTORY_BATCH_PAUSE_SECONDS = 10
+DHAN_HISTORY_RETRY_COOLDOWN_SECONDS = 300
 SWING_SCANNER_CACHE_VERSION = 2
 ACCELERATION_SCANNER_MIN_GAIN_PERCENT = 0.5
 ACCELERATION_TIMEFRAMES = {1, 5, 15}
@@ -606,6 +609,18 @@ class MarketEngine:
             "broker": self._current_broker(),
             "message": "No market history cache job has been started yet.",
             "error": None,
+            "previous_close_available": 0,
+            "previous_close_new": 0,
+            "badge_available": 0,
+            "badge_new": 0,
+            "volume_available": 0,
+            "volume_new": 0,
+            "ready_symbols": 0,
+            "failed_count": 0,
+            "failed_symbols": [],
+            "rate_limited": False,
+            "next_retry_at": None,
+            "market_open_ready": False,
         }
         self.badge_warm_lock = threading.Lock()
         self.badge_warm_thread = None
@@ -2941,6 +2956,65 @@ class MarketEngine:
             return None
         close = payload.get("close")
         return close if close not in (None, 0) else None
+
+    def _cached_previous_close_for_marker(self, bucket, key, cache_marker):
+        if not key:
+            return None
+        if not self.previous_close_cache:
+            self._restore_previous_close_cache()
+        cache_bucket = "sectors" if bucket == "sectors" else "symbols"
+        payload = (self.previous_close_cache.get(cache_bucket) or {}).get(str(key).upper())
+        if (
+            not isinstance(payload, dict)
+            or payload.get("cache_marker") != cache_marker
+            or not self._payload_matches_broker(payload)
+        ):
+            return None
+        close = payload.get("close")
+        return close if close not in (None, 0) else None
+
+    def _stock_history_cache_flags(self, symbol, cache_marker):
+        symbol = str(symbol or "").upper()
+        badge_cached = self.previous_day_badges_cache.get(symbol)
+        volume_cached = self.acceleration_volume_sma_cache.get(symbol)
+        previous_close_cached = self._cached_previous_close_for_marker("symbols", symbol, cache_marker)
+        has_previous_close = previous_close_cached not in (None, 0)
+        has_badge = (
+            isinstance(badge_cached, dict)
+            and badge_cached.get("cache_marker") == cache_marker
+            and self._payload_matches_broker(badge_cached)
+        )
+        has_volume = (
+            isinstance(volume_cached, dict)
+            and volume_cached.get("cache_marker") == cache_marker
+            and self._payload_matches_broker(volume_cached)
+            and volume_cached.get("volume_sma") not in (None, 0)
+        )
+        return {
+            "previous_close": has_previous_close,
+            "badge": has_badge,
+            "volume": has_volume,
+            "ready": has_previous_close and has_badge and has_volume,
+        }
+
+    def _stock_history_cache_counts(self, symbols, cache_marker):
+        counts = {
+            "previous_close_available": 0,
+            "badge_available": 0,
+            "volume_available": 0,
+            "ready_symbols": 0,
+        }
+        for symbol in symbols or []:
+            flags = self._stock_history_cache_flags(symbol, cache_marker)
+            if flags["previous_close"]:
+                counts["previous_close_available"] += 1
+            if flags["badge"]:
+                counts["badge_available"] += 1
+            if flags["volume"]:
+                counts["volume_available"] += 1
+            if flags["ready"]:
+                counts["ready_symbols"] += 1
+        return counts
 
     def _save_previous_day_badges_cache(self):
         try:
@@ -5386,6 +5460,7 @@ class MarketEngine:
         return {"processed": processed, "total": total, "updated": updated}
 
     def _warm_market_open_stock_cache(self, cache_marker, force=False):
+        del force
         self._restore_previous_day_badges_cache()
         self._restore_acceleration_volume_sma_cache()
         symbols = self._symbols_for_badge_warmup()
@@ -5397,10 +5472,20 @@ class MarketEngine:
                 "badge_updated": 0,
                 "volume_updated": 0,
                 "previous_close_updated": 0,
+                "previous_close_available": 0,
+                "badge_available": 0,
+                "volume_available": 0,
+                "ready_symbols": 0,
+                "skipped_ready": 0,
+                "failed": 0,
+                "failed_symbols": [],
+                "rate_limited": False,
+                "next_retry_at": None,
             }
 
         completed_session = datetime.fromisoformat(cache_marker).date()
         session_window = self._trading_session_window(completed_session, ACCELERATION_VOLUME_LOOKBACK_SESSIONS)
+        available_before = self._stock_history_cache_counts(symbols, cache_marker)
         if len(session_window) < ACCELERATION_VOLUME_SMA_SESSIONS:
             return {
                 "processed": 0,
@@ -5408,55 +5493,98 @@ class MarketEngine:
                 "badge_updated": 0,
                 "volume_updated": 0,
                 "previous_close_updated": 0,
+                **available_before,
+                "skipped_ready": available_before["ready_symbols"],
+                "failed": 0,
+                "failed_symbols": [],
+                "rate_limited": False,
+                "next_retry_at": None,
             }
 
         from_date = self._session_start_dt(session_window[0])
         to_date = self._session_end_dt(session_window[-1])
+        pending_symbols = [
+            symbol
+            for symbol in symbols
+            if not self._stock_history_cache_flags(symbol, cache_marker)["ready"]
+        ]
         processed = 0
+        fetch_attempts = 0
         badge_updated = 0
         volume_updated = 0
         previous_close_updated = 0
         prev_close_cache_dirty = False
         badges_dirty = False
         volume_dirty = False
+        failed_symbols = []
+        rate_limited = False
 
-        for symbol in symbols:
+        def flush_dirty_caches():
+            nonlocal prev_close_cache_dirty, badges_dirty, volume_dirty
+            if prev_close_cache_dirty:
+                self._save_previous_close_cache()
+                prev_close_cache_dirty = False
+            if badges_dirty:
+                self._save_previous_day_badges_cache()
+                badges_dirty = False
+            if volume_dirty:
+                self._save_acceleration_volume_sma_cache()
+                volume_dirty = False
+
+        if not pending_symbols:
+            return {
+                "processed": 0,
+                "total": total,
+                "badge_updated": 0,
+                "volume_updated": 0,
+                "previous_close_updated": 0,
+                **available_before,
+                "skipped_ready": available_before["ready_symbols"],
+                "failed": 0,
+                "failed_symbols": [],
+                "rate_limited": False,
+                "next_retry_at": None,
+            }
+
+        for index, symbol in enumerate(pending_symbols, start=1):
             processed += 1
             self._update_history_cache_status(
                 processed=processed,
                 total=total + len(self.sector_tokens) + 1,
-                message=f"Caching market-open stock data ({processed}/{total})",
+                message=(
+                    f"Caching missing stock history ({processed}/{len(pending_symbols)} missing). "
+                    f"{available_before['ready_symbols']} of {total} already ready for {cache_marker}."
+                ),
             )
 
-            badge_cached = self.previous_day_badges_cache.get(symbol)
-            volume_cached = self.acceleration_volume_sma_cache.get(symbol)
-            previous_close_cached = self._cached_previous_close("symbols", symbol)
-            stock_cache_ready = (
-                not force
-                and badge_cached
-                and badge_cached.get("cache_marker") == cache_marker
-                and self._payload_matches_broker(badge_cached)
-                and volume_cached
-                and volume_cached.get("cache_marker") == cache_marker
-                and self._payload_matches_broker(volume_cached)
-                and volume_cached.get("volume_sma") not in (None, 0)
-                and previous_close_cached not in (None, 0)
-            )
-            if stock_cache_ready:
+            flags_before = self._stock_history_cache_flags(symbol, cache_marker)
+            if flags_before["ready"]:
                 continue
-
             token = self.symbol_to_token.get(symbol)
+            if not token:
+                failed_symbols.append(symbol)
+                continue
+            if self.broker == "dhan" and self._is_historical_rate_limited():
+                rate_limited = True
+                failed_symbols.extend(pending_symbols[index - 1 :])
+                break
+            fetch_attempts += 1
             candles = self._fetch_recent_day_candles(token, from_date, to_date, limit=ACCELERATION_VOLUME_LOOKBACK_SESSIONS)
             if not candles:
+                failed_symbols.append(symbol)
+                if self.broker == "dhan" and self._is_historical_rate_limited():
+                    rate_limited = True
+                    failed_symbols.extend(pending_symbols[index:])
+                    break
                 continue
 
             latest_close = candles[-1].get("close")
-            if latest_close not in (None, 0):
+            if not flags_before["previous_close"] and latest_close not in (None, 0):
                 if self._remember_previous_close("symbols", symbol, latest_close, cache_marker=cache_marker):
                     prev_close_cache_dirty = True
                     previous_close_updated += 1
 
-            if len(candles) >= 2:
+            if not flags_before["badge"] and len(candles) >= 2:
                 current_close = candles[-1].get("close")
                 prior_close = candles[-2].get("close")
                 if current_close not in (None, 0) and prior_close not in (None, 0):
@@ -5470,7 +5598,7 @@ class MarketEngine:
                     badge_updated += 1
 
             volumes = self._latest_volume_values(candles)
-            if len(volumes) >= ACCELERATION_VOLUME_SMA_SESSIONS:
+            if not flags_before["volume"] and len(volumes) >= ACCELERATION_VOLUME_SMA_SESSIONS:
                 volume_sum = sum(volumes)
                 session_minutes = ACCELERATION_VOLUME_SMA_SESSIONS * NSE_INTRADAY_SESSION_MINUTES
                 volume_sma = volume_sum / session_minutes
@@ -5487,18 +5615,39 @@ class MarketEngine:
                 volume_dirty = True
                 volume_updated += 1
 
-        if prev_close_cache_dirty:
-            self._save_previous_close_cache()
-        if badges_dirty:
-            self._save_previous_day_badges_cache()
-        if volume_dirty:
-            self._save_acceleration_volume_sma_cache()
+            if (
+                self.broker == "dhan"
+                and fetch_attempts
+                and fetch_attempts % DHAN_HISTORY_BATCH_SIZE == 0
+                and index < len(pending_symbols)
+            ):
+                flush_dirty_caches()
+                self._update_history_cache_status(
+                    message=(
+                        f"Dhan historical batch complete ({fetch_attempts} requests). "
+                        f"Pausing before next missing-symbol batch."
+                    ),
+                )
+                time.sleep(DHAN_HISTORY_BATCH_PAUSE_SECONDS)
+
+        flush_dirty_caches()
+        available_after = self._stock_history_cache_counts(symbols, cache_marker)
+        failed_unique = sorted(set(failed_symbols))
+        next_retry_at = None
+        if rate_limited and self.historical_rate_limited_until:
+            next_retry_at = datetime.fromtimestamp(self.historical_rate_limited_until, tz=IST).isoformat(timespec="seconds")
         return {
             "processed": processed,
             "total": total,
             "badge_updated": badge_updated,
             "volume_updated": volume_updated,
             "previous_close_updated": previous_close_updated,
+            **available_after,
+            "skipped_ready": available_before["ready_symbols"],
+            "failed": len(failed_unique),
+            "failed_symbols": failed_unique,
+            "rate_limited": rate_limited,
+            "next_retry_at": next_retry_at,
         }
 
     def _market_open_stock_cache_ready(self, cache_marker):
@@ -5507,25 +5656,8 @@ class MarketEngine:
         symbols = self._symbols_for_badge_warmup()
         if not symbols:
             return True
-        checked = 0
-        ready = 0
-        for symbol in symbols:
-            checked += 1
-            badge_cached = self.previous_day_badges_cache.get(symbol)
-            volume_cached = self.acceleration_volume_sma_cache.get(symbol)
-            previous_close_cached = self._cached_previous_close("symbols", symbol)
-            if (
-                badge_cached
-                and badge_cached.get("cache_marker") == cache_marker
-                and self._payload_matches_broker(badge_cached)
-                and volume_cached
-                and volume_cached.get("cache_marker") == cache_marker
-                and self._payload_matches_broker(volume_cached)
-                and volume_cached.get("volume_sma") not in (None, 0)
-                and previous_close_cached not in (None, 0)
-            ):
-                ready += 1
-        return checked > 0 and ready >= max(1, int(checked * 0.9))
+        counts = self._stock_history_cache_counts(symbols, cache_marker)
+        return counts["ready_symbols"] >= max(1, int(len(symbols) * 0.9))
 
     def _build_rrg_series_map(self, benchmark_symbol, cache_marker):
         if not self.kite:
@@ -5657,7 +5789,36 @@ class MarketEngine:
             swing_payload = self._build_swing_scanner_payload()
             self._save_swing_scanner_cache(swing_payload)
             self._save_previous_close_cache()
-            status = "completed" if rrg_payload.get("items") and not swing_payload.get("error") else "warning"
+            previous_close_available = stock_summary.get(
+                "previous_close_available",
+                stock_summary.get("previous_close_updated", 0),
+            )
+            badge_available = stock_summary.get("badge_available", stock_summary.get("badge_updated", 0))
+            volume_available = stock_summary.get("volume_available", stock_summary.get("volume_updated", 0))
+            ready_symbols = stock_summary.get("ready_symbols", 0)
+            failed_count = stock_summary.get("failed", 0)
+            stock_total = stock_summary.get("total", 0)
+            retry_text = (
+                f", next retry after {stock_summary.get('next_retry_at')}"
+                if stock_summary.get("next_retry_at")
+                else ""
+            )
+            stock_cache_sufficient = bool(
+                stock_total
+                and ready_symbols >= max(1, int(stock_total * 0.9))
+            )
+            stock_warning = bool(failed_count or stock_summary.get("rate_limited") or not stock_cache_sufficient)
+            rrg_ok = bool(rrg_payload.get("items"))
+            swing_ok = not swing_payload.get("error")
+            status = "completed" if stock_cache_sufficient and rrg_ok and swing_ok else "warning"
+            error_message = rrg_payload.get("error") or swing_payload.get("error")
+            if not error_message and stock_summary.get("rate_limited"):
+                error_message = (
+                    f"{self._broker_label()} historical API rate limit hit. "
+                    "Already cached symbols were kept; retry will fetch only missing symbols."
+                )
+            elif not error_message and stock_warning:
+                error_message = "Stock history cache is incomplete; retry will fetch only missing symbols."
             self._update_history_cache_status(
                 status=status,
                 finished_at=self._utc_now(),
@@ -5666,13 +5827,27 @@ class MarketEngine:
                 message=(
                     f"Premarket sync ready: "
                     f"{'Dhan universe ready, ' if universe_summary.get('required') and universe_summary.get('ready') else ''}"
-                    f"cached {stock_summary['previous_close_updated']} previous closes, "
-                    f"{stock_summary['badge_updated']} badge rows, {stock_summary['volume_updated']} volume baselines and "
+                    f"{previous_close_available} previous closes available "
+                    f"({stock_summary.get('previous_close_updated', 0)} newly fetched), "
+                    f"{badge_available} badge rows available ({stock_summary.get('badge_updated', 0)} newly fetched), "
+                    f"{volume_available} volume baselines available ({stock_summary.get('volume_updated', 0)} newly fetched), "
+                    f"{failed_count} failed{retry_text}, "
                     f"{len(rrg_payload.get('items') or [])} RRG sectors, "
                     f"{len(swing_payload.get('rows') or [])} swing rows for {cache_marker}."
                 ),
-                error=rrg_payload.get("error") or swing_payload.get("error"),
-                market_open_ready=True,
+                error=error_message,
+                market_open_ready=stock_cache_sufficient,
+                previous_close_available=previous_close_available,
+                previous_close_new=stock_summary.get("previous_close_updated", 0),
+                badge_available=badge_available,
+                badge_new=stock_summary.get("badge_updated", 0),
+                volume_available=volume_available,
+                volume_new=stock_summary.get("volume_updated", 0),
+                ready_symbols=ready_symbols,
+                failed_symbols=(stock_summary.get("failed_symbols") or [])[:50],
+                failed_count=failed_count,
+                rate_limited=bool(stock_summary.get("rate_limited")),
+                next_retry_at=stock_summary.get("next_retry_at"),
             )
         except Exception as exc:
             self.last_error = str(exc)
@@ -5691,6 +5866,8 @@ class MarketEngine:
         cached_rrg = self._cached_relative_rotation_graph()
         cached_swing = self._cached_swing_scanner_payload()
         stock_cache_ready = self._market_open_stock_cache_ready(cache_marker)
+        symbols = self._symbols_for_badge_warmup()
+        stock_counts = self._stock_history_cache_counts(symbols, cache_marker)
         if (
             not force
             and stock_cache_ready
@@ -5704,9 +5881,25 @@ class MarketEngine:
                 session_marker=cache_marker,
                 broker=self._current_broker(),
                 finished_at=self._utc_now(),
-                message=f"{self._broker_label()} premarket cache for {cache_marker} is already ready.",
+                message=(
+                    f"{self._broker_label()} premarket cache for {cache_marker} is already ready: "
+                    f"{stock_counts['previous_close_available']} previous closes, "
+                    f"{stock_counts['badge_available']} badge rows, "
+                    f"{stock_counts['volume_available']} volume baselines available."
+                ),
                 error=None,
                 market_open_ready=True,
+                previous_close_available=stock_counts["previous_close_available"],
+                previous_close_new=0,
+                badge_available=stock_counts["badge_available"],
+                badge_new=0,
+                volume_available=stock_counts["volume_available"],
+                volume_new=0,
+                ready_symbols=stock_counts["ready_symbols"],
+                failed_count=0,
+                failed_symbols=[],
+                rate_limited=False,
+                next_retry_at=None,
             )
         with self.history_cache_lock:
             if self.history_cache_thread and self.history_cache_thread.is_alive():
@@ -5723,6 +5916,17 @@ class MarketEngine:
                     "broker": self._current_broker(),
                     "error": None,
                     "market_open_ready": False,
+                    "previous_close_available": stock_counts["previous_close_available"],
+                    "previous_close_new": 0,
+                    "badge_available": stock_counts["badge_available"],
+                    "badge_new": 0,
+                    "volume_available": stock_counts["volume_available"],
+                    "volume_new": 0,
+                    "ready_symbols": stock_counts["ready_symbols"],
+                    "failed_count": 0,
+                    "failed_symbols": [],
+                    "rate_limited": False,
+                    "next_retry_at": None,
                 }
             )
             thread = threading.Thread(

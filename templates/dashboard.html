@@ -1443,10 +1443,10 @@
   #gainers-body .table-row:not(.table-head),
   #losers-body .table-row:not(.table-head) {
     grid-template-columns:
-      minmax(96px, 1.1fr)
-      minmax(58px, 0.68fr)
-      minmax(56px, 0.65fr)
-      34px !important;
+      minmax(118px, 1.2fr)
+      minmax(62px, 0.6fr)
+      minmax(66px, 0.62fr)
+      38px !important;
   }
 
   #gainers-body .table-row > span:nth-child(3),
@@ -1464,6 +1464,234 @@
   .sector-row > .sector-price,
   .sector-head > div:nth-child(2) {
     display: none !important;
+  }
+}
+
+/* Final mobile dashboard pass: readable rows, unclipped badges, aligned columns. */
+@media (max-width: 760px) {
+  .dash-shell {
+    padding: 6px !important;
+  }
+
+  .dash-hero {
+    position: relative;
+    z-index: 1;
+  }
+
+  .mobile-dashboard-tabs {
+    position: sticky;
+    top: 100px;
+    z-index: 50;
+    gap: 6px;
+    margin: 6px 2px 8px;
+    padding: 5px;
+  }
+
+  .mobile-dashboard-tab {
+    min-height: 40px;
+    font-size: 13px;
+  }
+
+  .hero-badge {
+    margin: 6px 2px !important;
+    padding: 10px !important;
+    gap: 8px;
+  }
+
+  .trial-chip {
+    padding: 8px 10px !important;
+    font-size: 12px !important;
+    line-height: 1.35 !important;
+  }
+
+  .status-line {
+    font-size: 12px !important;
+  }
+
+  .snapshot-updated-at {
+    font-size: 10px !important;
+  }
+
+  .panel-gainers,
+  .panel-losers,
+  .panel-sector {
+    padding: 10px !important;
+  }
+
+  .panel-gainers .table,
+  .panel-losers .table {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  .panel-header {
+    margin-bottom: 8px !important;
+    padding: 10px 10px 12px !important;
+  }
+
+  .panel-header h3 {
+    font-size: 18px !important;
+  }
+
+  .pill {
+    padding: 6px 10px !important;
+    font-size: 12px !important;
+  }
+
+  .dash-shell .table {
+    gap: 6px !important;
+  }
+
+  .dash-shell .table-row.table-head,
+  #gainers-body .table-row.table-head,
+  #losers-body .table-row.table-head {
+    display: grid !important;
+    grid-template-columns: minmax(118px, 1.2fr) minmax(62px, 0.6fr) minmax(66px, 0.62fr) 38px !important;
+    min-height: 32px !important;
+    padding: 7px 8px !important;
+    font-size: 10px !important;
+  }
+
+  #gainers-body .table-row,
+  #losers-body .table-row,
+  #gainers-body .table-row:not(.table-head),
+  #losers-body .table-row:not(.table-head) {
+    grid-template-columns: minmax(118px, 1.2fr) minmax(62px, 0.6fr) minmax(66px, 0.62fr) 38px !important;
+    gap: 6px 8px !important;
+    align-items: center !important;
+    min-height: 54px !important;
+    padding: 8px 9px !important;
+    border-radius: 9px !important;
+  }
+
+  #gainers-body .table-row > .cell-symbol,
+  #losers-body .table-row > .cell-symbol {
+    display: flex !important;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    min-width: 0;
+    overflow: visible;
+  }
+
+  .dash-shell .cell-symbol-main {
+    display: flex !important;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+    max-width: 100%;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    white-space: normal !important;
+    font-size: 15px !important;
+    line-height: 1.1 !important;
+  }
+
+  .cell-symbol-badges {
+    display: flex !important;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+    max-width: 100%;
+    overflow: visible;
+  }
+
+  .cell-symbol-badges:empty {
+    display: none !important;
+  }
+
+  .sector-rank-tag,
+  .ohlc-badge {
+    display: inline-flex !important;
+    max-width: 100%;
+    padding: 3px 6px !important;
+    border-radius: 999px;
+    font-size: 8.5px !important;
+    line-height: 1.05 !important;
+    white-space: normal;
+    overflow: visible;
+  }
+
+  .sector-rank-tag {
+    max-width: 116px;
+  }
+
+  .fno-tag,
+  .prev-rise-badge {
+    display: none !important;
+  }
+
+  #gainers-body .table-row > span:nth-child(2),
+  #losers-body .table-row > span:nth-child(2),
+  #gainers-body .table-row > span:nth-child(4),
+  #losers-body .table-row > span:nth-child(4) {
+    justify-content: flex-end !important;
+    text-align: right !important;
+  }
+
+  .dash-shell .mono,
+  .dash-shell .positive,
+  .dash-shell .negative {
+    font-size: 13px !important;
+    line-height: 1.15 !important;
+  }
+
+  #gainers-body .table-row > .tv-link,
+  #losers-body .table-row > .tv-link {
+    width: 38px !important;
+    min-width: 38px !important;
+    height: 34px !important;
+    min-height: 34px !important;
+    justify-self: end !important;
+    align-self: center !important;
+  }
+
+  #gainers-body .table-row > .tv-link::before,
+  #losers-body .table-row > .tv-link::before {
+    font-size: 11px !important;
+  }
+
+  .sector-row,
+  .sector-row:not(.sector-head) {
+    min-height: 40px !important;
+    padding: 8px 9px !important;
+    border-radius: 8px;
+  }
+
+  .sector-name,
+  .sector-change {
+    font-size: 12.5px !important;
+  }
+}
+
+@media (max-width: 380px) {
+  .dash-shell .table-row.table-head,
+  #gainers-body .table-row,
+  #losers-body .table-row,
+  #gainers-body .table-row:not(.table-head),
+  #losers-body .table-row:not(.table-head) {
+    grid-template-columns: minmax(104px, 1.12fr) minmax(54px, 0.58fr) minmax(58px, 0.58fr) 34px !important;
+    gap: 5px !important;
+  }
+
+  .dash-shell .cell-symbol-main {
+    font-size: 13.5px !important;
+  }
+
+  .sector-rank-tag {
+    max-width: 104px;
+  }
+
+  .dash-shell .mono,
+  .dash-shell .positive,
+  .dash-shell .negative {
+    font-size: 12px !important;
+  }
+
+  #gainers-body .table-row > .tv-link,
+  #losers-body .table-row > .tv-link {
+    width: 34px !important;
+    min-width: 34px !important;
   }
 }
 </style>
