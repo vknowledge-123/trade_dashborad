@@ -1407,12 +1407,12 @@ def admin_market_history_status(request: Request):
 
 
 @app.get("/api/sector-breakdown")
-def sector_breakdown(request: Request, sector: str):
+def sector_breakdown(request: Request, sector: str, side: str = "gainer"):
     blocked_response = blocked_access_json(current_user(request))
     if blocked_response:
         return blocked_response
     return JSONResponse(
-        engine.get_sector_breakdown(sector),
+        engine.get_sector_breakdown(sector, side=side),
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",

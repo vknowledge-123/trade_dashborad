@@ -2985,14 +2985,19 @@ textarea:focus {
       });
     };
 
-    const loadSectorBreakdown = async (sector) => {
+    const loadSectorBreakdown = async (sector, side) => {
       if (!sectorModalBody || !sectorModalTitle || !sectorModalMeta) return;
       sectorModalTitle.textContent = sector;
       sectorModalMeta.textContent = "Loading ranked stocks...";
       sectorModalBody.innerHTML = '<div class="sector-stock-empty">Loading ranked constituent stocks...</div>';
       openSectorModal();
       try {
-        const res = await fetch(`/api/sector-breakdown?sector=${encodeURIComponent(sector)}&ts=${Date.now()}`, {
+        const params = new URLSearchParams({
+          sector,
+          side: side || "gainer",
+          ts: Date.now().toString(),
+        });
+        const res = await fetch(`/api/sector-breakdown?${params.toString()}`, {
           cache: "no-store",
           headers: {
             "Cache-Control": "no-cache",
@@ -3008,17 +3013,18 @@ textarea:focus {
     };
 
     const bindSectorClicks = (container) => {
+      const side = container && container.id === "sector-losers" ? "loser" : "gainer";
       container.addEventListener("click", (event) => {
         const row = event.target.closest(".sector-row[data-sector]");
         if (!row) return;
-        loadSectorBreakdown(row.dataset.sector);
+        loadSectorBreakdown(row.dataset.sector, side);
       });
       container.addEventListener("keydown", (event) => {
         if (event.key !== "Enter" && event.key !== " ") return;
         const row = event.target.closest(".sector-row[data-sector]");
         if (!row) return;
         event.preventDefault();
-        loadSectorBreakdown(row.dataset.sector);
+        loadSectorBreakdown(row.dataset.sector, side);
       });
     };
 

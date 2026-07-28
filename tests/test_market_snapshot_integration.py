@@ -2273,6 +2273,19 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertEqual(payload["stocks"][0]["turnover"], 1500000.0)
         self.assertEqual(payload["stocks"][1]["symbol"], "TCS")
 
+    def test_sector_breakdown_loser_side_sorts_most_negative_first(self):
+        engine = MarketEngine(redis_client=None)
+        rows = [
+            {"symbol": "A", "price": 100, "change": -0.5, "volume": 1000},
+            {"symbol": "B", "price": 100, "change": -3.8, "volume": 1000},
+            {"symbol": "C", "price": 100, "change": -1.2, "volume": 1000},
+        ]
+
+        ranked = engine._rank_sector_breakdown_rows(rows, market_open=True, side="loser")
+
+        self.assertEqual([row["change"] for row in ranked], [-3.8, -1.2, -0.5])
+        self.assertEqual([row["rank"] for row in ranked], [1, 2, 3])
+
     def test_nifty_it_breakdown_uses_fallback_members_when_csv_is_unavailable(self):
         engine = MarketEngine(redis_client=None)
         engine.kite = object()

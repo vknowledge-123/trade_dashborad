@@ -3682,7 +3682,7 @@ class MarketEngine:
                 row["turnover"] = self._calculate_turnover(row.get("price"), row.get("volume"))
         return rows
 
-    def _rank_sector_breakdown_rows(self, rows, market_open):
+    def _rank_sector_breakdown_rows(self, rows, market_open, side="gainer"):
         prepared = [
             self._apply_open_extreme_flags(dict(row))
             for row in rows or []
@@ -3690,7 +3690,8 @@ class MarketEngine:
         ]
         self._decorate_rows_with_previous_day_badges(prepared, fetch_missing=False)
         self._decorate_rows_with_turnover(prepared)
-        ranked = sorted(prepared, key=lambda item: item.get("change") or 0, reverse=True)
+        reverse = str(side or "").lower() != "loser"
+        ranked = sorted(prepared, key=lambda item: item.get("change") or 0, reverse=reverse)
         for index, row in enumerate(ranked, start=1):
             row["rank"] = index
         return ranked
@@ -6278,10 +6279,11 @@ class MarketEngine:
             self._save_previous_close_cache()
         return rows
 
-    def get_sector_breakdown(self, sector_name):
+    def get_sector_breakdown(self, sector_name, side="gainer"):
         sector = (sector_name or "").strip()
         if not sector:
             return {"sector": "", "stocks": [], "updated_at": self.last_update, "market_open": self._is_market_open()}
+        side = "loser" if str(side or "").lower() == "loser" else "gainer"
 
         market_open = self._is_market_open()
         cached_breakdowns = {}
@@ -6325,18 +6327,20 @@ class MarketEngine:
             if not rows:
                 if cached_payload_fresh:
                     payload = dict(cached_payload)
-                    payload["stocks"] = self._rank_sector_breakdown_rows(cached_payload["stocks"], market_open=False)
+                    payload["stocks"] = self._rank_sector_breakdown_rows(cached_payload["stocks"], market_open=False, side=side)
                     payload["constituent_count"] = len(payload["stocks"])
+                    payload["side"] = side
                     return payload
         else:
             rows = self._get_latest_rows_for_symbols(symbols)
 
-        ranked = self._rank_sector_breakdown_rows(rows, market_open)
+        ranked = self._rank_sector_breakdown_rows(rows, market_open, side=side)
         if market_open:
             self._decorate_rows_with_previous_day_badges(ranked)
         return {
             "sector": sector,
             "stocks": ranked,
+            "side": side,
             "updated_at": self.last_update,
             "session_marker": self._completed_session_cache_marker() if not market_open else None,
             "market_open": market_open,
