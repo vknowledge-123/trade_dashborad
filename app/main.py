@@ -483,6 +483,21 @@ def blaster_hit_time(row):
     return format_ione_hit_time(row.get("appearance_time") or row.get("updated_at"))
 
 
+def blaster_sector_rank_label(row):
+    try:
+        sector_rank = int(row.get("sector_rank") or 0)
+    except (TypeError, ValueError):
+        sector_rank = 0
+    if sector_rank not in {1, 2}:
+        return None
+    try:
+        move_percent = float(row.get("move_percent") or 0)
+    except (TypeError, ValueError):
+        move_percent = 0
+    prefix = "Leading Sector Rank" if move_percent >= 0 else "Sector Fall Rank"
+    return f"{prefix} {sector_rank}"
+
+
 def blaster_intraday_row(row):
     symbol = str(row.get("symbol") or "").upper()
     try:
@@ -494,6 +509,7 @@ def blaster_intraday_row(row):
         "name": row.get("name") or symbol,
         "status": "Blast",
         "move_percent": round(move_percent, 2) if move_percent is not None else None,
+        "sector_rank_label": blaster_sector_rank_label(row),
         "hit_time": blaster_hit_time(row),
         "chart_url": f"https://www.tradingview.com/chart/?symbol=NSE%3A{symbol}",
     }
@@ -503,14 +519,10 @@ def blaster_intraday_payload(scanner):
     rows = []
     for row in scanner.get("rows") or []:
         try:
-            multiplier = float(row.get("volume_sma_multiplier") or 0)
-        except (TypeError, ValueError):
-            multiplier = 0
-        try:
             turnover = float(row.get("turnover") or 0)
         except (TypeError, ValueError):
             turnover = 0
-        if multiplier >= 5 and turnover >= 10_000_000:
+        if turnover >= 50_000_000:
             rows.append(row)
     rows.sort(key=lambda item: item.get("appearance_time") or "", reverse=True)
     return {

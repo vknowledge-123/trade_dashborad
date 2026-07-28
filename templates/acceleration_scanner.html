@@ -715,6 +715,9 @@
           <span class="cell-symbol">
             <span class="cell-symbol-main">{{ row.symbol }}</span>
             <span class="sector-stock-name">{{ row.name }}</span>
+            {% if row.sector_rank_label %}
+              <span class="blaster-sector-rank">{{ row.sector_rank_label }}</span>
+            {% endif %}
           </span>
           <span><span class="blast-status">{{ row.status }}</span></span>
           <span class="{{ 'positive' if row.move_percent is not none and row.move_percent >= 0 else 'negative' }} mono">{% if row.move_percent is not none %}{{ '+' if row.move_percent >= 0 else '' }}{{ row.move_percent }}%{% else %}-{% endif %}</span>
@@ -790,6 +793,22 @@
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
+.blaster-sector-rank {
+  display: inline-flex;
+  align-items: center;
+  width: max-content;
+  max-width: 100%;
+  margin-top: 3px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(138, 180, 248, 0.25);
+  background: rgba(138, 180, 248, 0.12);
+  color: #d9e7ff;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
 .blaster-empty span:first-child {
   grid-column: 1 / -1;
   color: #8ca5c8;
@@ -805,6 +824,9 @@
   .blaster-row:not(.table-head) > span:first-child,
   .blaster-row:not(.table-head) > .tv-link {
     grid-column: 1 / -1;
+  }
+  .blaster-sector-rank {
+    font-size: 9.5px;
   }
   .blaster-row:not(.table-head) > span:nth-child(2)::before {
     content: "Status ";
@@ -909,6 +931,7 @@
       <span class="cell-symbol">
         <span class="cell-symbol-main">${escapeHtml(row.symbol)}</span>
         <span class="sector-stock-name">${escapeHtml(row.name || row.symbol || "")}</span>
+        ${row.sector_rank_label ? `<span class="blaster-sector-rank">${escapeHtml(row.sector_rank_label)}</span>` : ""}
       </span>
       <span><span class="blast-status">${escapeHtml(row.status || "Blast")}</span></span>
       <span class="${Number(row.move_percent) >= 0 ? "positive" : "negative"} mono">${formatSigned(row.move_percent)}</span>

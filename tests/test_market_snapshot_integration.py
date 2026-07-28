@@ -2930,8 +2930,9 @@ class MarketSnapshotApiIntegrationTests(unittest.TestCase):
                         "symbol": "OLD",
                         "name": "Old Hit",
                         "volume_sma_multiplier": 5.5,
-                        "turnover": 20_000_000,
+                        "turnover": 60_000_000,
                         "move_percent": -0.7,
+                        "sector_rank": 1,
                         "appearance_time": "2026-07-07T09:16:00+05:30",
                         "appearance_time_display": "09:16:00 AM",
                         "candle_volume": 100000,
@@ -2939,9 +2940,10 @@ class MarketSnapshotApiIntegrationTests(unittest.TestCase):
                     {
                         "symbol": "NEW",
                         "name": "New Hit",
-                        "volume_sma_multiplier": 6,
-                        "turnover": 15_000_000,
+                        "volume_sma_multiplier": 1.2,
+                        "turnover": 75_000_000,
                         "move_percent": 1.25,
+                        "sector_rank": 2,
                         "appearance_time": "2026-07-07T09:20:00+05:30",
                         "appearance_time_display": "09:20:00 AM",
                         "candle_volume": 100000,
@@ -2957,7 +2959,7 @@ class MarketSnapshotApiIntegrationTests(unittest.TestCase):
                         "symbol": "SLOW",
                         "name": "Slow Hit",
                         "volume_sma_multiplier": 4.9,
-                        "turnover": 20_000_000,
+                        "turnover": 40_000_000,
                         "appearance_time": "2026-07-07T09:22:00+05:30",
                     },
                 ],
@@ -2975,7 +2977,9 @@ class MarketSnapshotApiIntegrationTests(unittest.TestCase):
         self.assertEqual([row["symbol"] for row in payload["rows"]], ["NEW", "OLD"])
         self.assertEqual(payload["rows"][0]["status"], "Blast")
         self.assertEqual(payload["rows"][0]["move_percent"], 1.25)
+        self.assertEqual(payload["rows"][0]["sector_rank_label"], "Leading Sector Rank 2")
         self.assertEqual(payload["rows"][1]["move_percent"], -0.7)
+        self.assertEqual(payload["rows"][1]["sector_rank_label"], "Sector Fall Rank 1")
         self.assertNotIn("volume_sma_multiplier", payload["rows"][0])
         self.assertNotIn("turnover", payload["rows"][0])
         self.assertNotIn("candle_volume", payload["rows"][0])
