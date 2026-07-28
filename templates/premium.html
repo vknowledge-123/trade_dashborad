@@ -30,6 +30,11 @@
         Your 24-hour guest preview is complete. Register now to start your 3 trading-day free trial.
       </div>
     {% endif %}
+    {% if access_blocked %}
+      <div class="premium-alert">
+        Your dashboard access is currently blocked. Please buy a license or contact support to continue platform access.
+      </div>
+    {% endif %}
     {% if course_settings.get("payment_qr_path") %}
       <div class="payment-qr-card">
         <div>

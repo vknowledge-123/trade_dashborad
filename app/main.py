@@ -29,6 +29,7 @@ from app.db import (
     update_user_password_hash,
     record_user_login,
     get_recent_users,
+    set_user_access_blocked,
     set_admin_totp,
     log_admin_login,
     get_admin_login_audit,
@@ -751,6 +752,35 @@ def require_admin(request: Request):
     return admin
 
 
+def user_access_blocked(user_row):
+    return bool(user_row and not user_row["is_admin"] and user_row["access_blocked"])
+
+
+def blocked_access_redirect(user_row):
+    if user_access_blocked(user_row):
+        return RedirectResponse(url="/premium?blocked=1", status_code=302)
+    return None
+
+
+def blocked_access_json(user_row):
+    if user_access_blocked(user_row):
+        return JSONResponse(
+            {
+                "ok": False,
+                "blocked": True,
+                "error": "Your dashboard access is blocked. Please buy a license to continue.",
+                "redirect": "/premium?blocked=1",
+            },
+            status_code=403,
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            },
+        )
+    return None
+
+
 def trial_status(user_row):
     start = datetime.fromisoformat(user_row["trial_start"])
     days = int(user_row["trial_days"])
@@ -972,6 +1002,9 @@ def logout(request: Request):
 def dashboard(request: Request):
     user = current_user(request)
     admin = current_admin(request)
+    blocked_redirect = blocked_access_redirect(user)
+    if blocked_redirect:
+        return blocked_redirect
     guest_trial = None
     if not user and not admin:
         guest_trial = guest_dashboard_status(request)
@@ -1012,6 +1045,9 @@ def free_course_dismiss(request: Request):
 def relative_rotation(request: Request):
     user = current_user(request)
     admin = current_admin(request)
+    blocked_redirect = blocked_access_redirect(user)
+    if blocked_redirect:
+        return blocked_redirect
     history_cache_status = engine.get_history_cache_status() if admin else None
     return templates.TemplateResponse(
         request,
@@ -1041,6 +1077,9 @@ def swing_scanner(request: Request):
 def acceleration_scanner(request: Request):
     user = current_user(request)
     admin = current_admin(request)
+    blocked_redirect = blocked_access_redirect(user)
+    if blocked_redirect:
+        return blocked_redirect
     scanner = engine.get_acceleration_scanner(timeframe=1, min_gain=0.5)
     if admin:
         scanner = admin_blaster_payload(scanner)
@@ -1081,6 +1120,9 @@ def gap_reversal_scanner(request: Request):
 def open_extreme_scanner(request: Request):
     user = current_user(request)
     admin = current_admin(request)
+    blocked_redirect = blocked_access_redirect(user)
+    if blocked_redirect:
+        return blocked_redirect
     scanner = engine.get_open_extreme_scanner()
     return templates.TemplateResponse(
         request,
@@ -1098,6 +1140,9 @@ def open_extreme_scanner(request: Request):
 
 @app.get("/api/market-snapshot")
 def market_snapshot(request: Request):
+    blocked_response = blocked_access_json(current_user(request))
+    if blocked_response:
+        return blocked_response
     return JSONResponse(
         engine.get_snapshot(),
         headers={
@@ -1110,6 +1155,9 @@ def market_snapshot(request: Request):
 
 @app.get("/api/relative-rotation")
 def relative_rotation_data(request: Request):
+    blocked_response = blocked_access_json(current_user(request))
+    if blocked_response:
+        return blocked_response
     return JSONResponse(
         engine.get_relative_rotation_graph(),
         headers={
@@ -1157,6 +1205,9 @@ def acceleration_scanner_data(
     timeframe: int = 1,
     min_gain: float = 0.5,
 ):
+    blocked_response = blocked_access_json(current_user(request))
+    if blocked_response:
+        return blocked_response
     scanner = engine.get_acceleration_scanner(timeframe=timeframe, min_gain=min_gain)
     if not current_admin(request):
         return JSONResponse(
@@ -1193,6 +1244,9 @@ def gap_reversal_scanner_data(request: Request):
 
 @app.get("/api/open-extreme-scanner")
 def open_extreme_scanner_data(request: Request):
+    blocked_response = blocked_access_json(current_user(request))
+    if blocked_response:
+        return blocked_response
     scanner = engine.get_open_extreme_scanner()
     if not current_admin(request):
         return JSONResponse(
@@ -1287,6 +1341,9 @@ def acceleration_hit_action(
     request: Request,
     payload: dict = Body(...),
 ):
+    blocked_response = blocked_access_json(current_user(request))
+    if blocked_response:
+        return blocked_response
     result = engine.update_acceleration_hit(
         event_id=payload.get("event_id"),
         action=payload.get("action"),
@@ -1340,6 +1397,9 @@ def admin_market_history_status(request: Request):
 
 @app.get("/api/sector-breakdown")
 def sector_breakdown(request: Request, sector: str):
+    blocked_response = blocked_access_json(current_user(request))
+    if blocked_response:
+        return blocked_response
     return JSONResponse(
         engine.get_sector_breakdown(sector),
         headers={
@@ -1354,6 +1414,9 @@ def inquiry_get(request: Request):
     user = require_login(request)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
+    blocked_redirect = blocked_access_redirect(user)
+    if blocked_redirect:
+        return blocked_redirect
     return templates.TemplateResponse(
         request,
         "inquiry.html",
@@ -1375,6 +1438,9 @@ def inquiry(
     user = require_login(request)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
+    blocked_redirect = blocked_access_redirect(user)
+    if blocked_redirect:
+        return blocked_redirect
 
     create_inquiry(user["id"], subject, message)
     return RedirectResponse(url="/dashboard?inquiry=success", status_code=302)
@@ -1402,6 +1468,7 @@ def premium(request: Request):
             "course_settings": course_settings,
             "course_video_count": len(videos),
             "guest_expired": request.query_params.get("guest") == "expired",
+            "access_blocked": request.query_params.get("blocked") == "1",
         },
     )
 
@@ -1412,6 +1479,9 @@ def academy(request: Request):
     user = current_user(request)
     if not admin and not user:
         return RedirectResponse(url="/login", status_code=302)
+    blocked_redirect = blocked_access_redirect(user)
+    if blocked_redirect:
+        return blocked_redirect
 
     active_license = None
     academy_access = False
@@ -1504,6 +1574,7 @@ def admin_home(request: Request):
                     "trial": trial,
                     "last_login_at": u["last_login_at"],
                     "login_count": u["login_count"],
+                    "access_blocked": bool(u["access_blocked"]),
                 }
             )
         return templates.TemplateResponse(
@@ -1860,6 +1931,21 @@ def admin_select_broker(
         token = engine.token_from_redis()
         if creds and token:
             start_engine_in_background(creds["api_key"], token)
+    return RedirectResponse(url="/admin", status_code=302)
+
+
+@app.post("/admin/user/access")
+def admin_user_access(
+    request: Request,
+    user_id: int = Form(...),
+    access_blocked: int = Form(...),
+    csrf_token: str = Form(""),
+):
+    require_csrf(request, csrf_token)
+    admin = require_admin(request)
+    if not admin:
+        return RedirectResponse(url="/admin/login", status_code=302)
+    set_user_access_blocked(user_id, bool(int(access_blocked)))
     return RedirectResponse(url="/admin", status_code=302)
 
 

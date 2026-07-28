@@ -2753,6 +2753,65 @@ class MarketSnapshotApiIntegrationTests(unittest.TestCase):
         self.assertTrue(response.json()["ok"])
         self.assertEqual(response.json()["status"]["status"], "completed")
 
+    def test_admin_can_block_and_unblock_user_dashboard_access(self):
+        main_module.init_db()
+        email = "blocked-user@example.com"
+        existing = main_module.get_user_by_email(email)
+        user_id = existing["id"] if existing else main_module.create_user(
+            "Blocked User",
+            email,
+            "9999999999",
+            main_module.hash_password("Password123"),
+            trial_days=3,
+        )
+        with patch.object(main_module, "require_csrf", return_value=None), patch.object(
+            main_module,
+            "require_admin",
+            return_value={"id": 1, "is_admin": 1},
+        ):
+            with TestClient(main_module.app, follow_redirects=False) as client:
+                block_response = client.post(
+                    "/admin/user/access",
+                    data={"user_id": user_id, "access_blocked": "1", "csrf_token": "test"},
+                )
+                blocked = main_module.get_user_by_id(user_id)
+                unblock_response = client.post(
+                    "/admin/user/access",
+                    data={"user_id": user_id, "access_blocked": "0", "csrf_token": "test"},
+                )
+                unblocked = main_module.get_user_by_id(user_id)
+
+        self.assertEqual(block_response.status_code, 302)
+        self.assertEqual(unblock_response.status_code, 302)
+        self.assertEqual(blocked["access_blocked"], 1)
+        self.assertEqual(unblocked["access_blocked"], 0)
+
+    def test_blocked_user_is_redirected_from_pages_and_denied_api(self):
+        blocked_user = {
+            "id": 42,
+            "is_admin": 0,
+            "access_blocked": 1,
+            "trial_start": "2026-07-01T00:00:00",
+            "trial_days": 3,
+        }
+        with patch.object(main_module, "current_user", return_value=blocked_user), patch.object(
+            main_module,
+            "current_admin",
+            return_value=None,
+        ):
+            with TestClient(main_module.app, follow_redirects=False) as client:
+                page_response = client.get("/dashboard")
+                scanner_response = client.get("/open-extreme-scanner")
+                api_response = client.get("/api/market-snapshot")
+
+        self.assertEqual(page_response.status_code, 302)
+        self.assertEqual(page_response.headers["location"], "/premium?blocked=1")
+        self.assertEqual(scanner_response.status_code, 302)
+        self.assertEqual(scanner_response.headers["location"], "/premium?blocked=1")
+        self.assertEqual(api_response.status_code, 403)
+        self.assertTrue(api_response.json()["blocked"])
+        self.assertEqual(api_response.json()["redirect"], "/premium?blocked=1")
+
     def test_removed_pages_return_not_found(self):
         with TestClient(main_module.app) as client:
             responses = [

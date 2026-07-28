@@ -123,6 +123,7 @@
           <span>Trial</span>
           <span>Last Login</span>
           <span>Logins</span>
+          <span>Access</span>
         </div>
         {% for u in users_activity %}
           <div class="table-row user-activity-row">
@@ -145,6 +146,21 @@
             </span>
             <span class="mono muted">{{ u["last_login_at"] if u["last_login_at"] else "-" }}</span>
             <span class="mono">{{ u["login_count"] if u["login_count"] else 0 }}</span>
+            <span>
+              <form class="user-access-form" method="post" action="/admin/user/access">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}" />
+                <input type="hidden" name="user_id" value="{{ u['id'] }}" />
+                {% if u["access_blocked"] %}
+                  <input type="hidden" name="access_blocked" value="0" />
+                  <span class="pill negative">Blocked</span>
+                  <button class="btn btn-ghost btn-mini" type="submit">Unblock</button>
+                {% else %}
+                  <input type="hidden" name="access_blocked" value="1" />
+                  <span class="pill positive">Allowed</span>
+                  <button class="btn btn-ghost btn-mini danger" type="submit">Block</button>
+                {% endif %}
+              </form>
+            </span>
           </div>
         {% endfor %}
       </div>
@@ -518,9 +534,31 @@
 .table-row span.muted {
   font-size: 12px;
 }
+.user-activity-head,
+.user-activity-row {
+  grid-template-columns: minmax(180px, 1.4fr) minmax(110px, 0.8fr) minmax(130px, 0.9fr) minmax(60px, 0.45fr) minmax(150px, 0.9fr);
+  align-items: center;
+}
+.user-access-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.btn.danger {
+  border-color: rgba(242, 139, 130, 0.34);
+  color: #ffd5d2;
+}
+.btn.danger:hover {
+  background: rgba(242, 139, 130, 0.12);
+}
 @media (max-width: 900px) {
   .admin-grid { grid-template-columns: 1fr; }
   .admin-hero { flex-direction: column; align-items: flex-start; }
+  .user-activity-head,
+  .user-activity-row {
+    grid-template-columns: 1fr;
+  }
 }
 
 .inquiry-row-grid,
