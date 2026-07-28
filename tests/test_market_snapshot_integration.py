@@ -2812,6 +2812,11 @@ class MarketSnapshotApiIntegrationTests(unittest.TestCase):
         self.assertTrue(api_response.json()["blocked"])
         self.assertEqual(api_response.json()["redirect"], "/premium?blocked=1")
 
+    def test_missing_access_blocked_key_defaults_to_allowed_for_old_rows(self):
+        user_without_new_column = {"id": 42, "is_admin": 0}
+
+        self.assertFalse(main_module.user_access_blocked(user_without_new_column))
+
     def test_removed_pages_return_not_found(self):
         with TestClient(main_module.app) as client:
             responses = [

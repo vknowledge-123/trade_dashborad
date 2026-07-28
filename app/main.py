@@ -752,8 +752,19 @@ def require_admin(request: Request):
     return admin
 
 
+def row_value(row, key, default=None):
+    if row is None:
+        return default
+    if isinstance(row, dict):
+        return row.get(key, default)
+    try:
+        return row[key]
+    except (KeyError, IndexError, TypeError):
+        return default
+
+
 def user_access_blocked(user_row):
-    return bool(user_row and not user_row["is_admin"] and user_row["access_blocked"])
+    return bool(user_row and not row_value(user_row, "is_admin") and row_value(user_row, "access_blocked", 0))
 
 
 def blocked_access_redirect(user_row):
@@ -1574,7 +1585,7 @@ def admin_home(request: Request):
                     "trial": trial,
                     "last_login_at": u["last_login_at"],
                     "login_count": u["login_count"],
-                    "access_blocked": bool(u["access_blocked"]),
+                    "access_blocked": bool(row_value(u, "access_blocked", 0)),
                 }
             )
         return templates.TemplateResponse(
