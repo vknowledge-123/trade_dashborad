@@ -625,6 +625,9 @@ class MarketEngine:
         self.badge_warm_lock = threading.Lock()
         self.badge_warm_thread = None
         self.pending_badge_symbols = set()
+        self.previous_day_levels_warm_lock = threading.Lock()
+        self.previous_day_levels_warm_thread = None
+        self.pending_previous_day_level_symbols = set()
         self.scanner_lock = threading.Lock()
         self.scanner_thread = None
         self.scanner_status = {
@@ -2977,6 +2980,7 @@ class MarketEngine:
         symbol = str(symbol or "").upper()
         badge_cached = self.previous_day_badges_cache.get(symbol)
         volume_cached = self.acceleration_volume_sma_cache.get(symbol)
+        levels_cached = self.previous_day_levels_cache.get(symbol)
         previous_close_cached = self._cached_previous_close_for_marker("symbols", symbol, cache_marker)
         has_previous_close = previous_close_cached not in (None, 0)
         has_badge = (
@@ -2990,11 +2994,18 @@ class MarketEngine:
             and self._payload_matches_broker(volume_cached)
             and volume_cached.get("volume_sma") not in (None, 0)
         )
+        has_levels = (
+            isinstance(levels_cached, dict)
+            and levels_cached.get("cache_marker") == cache_marker
+            and self._payload_matches_broker(levels_cached)
+            and self._valid_previous_day_levels(levels_cached)
+        )
         return {
             "previous_close": has_previous_close,
             "badge": has_badge,
             "volume": has_volume,
-            "ready": has_previous_close and has_badge and has_volume,
+            "levels": has_levels,
+            "ready": has_previous_close and has_badge and has_volume and has_levels,
         }
 
     def _stock_history_cache_counts(self, symbols, cache_marker):
@@ -3002,6 +3013,7 @@ class MarketEngine:
             "previous_close_available": 0,
             "badge_available": 0,
             "volume_available": 0,
+            "levels_available": 0,
             "ready_symbols": 0,
         }
         for symbol in symbols or []:
@@ -3012,6 +3024,8 @@ class MarketEngine:
                 counts["badge_available"] += 1
             if flags["volume"]:
                 counts["volume_available"] += 1
+            if flags["levels"]:
+                counts["levels_available"] += 1
             if flags["ready"]:
                 counts["ready_symbols"] += 1
         return counts
@@ -3034,6 +3048,40 @@ class MarketEngine:
         cached = load_market_cache(PREVIOUS_DAY_LEVELS_CACHE_KEY)
         if isinstance(cached, dict):
             self.previous_day_levels_cache = cached
+
+    def _remember_previous_day_levels(self, symbol, candle, cache_marker=None):
+        symbol = str(symbol or "").upper()
+        if not symbol or not isinstance(candle, dict):
+            return False
+        high = self._float_or_none(candle.get("high"))
+        low = self._float_or_none(candle.get("low"))
+        if high in (None, 0) or low in (None, 0):
+            return False
+        open_value = self._float_or_none(candle.get("open"))
+        close = self._float_or_none(candle.get("close"))
+        levels = {
+            "cache_marker": cache_marker or self._completed_session_cache_marker(),
+            "broker": self._current_broker(),
+            "open": round(open_value, 2) if open_value not in (None, 0) else None,
+            "high": round(high, 2),
+            "low": round(low, 2),
+            "close": round(close, 2) if close not in (None, 0) else None,
+            "date": self._format_candle_date(candle),
+            "updated_at": self._utc_now(),
+        }
+        if not self._valid_previous_day_levels(levels):
+            return False
+        existing = self.previous_day_levels_cache.get(symbol)
+        if (
+            isinstance(existing, dict)
+            and existing.get("cache_marker") == levels["cache_marker"]
+            and existing.get("broker") == levels["broker"]
+            and existing.get("high") == levels["high"]
+            and existing.get("low") == levels["low"]
+        ):
+            return False
+        self.previous_day_levels_cache[symbol] = levels
+        return True
 
     def _save_scanner_cache(self, payload):
         try:
@@ -3602,6 +3650,61 @@ class MarketEngine:
             thread.start()
             return True
 
+    def _cached_previous_day_levels(self, symbol, price=None):
+        symbol = str(symbol or "").upper()
+        if not symbol:
+            return None
+        self._restore_previous_day_levels_cache()
+        cache_marker = self._completed_session_cache_marker()
+        cached = self.previous_day_levels_cache.get(symbol)
+        if (
+            isinstance(cached, dict)
+            and cached.get("cache_marker") == cache_marker
+            and self._payload_matches_broker(cached)
+            and self._valid_previous_day_levels(cached, price=price)
+        ):
+            return cached
+        return None
+
+    def _run_previous_day_levels_warm_job(self):
+        while True:
+            with self.previous_day_levels_warm_lock:
+                symbols = sorted(self.pending_previous_day_level_symbols)
+                self.pending_previous_day_level_symbols.clear()
+            if not symbols:
+                break
+            updated = False
+            self._restore_previous_day_levels_cache()
+            for symbol in symbols:
+                cached = self._cached_previous_day_levels(symbol)
+                if cached:
+                    continue
+                before = dict(self.previous_day_levels_cache.get(symbol) or {})
+                levels = self._get_previous_day_levels(symbol)
+                if levels and levels != before:
+                    updated = True
+            if updated:
+                self._save_previous_day_levels_cache()
+        with self.previous_day_levels_warm_lock:
+            self.previous_day_levels_warm_thread = None
+
+    def _ensure_previous_day_levels_background(self, symbols):
+        filtered = {
+            str(symbol).upper()
+            for symbol in (symbols or [])
+            if symbol and self.symbol_to_token.get(str(symbol).upper())
+        }
+        if not filtered or not self.kite:
+            return False
+        with self.previous_day_levels_warm_lock:
+            self.pending_previous_day_level_symbols.update(filtered)
+            if self.previous_day_levels_warm_thread and self.previous_day_levels_warm_thread.is_alive():
+                return False
+            thread = threading.Thread(target=self._run_previous_day_levels_warm_job, daemon=True)
+            self.previous_day_levels_warm_thread = thread
+            thread.start()
+            return True
+
     def _decorate_rows_with_previous_day_badges(self, rows, fetch_missing=False):
         if not rows:
             return rows
@@ -3618,6 +3721,60 @@ class MarketEngine:
             self._ensure_previous_day_badges_background(missing_symbols)
         return rows
 
+    def _decorate_rows_with_previous_day_level_breaks(self, rows, fetch_missing=False):
+        if not rows:
+            return rows
+        missing_symbols = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            symbol = str(row.get("symbol") or "").upper()
+            row["previous_day_high_breakout"] = False
+            row["previous_day_low_breakdown"] = False
+            row["previous_day_high"] = None
+            row["previous_day_low"] = None
+            if not symbol:
+                continue
+            price = self._float_or_none(row.get("price"))
+            levels = self._cached_previous_day_levels(symbol, price=price)
+            if not levels and fetch_missing:
+                levels = self._get_previous_day_levels(symbol)
+            if not levels:
+                missing_symbols.append(symbol)
+                continue
+            previous_high = self._float_or_none(levels.get("high"))
+            previous_low = self._float_or_none(levels.get("low"))
+            day_open = self._float_or_none(row.get("day_open"))
+            day_high = self._float_or_none(row.get("day_high"))
+            day_low = self._float_or_none(row.get("day_low"))
+            if day_high in (None, 0):
+                day_high = price
+            if day_low in (None, 0):
+                day_low = price
+            if previous_high not in (None, 0):
+                row["previous_day_high"] = round(previous_high, 2)
+                opened_above_previous_high = day_open is not None and day_open > previous_high
+                broke_after_open = (
+                    day_open is not None
+                    and not opened_above_previous_high
+                    and day_high is not None
+                    and day_high > previous_high
+                )
+                row["previous_day_high_breakout"] = bool(broke_after_open)
+            if previous_low not in (None, 0):
+                row["previous_day_low"] = round(previous_low, 2)
+                opened_below_previous_low = day_open is not None and day_open < previous_low
+                broke_after_open = (
+                    day_open is not None
+                    and not opened_below_previous_low
+                    and day_low is not None
+                    and day_low < previous_low
+                )
+                row["previous_day_low_breakdown"] = bool(broke_after_open)
+        if missing_symbols and not fetch_missing:
+            self._ensure_previous_day_levels_background(missing_symbols)
+        return rows
+
     def _decorate_snapshot_rows(self, snapshot):
         if not snapshot:
             return snapshot
@@ -3632,6 +3789,8 @@ class MarketEngine:
                 rows[idx] = enriched
         self._decorate_rows_with_previous_day_badges(snapshot.get("gainers") or [], fetch_missing=False)
         self._decorate_rows_with_previous_day_badges(snapshot.get("losers") or [], fetch_missing=False)
+        self._decorate_rows_with_previous_day_level_breaks(snapshot.get("gainers") or [], fetch_missing=False)
+        self._decorate_rows_with_previous_day_level_breaks(snapshot.get("losers") or [], fetch_missing=False)
         self._decorate_rows_with_turnover(snapshot.get("gainers") or [])
         self._decorate_rows_with_turnover(snapshot.get("losers") or [])
         return snapshot
@@ -3656,7 +3815,20 @@ class MarketEngine:
             return None
         return turnover, multiplier
 
-    def _dashboard_opening_turnover_rows(self, sorted_rows, limit=10):
+    def _dashboard_open_gap_pct(self, row):
+        if not isinstance(row, dict):
+            return None
+        previous_close = self._float_or_none(row.get("previous_close"))
+        if previous_close in (None, 0):
+            previous_close = self._cached_previous_close("symbols", row.get("symbol"))
+        opening_price = self._float_or_none(row.get("day_open"))
+        if opening_price in (None, 0):
+            opening_price = self._float_or_none(row.get("opening_candle_open"))
+        if previous_close in (None, 0) or opening_price in (None, 0):
+            return None
+        return abs((opening_price - previous_close) / previous_close * 100)
+
+    def _dashboard_opening_turnover_rows(self, sorted_rows, limit=20):
         prepared = []
         missing_symbols = []
         for row in sorted_rows or []:
@@ -3667,6 +3839,10 @@ class MarketEngine:
                 continue
             opening_turnover, opening_multiplier = opening_context or (None, None)
             if opening_turnover and opening_turnover > 30_000_000 and opening_multiplier >= 2.5:
+                item["opening_turnover"] = opening_turnover
+                item["opening_volume_sma_multiplier"] = opening_multiplier
+                open_gap_pct = self._dashboard_open_gap_pct(item)
+                item["dashboard_open_gap_pct"] = round(open_gap_pct, 2) if open_gap_pct is not None else None
                 prepared.append(item)
                 if len(prepared) >= limit:
                     break
@@ -5310,8 +5486,8 @@ class MarketEngine:
                 movers = [m for m in movers if m["symbol"].upper() in self.nifty500_set]
             sorted_gainers = sorted([m for m in movers if m["change"] > 0], key=lambda x: x["change"], reverse=True)
             sorted_losers = sorted([m for m in movers if m["change"] < 0], key=lambda x: x["change"])
-            gainers = self._dashboard_opening_turnover_rows(sorted_gainers, limit=10)
-            losers = self._dashboard_opening_turnover_rows(sorted_losers, limit=10)
+            gainers = self._dashboard_opening_turnover_rows(sorted_gainers, limit=20)
+            losers = self._dashboard_opening_turnover_rows(sorted_losers, limit=20)
             sectors = list(self.sector_latest.values())
             if not sectors:
                 sectors = self._sector_rows_from_constituent_changes(movers)
@@ -5463,6 +5639,7 @@ class MarketEngine:
     def _warm_market_open_stock_cache(self, cache_marker, force=False):
         del force
         self._restore_previous_day_badges_cache()
+        self._restore_previous_day_levels_cache()
         self._restore_acceleration_volume_sma_cache()
         symbols = self._symbols_for_badge_warmup()
         total = len(symbols)
@@ -5516,18 +5693,22 @@ class MarketEngine:
         previous_close_updated = 0
         prev_close_cache_dirty = False
         badges_dirty = False
+        levels_dirty = False
         volume_dirty = False
         failed_symbols = []
         rate_limited = False
 
         def flush_dirty_caches():
-            nonlocal prev_close_cache_dirty, badges_dirty, volume_dirty
+            nonlocal prev_close_cache_dirty, badges_dirty, levels_dirty, volume_dirty
             if prev_close_cache_dirty:
                 self._save_previous_close_cache()
                 prev_close_cache_dirty = False
             if badges_dirty:
                 self._save_previous_day_badges_cache()
                 badges_dirty = False
+            if levels_dirty:
+                self._save_previous_day_levels_cache()
+                levels_dirty = False
             if volume_dirty:
                 self._save_acceleration_volume_sma_cache()
                 volume_dirty = False
@@ -5584,6 +5765,10 @@ class MarketEngine:
                 if self._remember_previous_close("symbols", symbol, latest_close, cache_marker=cache_marker):
                     prev_close_cache_dirty = True
                     previous_close_updated += 1
+
+            if not flags_before["levels"]:
+                if self._remember_previous_day_levels(symbol, candles[-1], cache_marker=cache_marker):
+                    levels_dirty = True
 
             if not flags_before["badge"] and len(candles) >= 2:
                 current_close = candles[-1].get("close")

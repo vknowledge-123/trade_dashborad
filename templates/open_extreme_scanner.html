@@ -6,7 +6,7 @@
   <div class="openx-header">
     <div>
       <div class="panel-sub">Opening price action scanner</div>
-      <h1>Open High Low Scanner</h1>
+      <h1>Power Scanner</h1>
       <p class="muted">Ranks only stocks where day open equals day low or day open equals day high. Open=Low gainers and Open=High losers are ranked separately.</p>
     </div>
     <div class="status-line">
@@ -577,7 +577,7 @@
 
 {% else %}
 
-<section class="ione-power-shell">
+<section class="ione-power-shell" data-power-panel="long">
   <div class="ione-power-header">
     <div>
       <h1>Power</h1>
@@ -595,8 +595,13 @@
     <div class="openx-alert" id="ione-alert" hidden></div>
   {% endif %}
 
+  <nav class="power-scan-tabs" aria-label="Power scan sections">
+    <button type="button" class="power-scan-tab active" data-power-panel-tab="long" aria-selected="true">Long Scan</button>
+    <button type="button" class="power-scan-tab" data-power-panel-tab="short" aria-selected="false">Short Scan</button>
+  </nav>
+
   <div class="ione-power-grid">
-    <div class="panel">
+    <div class="panel power-long-panel">
       <div class="panel-header">
         <h3>Power Long Scan</h3>
         <span class="pill positive" id="ione-long-count">{{ ione_scanner.ione_power_long|length }}</span>
@@ -632,7 +637,7 @@
       </div>
     </div>
 
-    <div class="panel">
+    <div class="panel power-short-panel">
       <div class="panel-header">
         <h3>Power Short Scan</h3>
         <span class="pill negative" id="ione-short-count">{{ ione_scanner.ione_power_short|length }}</span>
@@ -724,6 +729,9 @@
   color: #8ca5c8;
   font-size: 12px;
   line-height: 1.45;
+}
+.power-scan-tabs {
+  display: none;
 }
 .ione-power-grid {
   display: grid;
@@ -818,9 +826,42 @@
 }
 
 @media (max-width: 860px) {
+  .power-scan-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    padding: 5px;
+    border: 1px solid rgba(232, 238, 247, 0.11);
+    border-radius: 10px;
+    background: rgba(24, 28, 34, 0.96);
+  }
+
+  .power-scan-tab {
+    min-height: 40px;
+    padding: 8px 10px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
+    color: #9fb2cf;
+    font-size: 13px;
+    font-weight: 800;
+    cursor: pointer;
+  }
+
+  .power-scan-tab.active {
+    border-color: rgba(105, 192, 255, 0.30);
+    background: rgba(105, 192, 255, 0.12);
+    color: #e9f8ff;
+  }
+
   .ione-power-header {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .ione-power-shell[data-power-panel="long"] .power-short-panel,
+  .ione-power-shell[data-power-panel="short"] .power-long-panel {
+    display: none !important;
   }
 
   .ione-power-row:not(.table-head) {
@@ -888,7 +929,35 @@
   const shortCount = document.getElementById("ione-short-count");
   const alertBox = document.getElementById("ione-alert");
   const alertToggle = document.getElementById("power-alert-toggle");
+  const shell = document.querySelector(".ione-power-shell");
+  const powerTabs = Array.from(document.querySelectorAll("[data-power-panel-tab]"));
   if (!longBody || !shortBody) return;
+
+  const setPowerPanel = (panel, shouldStore) => {
+    if (!shell || !powerTabs.length) return;
+    if (panel !== "short") panel = "long";
+    shell.dataset.powerPanel = panel;
+    powerTabs.forEach((tab) => {
+      const isActive = tab.dataset.powerPanelTab === panel;
+      tab.classList.toggle("active", isActive);
+      tab.setAttribute("aria-selected", isActive ? "true" : "false");
+    });
+    if (shouldStore) {
+      try {
+        localStorage.setItem("power_mobile_panel", panel);
+      } catch (error) {}
+    }
+  };
+
+  powerTabs.forEach((tab) => {
+    tab.addEventListener("click", () => setPowerPanel(tab.dataset.powerPanelTab, true));
+  });
+
+  try {
+    setPowerPanel(localStorage.getItem("power_mobile_panel") || "long", false);
+  } catch (error) {
+    setPowerPanel("long", false);
+  }
 
   const longHead = longBody.querySelector(".table-head")?.outerHTML || "";
   const shortHead = shortBody.querySelector(".table-head")?.outerHTML || "";

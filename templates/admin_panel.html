@@ -124,6 +124,7 @@
           <span>Last Login</span>
           <span>Logins</span>
           <span>Access</span>
+          <span>Advanced Scan</span>
         </div>
         {% for u in users_activity %}
           <div class="table-row user-activity-row">
@@ -158,6 +159,21 @@
                   <input type="hidden" name="access_blocked" value="1" />
                   <span class="pill positive">Allowed</span>
                   <button class="btn btn-ghost btn-mini danger" type="submit">Block</button>
+                {% endif %}
+              </form>
+            </span>
+            <span>
+              <form class="user-access-form" method="post" action="/admin/user/advanced-scan">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}" />
+                <input type="hidden" name="user_id" value="{{ u['id'] }}" />
+                {% if u["advanced_scan_enabled"] %}
+                  <input type="hidden" name="advanced_scan_enabled" value="0" />
+                  <span class="pill positive">Enabled</span>
+                  <button class="btn btn-ghost btn-mini" type="submit">Revoke</button>
+                {% else %}
+                  <input type="hidden" name="advanced_scan_enabled" value="1" />
+                  <span class="pill">Off</span>
+                  <button class="btn btn-ghost btn-mini" type="submit">Grant</button>
                 {% endif %}
               </form>
             </span>
@@ -536,7 +552,7 @@
 }
 .user-activity-head,
 .user-activity-row {
-  grid-template-columns: minmax(180px, 1.4fr) minmax(110px, 0.8fr) minmax(130px, 0.9fr) minmax(60px, 0.45fr) minmax(150px, 0.9fr);
+  grid-template-columns: minmax(180px, 1.35fr) minmax(110px, 0.78fr) minmax(130px, 0.86fr) minmax(60px, 0.42fr) minmax(145px, 0.82fr) minmax(155px, 0.9fr);
   align-items: center;
 }
 .user-access-form {

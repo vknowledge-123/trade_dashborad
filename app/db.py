@@ -67,6 +67,7 @@ def init_db():
             last_login_user_agent TEXT,
             login_count INTEGER NOT NULL DEFAULT 0,
             access_blocked INTEGER NOT NULL DEFAULT 0,
+            advanced_scan_enabled INTEGER NOT NULL DEFAULT 0,
             trial_start TEXT NOT NULL,
             trial_days INTEGER NOT NULL,
             created_at TEXT NOT NULL
@@ -217,6 +218,8 @@ def init_db():
         cur.execute("ALTER TABLE users ADD COLUMN login_count INTEGER NOT NULL DEFAULT 0")
     if "access_blocked" not in cols:
         cur.execute("ALTER TABLE users ADD COLUMN access_blocked INTEGER NOT NULL DEFAULT 0")
+    if "advanced_scan_enabled" not in cols:
+        cur.execute("ALTER TABLE users ADD COLUMN advanced_scan_enabled INTEGER NOT NULL DEFAULT 0")
 
     cur.execute("PRAGMA table_info(inquiries)")
     inquiry_cols = {row["name"] for row in cur.fetchall()}
@@ -478,6 +481,19 @@ def set_user_access_blocked(user_id: int, blocked: bool):
     cur.execute(
         "UPDATE users SET access_blocked = ? WHERE id = ? AND is_admin = 0",
         (1 if blocked else 0, int(user_id)),
+    )
+    _commit_with_retry(conn)
+    updated = cur.rowcount
+    conn.close()
+    return updated > 0
+
+
+def set_user_advanced_scan_enabled(user_id: int, enabled: bool):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE users SET advanced_scan_enabled = ? WHERE id = ? AND is_admin = 0",
+        (1 if enabled else 0, int(user_id)),
     )
     _commit_with_retry(conn)
     updated = cur.rowcount

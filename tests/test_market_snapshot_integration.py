@@ -455,6 +455,42 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertFalse(snapshot["losers"][0]["previous_day_positive"])
         self.assertEqual(snapshot["losers"][0]["previous_day_change"], -1.25)
 
+    def test_dashboard_pdh_pdl_badges_exclude_stocks_opened_beyond_previous_day_levels(self):
+        engine = MarketEngine(redis_client=None)
+        engine._completed_session_cache_marker = lambda: "2026-08-10"
+        engine.previous_day_levels_cache = {
+            "BREAKOUT": {"cache_marker": "2026-08-10", "high": 105, "low": 95, "broker": "kite"},
+            "GAPABOVE": {"cache_marker": "2026-08-10", "high": 105, "low": 95, "broker": "kite"},
+            "BELOW": {"cache_marker": "2026-08-10", "high": 105, "low": 95, "broker": "kite"},
+            "BREAKDOWN": {"cache_marker": "2026-08-10", "high": 105, "low": 95, "broker": "kite"},
+            "GAPBELOW": {"cache_marker": "2026-08-10", "high": 105, "low": 95, "broker": "kite"},
+            "ABOVELOW": {"cache_marker": "2026-08-10", "high": 105, "low": 95, "broker": "kite"},
+        }
+        snapshot = {
+            "gainers": [
+                {"symbol": "BREAKOUT", "price": 106, "change": 2.0, "day_open": 100, "day_high": 106},
+                {"symbol": "GAPABOVE", "price": 108, "change": 3.0, "day_open": 106, "day_high": 109},
+                {"symbol": "BELOW", "price": 104, "change": 1.0, "day_open": 100, "day_high": 104},
+            ],
+            "losers": [
+                {"symbol": "BREAKDOWN", "price": 94, "change": -2.0, "day_open": 100, "day_low": 94},
+                {"symbol": "GAPBELOW", "price": 92, "change": -3.0, "day_open": 94, "day_low": 92},
+                {"symbol": "ABOVELOW", "price": 96, "change": -1.0, "day_open": 100, "day_low": 96},
+            ],
+        }
+        engine._get_previous_day_change = lambda symbol, allow_fetch=True: None
+
+        engine._decorate_snapshot_rows(snapshot)
+
+        rows = {row["symbol"]: row for row in snapshot["gainers"]}
+        self.assertTrue(rows["BREAKOUT"]["previous_day_high_breakout"])
+        self.assertFalse(rows["GAPABOVE"]["previous_day_high_breakout"])
+        self.assertFalse(rows["BELOW"]["previous_day_high_breakout"])
+        loser_rows = {row["symbol"]: row for row in snapshot["losers"]}
+        self.assertTrue(loser_rows["BREAKDOWN"]["previous_day_low_breakdown"])
+        self.assertFalse(loser_rows["GAPBELOW"]["previous_day_low_breakdown"])
+        self.assertFalse(loser_rows["ABOVELOW"]["previous_day_low_breakdown"])
+
     def test_build_stock_row_includes_turnover_from_price_and_volume(self):
         engine = MarketEngine(redis_client=None)
 
@@ -500,17 +536,17 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         self.assertEqual([row["symbol"] for row in snapshot["gainers"]], ["BIGGAIN"])
         self.assertEqual([row["symbol"] for row in snapshot["losers"]], ["BIGLOSS"])
 
-    def test_dashboard_snapshot_limits_gainers_and_losers_to_ten(self):
+    def test_dashboard_snapshot_limits_gainers_and_losers_to_twenty(self):
         engine = MarketEngine(redis_client=None)
-        engine.nifty500_set = {f"GAIN{i}" for i in range(12)} | {f"LOSS{i}" for i in range(12)}
+        engine.nifty500_set = {f"GAIN{i}" for i in range(25)} | {f"LOSS{i}" for i in range(25)}
         engine.latest = {
             **{
-                f"GAIN{i}": {"symbol": f"GAIN{i}", "price": 100 + i, "change": 20 - i, "volume": 1000}
-                for i in range(12)
+                f"GAIN{i}": {"symbol": f"GAIN{i}", "price": 100 + i, "change": 30 - i, "volume": 1000}
+                for i in range(25)
             },
             **{
-                f"LOSS{i}": {"symbol": f"LOSS{i}", "price": 100 + i, "change": -20 + i, "volume": 1000}
-                for i in range(12)
+                f"LOSS{i}": {"symbol": f"LOSS{i}", "price": 100 + i, "change": -30 + i, "volume": 1000}
+                for i in range(25)
             },
         }
         engine._opening_candle_context = lambda symbol, reference_price=None, allow_fetch=False: {
@@ -521,8 +557,52 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
 
         snapshot = engine._build_snapshot(market_open=True)
 
-        self.assertEqual(len(snapshot["gainers"]), 10)
-        self.assertEqual(len(snapshot["losers"]), 10)
+        self.assertEqual(len(snapshot["gainers"]), 20)
+        self.assertEqual(len(snapshot["losers"]), 20)
+
+    def test_dashboard_advanced_snapshot_sorts_by_smallest_open_gap(self):
+        snapshot = {
+            "gainers": [
+                {"symbol": "FAST", "change": 4.0, "dashboard_open_gap_pct": 2.0},
+                {"symbol": "CLEAN", "change": 3.5, "dashboard_open_gap_pct": 1.0},
+            ],
+            "losers": [
+                {"symbol": "WEAK", "change": -5.0, "dashboard_open_gap_pct": 1.8},
+                {"symbol": "TIGHT", "change": -2.0, "dashboard_open_gap_pct": 0.7},
+            ],
+            "sector_gainers": [],
+            "sector_losers": [],
+        }
+
+        advanced = main_module.dashboard_snapshot_for_view(snapshot, advanced_scan=True)
+
+        self.assertEqual([row["symbol"] for row in advanced["gainers"]], ["CLEAN", "FAST"])
+        self.assertEqual([row["symbol"] for row in advanced["losers"]], ["TIGHT", "WEAK"])
+        self.assertTrue(advanced["advanced_scan"])
+
+    def test_dashboard_advanced_snapshot_supports_turnover_and_move_sort_modes(self):
+        snapshot = {
+            "gainers": [
+                {"symbol": "LOWTO", "change": 5.0, "opening_turnover": 40_000_000},
+                {"symbol": "HIGHTO_SMALL", "change": 1.0, "opening_turnover": 80_000_000},
+                {"symbol": "HIGHTO_BIG", "change": 4.0, "opening_turnover": 80_000_000},
+            ],
+            "losers": [
+                {"symbol": "LOWTO_LOSS", "change": -5.0, "opening_turnover": 40_000_000},
+                {"symbol": "HIGHTO_SMALL_LOSS", "change": -1.0, "opening_turnover": 80_000_000},
+                {"symbol": "HIGHTO_BIG_LOSS", "change": -4.0, "opening_turnover": 80_000_000},
+            ],
+        }
+
+        turnover = main_module.dashboard_snapshot_for_view(snapshot, advanced_scan=True, advanced_sort="turnover")
+        move_high = main_module.dashboard_snapshot_for_view(snapshot, advanced_scan=True, advanced_sort="turnover_move_high")
+        move_low = main_module.dashboard_snapshot_for_view(snapshot, advanced_scan=True, advanced_sort="turnover_move_low")
+
+        self.assertEqual([row["symbol"] for row in turnover["gainers"]], ["HIGHTO_SMALL", "HIGHTO_BIG", "LOWTO"])
+        self.assertEqual([row["symbol"] for row in move_high["gainers"]], ["HIGHTO_BIG", "HIGHTO_SMALL", "LOWTO"])
+        self.assertEqual([row["symbol"] for row in move_low["gainers"]], ["HIGHTO_SMALL", "HIGHTO_BIG", "LOWTO"])
+        self.assertEqual([row["symbol"] for row in move_high["losers"]], ["HIGHTO_BIG_LOSS", "HIGHTO_SMALL_LOSS", "LOWTO_LOSS"])
+        self.assertEqual([row["symbol"] for row in move_low["losers"]], ["HIGHTO_SMALL_LOSS", "HIGHTO_BIG_LOSS", "LOWTO_LOSS"])
 
     def test_decorate_snapshot_rows_backfills_cached_turnover(self):
         engine = MarketEngine(redis_client=None)
@@ -982,6 +1062,7 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         engine._completed_session_cache_marker = lambda: "2026-06-25"
         engine._save_previous_close_cache = lambda: None
         engine._save_previous_day_badges_cache = lambda: None
+        engine._save_previous_day_levels_cache = lambda: None
         engine._save_acceleration_volume_sma_cache = lambda: None
         engine.previous_close_cache = {
             "symbols": {
@@ -991,22 +1072,26 @@ class MarketEngineSectorRefreshTests(unittest.TestCase):
         engine.previous_day_badges_cache = {
             "INFY": {"cache_marker": "2026-06-25", "broker": "kite", "change": 1.0}
         }
+        engine.previous_day_levels_cache = {
+            "INFY": {"cache_marker": "2026-06-25", "broker": "kite", "high": 105.0, "low": 95.0}
+        }
         engine.acceleration_volume_sma_cache = {
             "INFY": {"cache_marker": "2026-06-25", "broker": "kite", "volume_sma": 123}
         }
         engine._restore_previous_close_cache = lambda: engine.previous_close_cache
         engine._restore_previous_day_badges_cache = lambda: None
+        engine._restore_previous_day_levels_cache = lambda: None
         engine._restore_acceleration_volume_sma_cache = lambda: engine.acceleration_volume_sma_cache
         fetched = []
 
         def fake_fetch(token, from_date, to_date, limit=None):
             fetched.append(token)
             return [
-                {"date": "2026-06-19", "close": 95.0, "volume": 100000},
-                {"date": "2026-06-22", "close": 96.0, "volume": 110000},
-                {"date": "2026-06-23", "close": 97.0, "volume": 120000},
-                {"date": "2026-06-24", "close": 98.0, "volume": 130000},
-                {"date": "2026-06-25", "close": 99.0, "volume": 140000},
+                {"date": "2026-06-19", "open": 94.0, "high": 96.0, "low": 93.0, "close": 95.0, "volume": 100000},
+                {"date": "2026-06-22", "open": 95.0, "high": 97.0, "low": 94.0, "close": 96.0, "volume": 110000},
+                {"date": "2026-06-23", "open": 96.0, "high": 98.0, "low": 95.0, "close": 97.0, "volume": 120000},
+                {"date": "2026-06-24", "open": 97.0, "high": 99.0, "low": 96.0, "close": 98.0, "volume": 130000},
+                {"date": "2026-06-25", "open": 98.0, "high": 100.0, "low": 97.0, "close": 99.0, "volume": 140000},
             ]
 
         engine._fetch_recent_day_candles = fake_fetch
@@ -2798,6 +2883,70 @@ class MarketSnapshotApiIntegrationTests(unittest.TestCase):
         self.assertEqual(unblock_response.status_code, 302)
         self.assertEqual(blocked["access_blocked"], 1)
         self.assertEqual(unblocked["access_blocked"], 0)
+
+    def test_admin_can_grant_and_revoke_advanced_scan_access(self):
+        main_module.init_db()
+        email = "advanced-user@example.com"
+        existing = main_module.get_user_by_email(email)
+        user_id = existing["id"] if existing else main_module.create_user(
+            "Advanced User",
+            email,
+            "9999999999",
+            main_module.hash_password("Password123"),
+            trial_days=3,
+        )
+        with patch.object(main_module, "require_csrf", return_value=None), patch.object(
+            main_module,
+            "require_admin",
+            return_value={"id": 1, "is_admin": 1},
+        ):
+            with TestClient(main_module.app, follow_redirects=False) as client:
+                grant_response = client.post(
+                    "/admin/user/advanced-scan",
+                    data={"user_id": user_id, "advanced_scan_enabled": "1", "csrf_token": "test"},
+                )
+                granted = main_module.get_user_by_id(user_id)
+                revoke_response = client.post(
+                    "/admin/user/advanced-scan",
+                    data={"user_id": user_id, "advanced_scan_enabled": "0", "csrf_token": "test"},
+                )
+                revoked = main_module.get_user_by_id(user_id)
+
+        self.assertEqual(grant_response.status_code, 302)
+        self.assertEqual(revoke_response.status_code, 302)
+        self.assertEqual(granted["advanced_scan_enabled"], 1)
+        self.assertEqual(revoked["advanced_scan_enabled"], 0)
+
+    def test_market_snapshot_advanced_mode_requires_permission(self):
+        snapshot = {
+            "gainers": [
+                {"symbol": "FAST", "change": 4.0, "dashboard_open_gap_pct": 2.0},
+                {"symbol": "CLEAN", "change": 3.5, "dashboard_open_gap_pct": 1.0},
+            ],
+            "losers": [],
+            "sector_gainers": [],
+            "sector_losers": [],
+        }
+        with patch.object(main_module.engine, "get_snapshot", return_value=snapshot), patch.object(
+            main_module,
+            "current_user",
+            return_value={"id": 7, "is_admin": 0, "advanced_scan_enabled": 0},
+        ), patch.object(main_module, "current_admin", return_value=None):
+            with TestClient(main_module.app) as client:
+                denied_response = client.get("/api/market-snapshot?advanced=1")
+
+        with patch.object(main_module.engine, "get_snapshot", return_value=snapshot), patch.object(
+            main_module,
+            "current_user",
+            return_value={"id": 7, "is_admin": 0, "advanced_scan_enabled": 1},
+        ), patch.object(main_module, "current_admin", return_value=None):
+            with TestClient(main_module.app) as client:
+                allowed_response = client.get("/api/market-snapshot?advanced=1&advanced_sort=turnover_move_low")
+
+        self.assertFalse(denied_response.json()["advanced_scan"])
+        self.assertEqual([row["symbol"] for row in denied_response.json()["gainers"]], ["FAST", "CLEAN"])
+        self.assertTrue(allowed_response.json()["advanced_scan"])
+        self.assertEqual(allowed_response.json()["advanced_sort"], "turnover_move_low")
 
     def test_blocked_user_is_redirected_from_pages_and_denied_api(self):
         blocked_user = {

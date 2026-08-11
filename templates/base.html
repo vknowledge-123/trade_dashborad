@@ -327,6 +327,10 @@ body::after {
   font-weight: 600;
 }
 
+.mobile-menu-toggle {
+  display: none;
+}
+
 /* ─── Page Wrapper ───────────────────────────────────────── */
 .page {
   position: relative;
@@ -609,6 +613,36 @@ body::after {
   color: #dffcf2;
   border: 1px solid rgba(0, 229, 160, 0.28);
   background: rgba(0, 229, 160, 0.12);
+  text-transform: uppercase;
+}
+
+.pdh-breakout-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0;
+  color: #fff6d7;
+  border: 1px solid rgba(255, 209, 102, 0.34);
+  background: rgba(255, 209, 102, 0.14);
+  text-transform: uppercase;
+}
+
+.pdl-breakdown-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0;
+  color: #ffe3e0;
+  border: 1px solid rgba(242, 139, 130, 0.34);
+  background: rgba(242, 139, 130, 0.14);
   text-transform: uppercase;
 }
 
@@ -2212,6 +2246,8 @@ textarea:focus {
 .pill,
 .fno-tag,
 .prev-rise-badge,
+.pdh-breakout-badge,
+.pdl-breakdown-badge,
 .sector-rank-tag,
 .nifty50-tag,
 .ohlc-badge,
@@ -2378,7 +2414,9 @@ textarea:focus {
     position: sticky;
     top: 0;
     z-index: 1100;
-    align-items: stretch !important;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center !important;
     gap: 8px !important;
     padding: 8px 10px 10px !important;
     overflow: visible !important;
@@ -2388,9 +2426,27 @@ textarea:focus {
   }
 
   .brand {
-    width: 100%;
+    width: auto;
+    min-width: 0;
     justify-content: flex-start !important;
     padding: 2px 0 !important;
+  }
+
+  .mobile-menu-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    min-height: 38px;
+    padding: 9px 12px;
+    border-radius: 10px;
+    border: 1px solid rgba(105, 192, 255, 0.24);
+    background: rgba(105, 192, 255, 0.10);
+    color: #e8f5ff;
+    font-size: 12px;
+    font-weight: 800;
+    line-height: 1;
+    cursor: pointer;
   }
 
   .brand-mark {
@@ -2408,39 +2464,46 @@ textarea:focus {
   }
 
   .nav {
-    display: flex !important;
-    flex-wrap: nowrap !important;
-    justify-content: flex-start !important;
-    align-items: center !important;
+    grid-column: 1 / -1;
+    display: none !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    justify-content: stretch !important;
+    align-items: stretch !important;
     width: 100%;
     max-width: 100%;
-    gap: 6px !important;
-    padding: 6px !important;
-    overflow-x: auto !important;
-    overflow-y: hidden !important;
-    scroll-snap-type: x proximity;
+    gap: 7px !important;
+    padding: 8px !important;
+    overflow: visible !important;
     border-radius: 10px !important;
+  }
+
+  .topbar.nav-open .nav {
+    display: grid !important;
   }
 
   .nav-user,
   .nav-contact,
   .nav-link,
   .nav-tool {
-    flex: 0 0 auto !important;
+    flex: initial !important;
     grid-column: auto !important;
-    min-width: max-content;
-    scroll-snap-align: start;
+    width: 100%;
+    min-width: 0;
   }
 
   .nav-user {
-    max-width: 130px;
-    justify-content: flex-start;
+    grid-column: 1 / -1 !important;
+    max-width: none;
+    justify-content: center;
   }
 
   .nav-link,
   .nav-contact {
     min-height: 34px;
-    padding: 8px 11px !important;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 9px 10px !important;
     border-radius: 9px !important;
     font-size: 11px !important;
     line-height: 1 !important;
@@ -2448,9 +2511,11 @@ textarea:focus {
   }
 
   .nav-tool {
+    grid-column: 1 / -1 !important;
     width: 34px !important;
     height: 34px !important;
     min-width: 34px;
+    justify-self: center;
   }
 }
   </style>
@@ -2470,12 +2535,17 @@ textarea:focus {
       </div>
     </a>
 
-    <nav class="nav">
+    <button class="mobile-menu-toggle" id="mobile-menu-toggle" type="button" aria-controls="main-nav" aria-expanded="false">
+      <span aria-hidden="true">☰</span>
+      <span>Menu</span>
+    </button>
+
+    <nav class="nav" id="main-nav">
       {% if admin %}
         <span class="nav-user">Admin</span>
-        <a class="nav-contact" href="https://wa.me/917747966806" target="_blank" rel="noopener noreferrer">
+        <a class="nav-contact" href="https://wa.me/917749995311" target="_blank" rel="noopener noreferrer">
           <span class="nav-contact-label">Call/WhatsApp</span>
-          <span>7747966806</span>
+          <span>7749995311</span>
         </a>
         <button class="nav-tool" id="quantity-calculator-trigger" type="button" aria-label="Open quantity calculator">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -2498,9 +2568,9 @@ textarea:focus {
         <a class="nav-link" href="/admin/logout">Logout</a>
       {% elif user %}
         <span class="nav-user">Hi, {{ user["full_name"] }}</span>
-        <a class="nav-contact" href="https://wa.me/917747966806" target="_blank" rel="noopener noreferrer">
+        <a class="nav-contact" href="https://wa.me/917749995311" target="_blank" rel="noopener noreferrer">
           <span class="nav-contact-label">Call/WhatsApp</span>
-          <span>7747966806</span>
+          <span>7749995311</span>
         </a>
         <button class="nav-tool" id="quantity-calculator-trigger" type="button" aria-label="Open quantity calculator">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -2521,9 +2591,9 @@ textarea:focus {
         <a class="nav-link" href="/inquiry">Inquiry</a>
         <a class="nav-link" href="/logout">Logout</a>
       {% else %}
-        <a class="nav-contact" href="https://wa.me/917747966806" target="_blank" rel="noopener noreferrer">
+        <a class="nav-contact" href="https://wa.me/917749995311" target="_blank" rel="noopener noreferrer">
           <span class="nav-contact-label">Call/WhatsApp</span>
-          <span>7747966806</span>
+          <span>7749995311</span>
         </a>
         <button class="nav-tool" id="quantity-calculator-trigger" type="button" aria-label="Open quantity calculator">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -2598,6 +2668,39 @@ textarea:focus {
 
   <script>
 (function () {
+  const topbar = document.querySelector(".topbar");
+  const mobileMenuToggle = document.getElementById("mobile-menu-toggle");
+  const mainNav = document.getElementById("main-nav");
+  if (topbar && mobileMenuToggle && mainNav) {
+    const setMobileMenuOpen = (isOpen) => {
+      topbar.classList.toggle("nav-open", isOpen);
+      mobileMenuToggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
+    };
+
+    mobileMenuToggle.addEventListener("click", (event) => {
+      event.stopPropagation();
+      setMobileMenuOpen(!topbar.classList.contains("nav-open"));
+    });
+
+    mainNav.addEventListener("click", (event) => {
+      if (event.target.closest("a")) {
+        setMobileMenuOpen(false);
+      }
+    });
+
+    document.addEventListener("click", (event) => {
+      if (!topbar.classList.contains("nav-open")) return;
+      if (topbar.contains(event.target)) return;
+      setMobileMenuOpen(false);
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        setMobileMenuOpen(false);
+      }
+    });
+  }
+
   const params = new URLSearchParams(window.location.search);
   if (params.get("inquiry") === "success") {
     const toast = document.createElement("div");
@@ -2612,6 +2715,10 @@ textarea:focus {
 
   const gainersBody = document.getElementById("gainers-body");
   const losersBody = document.getElementById("losers-body");
+  const dashboardShell = document.querySelector(".dash-shell");
+  const dashboardAdvancedScan = dashboardShell?.dataset.advancedScan === "1";
+  const dashboardAdvancedSort = dashboardShell?.dataset.advancedSort || "open_gap";
+  const dashboardSnapshotCacheKey = dashboardAdvancedScan ? `snapshot_cache_advanced_${dashboardAdvancedSort}` : "snapshot_cache";
   const sectorGainers = document.getElementById("sector-gainers");
   const sectorLosers = document.getElementById("sector-losers");
   const sectorModal = document.getElementById("sector-modal");
@@ -2810,7 +2917,14 @@ textarea:focus {
       const prevBadge = row.previous_day_positive
         ? `<span class="prev-rise-badge">Prev ${formatSignedPercent(row.previous_day_change)}</span>`
         : "";
-      const badges = [sectorRankBadgeHtml(row, positive), ohlcBadgeHtml(row), prevBadge].filter(Boolean).join("");
+      const pdhBreakoutBadge = row.previous_day_high_breakout
+        ? '<span class="pdh-breakout-badge">PDH Breakout</span>'
+        : "";
+      const pdlBreakdownBadge = row.previous_day_low_breakdown
+        ? '<span class="pdl-breakdown-badge">PDL Breakdown</span>'
+        : "";
+      const levelBreakBadge = positive ? pdhBreakoutBadge : pdlBreakdownBadge;
+      const badges = [sectorRankBadgeHtml(row, positive), ohlcBadgeHtml(row), levelBreakBadge, prevBadge].filter(Boolean).join("");
       return `
         <span class="cell-symbol-main">${escapeHtml(row.symbol)} ${fno}</span>
         ${badges ? `<span class="cell-symbol-badges">${badges}</span>` : ""}
@@ -2819,11 +2933,14 @@ textarea:focus {
 
     const ensureHead = (container) => {
       let head = container.querySelector(".table-head");
+      const headHtml = dashboardAdvancedScan
+        ? "<span>Symbol</span><span>Price</span><span>Volume</span><span>Change %</span><span>9:15 TO</span><span>Chart</span>"
+        : "<span>Symbol</span><span>Price</span><span>Volume</span><span>Change %</span><span>Chart</span>";
       if (!head) {
         head = document.createElement("div");
         head.className = "table-row table-head";
-        head.innerHTML = "<span>Symbol</span><span>Price</span><span>Volume</span><span>Change %</span><span>Chart</span>";
       }
+      head.innerHTML = headHtml;
       return head;
     };
 
@@ -2839,6 +2956,7 @@ textarea:focus {
         <span class="cell-price">${escapeHtml(row.price)}</span>
         <span class="cell-volume">${formatVolume(row.volume)}</span>
         <span class="cell-change ${positive ? "positive" : "negative"}">${escapeHtml(`${sign}${row.change}%`)}</span>
+        ${dashboardAdvancedScan ? `<span class="cell-opening-turnover">${formatCrores(row.opening_turnover)}</span>` : ""}
         <a class="tv-link" href="${tradingViewUrl(row.symbol)}" target="_blank" rel="noopener noreferrer">TradingView</a>
       `;
       return el;
@@ -2862,6 +2980,7 @@ textarea:focus {
           const priceCell = el.querySelector('.cell-price');
           const volumeCell = el.querySelector('.cell-volume');
           const changeCell = el.querySelector('.cell-change');
+          let turnoverCell = el.querySelector('.cell-opening-turnover');
           const chartLink = el.querySelector('.tv-link');
           if (symbolCell) symbolCell.innerHTML = symbolCellHtml(row, positive);
           if (priceCell) priceCell.textContent = row.price;
@@ -2869,6 +2988,16 @@ textarea:focus {
           if (changeCell) {
             changeCell.className = `cell-change ${positive ? "positive" : "negative"}`;
             changeCell.textContent = `${sign}${row.change}%`;
+          }
+          if (dashboardAdvancedScan) {
+            if (!turnoverCell) {
+              turnoverCell = document.createElement("span");
+              turnoverCell.className = "cell-opening-turnover";
+              el.insertBefore(turnoverCell, chartLink || null);
+            }
+            turnoverCell.textContent = formatCrores(row.opening_turnover);
+          } else if (turnoverCell) {
+            turnoverCell.remove();
           }
           if (chartLink) chartLink.href = tradingViewUrl(row.symbol);
         }
@@ -3078,7 +3207,7 @@ textarea:focus {
     }
 
     // render cached snapshot immediately to avoid flicker on refresh
-    const cached = localStorage.getItem("snapshot_cache");
+    const cached = localStorage.getItem(dashboardSnapshotCacheKey);
     if (cached) {
       try {
         const data = JSON.parse(cached);
@@ -3097,7 +3226,12 @@ textarea:focus {
       if (isSnapshotRequestInFlight) return;
       isSnapshotRequestInFlight = true;
       try {
-        const res = await fetch(`/api/market-snapshot?ts=${Date.now()}`, {
+        const params = new URLSearchParams({
+          ts: Date.now().toString(),
+          advanced: dashboardAdvancedScan ? "1" : "0",
+          advanced_sort: dashboardAdvancedSort,
+        });
+        const res = await fetch(`/api/market-snapshot?${params.toString()}`, {
           cache: "no-store",
           headers: {
             "Cache-Control": "no-cache",
@@ -3110,7 +3244,7 @@ textarea:focus {
         updateSectors(sectorGainers, data.sector_gainers || [], "Top Gainers");
         updateSectors(sectorLosers, data.sector_losers || [], "Top Losers");
         updateStatusLine(data);
-        try { localStorage.setItem("snapshot_cache", JSON.stringify(data)); } catch (e) {}
+        try { localStorage.setItem(dashboardSnapshotCacheKey, JSON.stringify(data)); } catch (e) {}
         const hasClosedMarketData =
           (data.gainers && data.gainers.length) ||
           (data.losers && data.losers.length) ||

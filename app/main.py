@@ -30,6 +30,7 @@ from app.db import (
     record_user_login,
     get_recent_users,
     set_user_access_blocked,
+    set_user_advanced_scan_enabled,
     set_admin_totp,
     log_admin_login,
     get_admin_login_audit,
@@ -767,6 +768,70 @@ def user_access_blocked(user_row):
     return bool(user_row and not row_value(user_row, "is_admin") and row_value(user_row, "access_blocked", 0))
 
 
+def dashboard_advanced_scan_allowed(user_row=None, admin_row=None):
+    if admin_row:
+        return True
+    return bool(user_row and row_value(user_row, "advanced_scan_enabled", 0))
+
+
+def dashboard_advanced_scan_enabled(request: Request, user_row=None, admin_row=None):
+    if not dashboard_advanced_scan_allowed(user_row, admin_row):
+        return False
+    value = str(request.query_params.get("advanced") or "").lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+DASHBOARD_ADVANCED_SORT_MODES = {
+    "open_gap",
+    "turnover",
+    "turnover_move_high",
+    "turnover_move_low",
+}
+
+
+def dashboard_advanced_sort_mode(value):
+    mode = str(value or "open_gap").strip().lower()
+    return mode if mode in DASHBOARD_ADVANCED_SORT_MODES else "open_gap"
+
+
+def dashboard_row_float(row, key, default=0.0):
+    try:
+        value = float(row.get(key))
+    except (AttributeError, TypeError, ValueError):
+        return default
+    return value if math.isfinite(value) else default
+
+
+def dashboard_advanced_sort_rows(rows, sort_mode="open_gap"):
+    sort_mode = dashboard_advanced_sort_mode(sort_mode)
+
+    def sort_key(indexed_row):
+        index, row = indexed_row
+        turnover = dashboard_row_float(row, "opening_turnover")
+        change_abs = abs(dashboard_row_float(row, "change"))
+        if sort_mode == "turnover":
+            return (-turnover, index)
+        if sort_mode == "turnover_move_high":
+            return (-turnover, -change_abs, index)
+        if sort_mode == "turnover_move_low":
+            return (-turnover, change_abs, index)
+        gap_pct = dashboard_row_float(row, "dashboard_open_gap_pct", float("inf"))
+        return (gap_pct, index)
+
+    return [row for _, row in sorted(enumerate(rows or []), key=sort_key)]
+
+
+def dashboard_snapshot_for_view(snapshot, advanced_scan=False, advanced_sort="open_gap"):
+    payload = dict(snapshot or {})
+    sort_mode = dashboard_advanced_sort_mode(advanced_sort)
+    if advanced_scan:
+        payload["gainers"] = dashboard_advanced_sort_rows(payload.get("gainers") or [], sort_mode)
+        payload["losers"] = dashboard_advanced_sort_rows(payload.get("losers") or [], sort_mode)
+    payload["advanced_scan"] = bool(advanced_scan)
+    payload["advanced_sort"] = sort_mode
+    return payload
+
+
 def blocked_access_redirect(user_row):
     if user_access_blocked(user_row):
         return RedirectResponse(url="/premium?blocked=1", status_code=302)
@@ -1021,7 +1086,10 @@ def dashboard(request: Request):
         guest_trial = guest_dashboard_status(request)
         if guest_trial["stage"] == "register":
             return RedirectResponse(url="/register?guest=expired", status_code=302)
-    snapshot = engine.get_snapshot()
+    advanced_scan_allowed = dashboard_advanced_scan_allowed(user, admin)
+    advanced_scan_enabled = dashboard_advanced_scan_enabled(request, user, admin)
+    advanced_sort = dashboard_advanced_sort_mode(request.query_params.get("advanced_sort"))
+    snapshot = dashboard_snapshot_for_view(engine.get_snapshot(), advanced_scan_enabled, advanced_sort)
     trial = trial_status(user) if user else None
     course_settings = get_course_settings()
 
@@ -1034,6 +1102,9 @@ def dashboard(request: Request):
             "trial": trial,
             "guest_trial": guest_trial,
             "snapshot": snapshot,
+            "advanced_scan_allowed": advanced_scan_allowed,
+            "advanced_scan_enabled": advanced_scan_enabled,
+            "advanced_sort": snapshot.get("advanced_sort", "open_gap"),
             "public_mode": True if not user and not admin else False,
             "course_settings": course_settings,
             "show_free_course_prompt": False,
@@ -1150,12 +1221,15 @@ def open_extreme_scanner(request: Request):
 
 
 @app.get("/api/market-snapshot")
-def market_snapshot(request: Request):
-    blocked_response = blocked_access_json(current_user(request))
+def market_snapshot(request: Request, advanced: int = 0, advanced_sort: str = "open_gap"):
+    user = current_user(request)
+    admin = current_admin(request)
+    blocked_response = blocked_access_json(user)
     if blocked_response:
         return blocked_response
+    advanced_scan = bool(advanced) and dashboard_advanced_scan_allowed(user, admin)
     return JSONResponse(
-        engine.get_snapshot(),
+        dashboard_snapshot_for_view(engine.get_snapshot(), advanced_scan, advanced_sort),
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",
@@ -1586,6 +1660,7 @@ def admin_home(request: Request):
                     "last_login_at": u["last_login_at"],
                     "login_count": u["login_count"],
                     "access_blocked": bool(row_value(u, "access_blocked", 0)),
+                    "advanced_scan_enabled": bool(row_value(u, "advanced_scan_enabled", 0)),
                 }
             )
         return templates.TemplateResponse(
@@ -1957,6 +2032,21 @@ def admin_user_access(
     if not admin:
         return RedirectResponse(url="/admin/login", status_code=302)
     set_user_access_blocked(user_id, bool(int(access_blocked)))
+    return RedirectResponse(url="/admin", status_code=302)
+
+
+@app.post("/admin/user/advanced-scan")
+def admin_user_advanced_scan(
+    request: Request,
+    user_id: int = Form(...),
+    advanced_scan_enabled: int = Form(...),
+    csrf_token: str = Form(""),
+):
+    require_csrf(request, csrf_token)
+    admin = require_admin(request)
+    if not admin:
+        return RedirectResponse(url="/admin/login", status_code=302)
+    set_user_advanced_scan_enabled(user_id, bool(int(advanced_scan_enabled)))
     return RedirectResponse(url="/admin", status_code=302)
 
 

@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 
-<div class="dash-shell" data-mobile-panel="gainers">
+<div class="dash-shell {{ 'advanced-dashboard' if advanced_scan_enabled else '' }}" data-mobile-panel="gainers" data-advanced-scan="{{ 1 if advanced_scan_enabled else 0 }}" data-advanced-sort="{{ advanced_sort or 'open_gap' }}">
   <section class="dash-hero">
     <div class="hero-badge">
       {% if guest_trial %}
@@ -45,6 +45,24 @@
           {% if snapshot.updated_at %}Updated {{ snapshot.updated_at }}{% else %}Waiting for live ticks{% endif %}
         </span>
       </div>
+      {% if advanced_scan_allowed %}
+        <div class="advanced-scan-switch">
+          <span>Advance Scan</span>
+          {% if advanced_scan_enabled %}
+            <a class="advanced-scan-switch-button active" href="/dashboard">On</a>
+          {% else %}
+            <a class="advanced-scan-switch-button" href="/dashboard?advanced=1">Off</a>
+          {% endif %}
+        </div>
+        {% if advanced_scan_enabled %}
+          <nav class="advanced-sort-controls" aria-label="Advanced scan sorting">
+            <a class="advanced-sort-chip {{ 'active' if advanced_sort == 'open_gap' else '' }}" href="/dashboard?advanced=1&advanced_sort=open_gap">Open Gap</a>
+            <a class="advanced-sort-chip {{ 'active' if advanced_sort == 'turnover' else '' }}" href="/dashboard?advanced=1&advanced_sort=turnover">Turnover</a>
+            <a class="advanced-sort-chip {{ 'active' if advanced_sort == 'turnover_move_high' else '' }}" href="/dashboard?advanced=1&advanced_sort=turnover_move_high">Turnover + Big %</a>
+            <a class="advanced-sort-chip {{ 'active' if advanced_sort == 'turnover_move_low' else '' }}" href="/dashboard?advanced=1&advanced_sort=turnover_move_low">Turnover + Small %</a>
+          </nav>
+        {% endif %}
+      {% endif %}
     </div>
   </section>
 
@@ -71,13 +89,14 @@
           <span>Price</span>
           <span>Volume</span>
           <span>Change %</span>
+          {% if advanced_scan_enabled %}<span>9:15 TO</span>{% endif %}
           <span>Chart</span>
         </div>
         {% for g in snapshot.gainers %}
           <div class="table-row" style="--row-delay: {{ loop.index0 * 0.18 }}s">
             <span class="cell-symbol">
               <span class="cell-symbol-main">{{ g.symbol }}{% if g.is_fno %} <span class="fno-tag">F&amp;O</span>{% endif %}</span>
-              {% if g.sector_rank in [1, 2] or g.open_equals_low or g.open_equals_high or g.previous_day_positive %}
+              {% if g.sector_rank in [1, 2] or g.open_equals_low or g.open_equals_high or g.previous_day_high_breakout or g.previous_day_positive %}
                 <span class="cell-symbol-badges">
                   {% if g.sector_rank in [1, 2] %}
                     <span class="sector-rank-tag">Leading Sector Rank {{ g.sector_rank }}</span>
@@ -88,6 +107,9 @@
                   {% if g.open_equals_high %}
                     <span class="ohlc-badge open-high">Open=High</span>
                   {% endif %}
+                  {% if g.previous_day_high_breakout %}
+                    <span class="pdh-breakout-badge">PDH Breakout</span>
+                  {% endif %}
                   {% if g.previous_day_positive %}
                   <span class="prev-rise-badge">Prev +{{ "%.2f"|format(g.previous_day_change) }}%</span>
                   {% endif %}
@@ -97,6 +119,7 @@
             <span class="mono">{{ g.price }}</span>
             <span class="mono">{{ format_compact_volume(g.volume if g.volume is defined else none) }}</span>
             <span class="positive mono">+{{ g.change }}%</span>
+            {% if advanced_scan_enabled %}<span class="mono">{{ format_crores(g.opening_turnover if g.opening_turnover is defined else none) }}</span>{% endif %}
             <a class="tv-link" href="https://www.tradingview.com/chart/?symbol=NSE%3A{{ g.symbol | urlencode }}" target="_blank" rel="noopener noreferrer">TradingView</a>
           </div>
         {% endfor %}
@@ -119,13 +142,14 @@
           <span>Price</span>
           <span>Volume</span>
           <span>Change %</span>
+          {% if advanced_scan_enabled %}<span>9:15 TO</span>{% endif %}
           <span>Chart</span>
         </div>
         {% for l in snapshot.losers %}
           <div class="table-row" style="--row-delay: {{ loop.index0 * 0.22 }}s">
             <span class="cell-symbol">
               <span class="cell-symbol-main">{{ l.symbol }}{% if l.is_fno %} <span class="fno-tag">F&amp;O</span>{% endif %}</span>
-              {% if l.sector_rank in [1, 2] or l.open_equals_low or l.open_equals_high or l.previous_day_positive %}
+              {% if l.sector_rank in [1, 2] or l.open_equals_low or l.open_equals_high or l.previous_day_low_breakdown or l.previous_day_positive %}
                 <span class="cell-symbol-badges">
                   {% if l.sector_rank in [1, 2] %}
                     <span class="sector-rank-tag">Sector Fall Rank {{ l.sector_rank }}</span>
@@ -136,6 +160,9 @@
                   {% if l.open_equals_high %}
                     <span class="ohlc-badge open-high">Open=High</span>
                   {% endif %}
+                  {% if l.previous_day_low_breakdown %}
+                    <span class="pdl-breakdown-badge">PDL Breakdown</span>
+                  {% endif %}
                   {% if l.previous_day_positive %}
                   <span class="prev-rise-badge">Prev +{{ "%.2f"|format(l.previous_day_change) }}%</span>
                   {% endif %}
@@ -145,6 +172,7 @@
             <span class="mono">{{ l.price }}</span>
             <span class="mono">{{ format_compact_volume(l.volume if l.volume is defined else none) }}</span>
             <span class="negative mono">{{ l.change }}%</span>
+            {% if advanced_scan_enabled %}<span class="mono">{{ format_crores(l.opening_turnover if l.opening_turnover is defined else none) }}</span>{% endif %}
             <a class="tv-link" href="https://www.tradingview.com/chart/?symbol=NSE%3A{{ l.symbol | urlencode }}" target="_blank" rel="noopener noreferrer">TradingView</a>
           </div>
         {% endfor %}
@@ -301,6 +329,10 @@
 #losers-body .table-row {
   grid-template-columns: 1.45fr 0.78fr 0.9fr 0.78fr auto;
 }
+.advanced-dashboard #gainers-body .table-row,
+.advanced-dashboard #losers-body .table-row {
+  grid-template-columns: 1.35fr 0.7fr 0.78fr 0.68fr 0.78fr auto;
+}
 
 .hero-badge {
   display: flex;
@@ -326,6 +358,60 @@
   gap: 7px;
   font-size: 12px !important;
   flex-wrap: wrap;
+}
+.advanced-scan-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px 5px 10px;
+  border: 1px solid rgba(105, 192, 255, 0.18);
+  border-radius: 999px;
+  background: rgba(105, 192, 255, 0.08);
+  color: #b9c7dc;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.advanced-scan-switch-button {
+  min-width: 44px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #d6e6ff;
+  text-align: center;
+  text-decoration: none;
+}
+.advanced-scan-switch-button.active {
+  background: rgba(99, 210, 151, 0.18);
+  border-color: rgba(99, 210, 151, 0.32);
+  color: #8df2be;
+}
+.advanced-sort-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.advanced-sort-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.045);
+  color: #b9c7dc;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.advanced-sort-chip.active {
+  border-color: rgba(255, 209, 102, 0.34);
+  background: rgba(255, 209, 102, 0.14);
+  color: #ffe4a3;
 }
 
 .snapshot-updated-at {
@@ -872,13 +958,19 @@
 
   .cell-symbol-badges:has(.ohlc-badge),
   .cell-symbol-badges:has(.sector-rank-tag),
+  .cell-symbol-badges:has(.pdh-breakout-badge),
+  .cell-symbol-badges:has(.pdl-breakdown-badge),
   .cell-symbol-badges:has(.ohlc-badge) .ohlc-badge,
-  .cell-symbol-badges:has(.sector-rank-tag) .sector-rank-tag {
+  .cell-symbol-badges:has(.sector-rank-tag) .sector-rank-tag,
+  .cell-symbol-badges:has(.pdh-breakout-badge) .pdh-breakout-badge,
+  .cell-symbol-badges:has(.pdl-breakdown-badge) .pdl-breakdown-badge {
     display: inline-flex !important;
   }
 
   .ohlc-badge,
-  .sector-rank-tag {
+  .sector-rank-tag,
+  .pdh-breakout-badge,
+  .pdl-breakdown-badge {
     padding: 1px 5px;
     font-size: 7px;
   }
@@ -1398,6 +1490,18 @@
     minmax(76px, 0.68fr)
     minmax(98px, auto) !important;
 }
+.advanced-dashboard #gainers-body .table-row,
+.advanced-dashboard #losers-body .table-row,
+.advanced-dashboard #gainers-body .table-row:not(.table-head),
+.advanced-dashboard #losers-body .table-row:not(.table-head) {
+  grid-template-columns:
+    minmax(145px, 1.35fr)
+    minmax(78px, 0.66fr)
+    minmax(82px, 0.72fr)
+    minmax(74px, 0.62fr)
+    minmax(82px, 0.72fr)
+    minmax(94px, auto) !important;
+}
 
 #gainers-body .table-row > span,
 #losers-body .table-row > span,
@@ -1508,6 +1612,25 @@
     font-size: 12px !important;
   }
 
+  .advanced-scan-switch,
+  .advanced-sort-controls {
+    width: 100%;
+  }
+
+  .advanced-sort-controls {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .advanced-sort-chip {
+    justify-content: center;
+    min-height: 34px;
+    padding: 8px 7px;
+    font-size: 10.5px;
+    white-space: normal;
+    text-align: center;
+  }
+
   .snapshot-updated-at {
     font-size: 10px !important;
   }
@@ -1550,6 +1673,22 @@
     min-height: 32px !important;
     padding: 7px 8px !important;
     font-size: 10px !important;
+  }
+
+  .advanced-dashboard #gainers-body .table-row.table-head,
+  .advanced-dashboard #losers-body .table-row.table-head,
+  .advanced-dashboard #gainers-body .table-row,
+  .advanced-dashboard #losers-body .table-row,
+  .advanced-dashboard #gainers-body .table-row:not(.table-head),
+  .advanced-dashboard #losers-body .table-row:not(.table-head) {
+    grid-template-columns: minmax(105px, 1.06fr) minmax(54px, 0.5fr) minmax(60px, 0.54fr) minmax(66px, 0.6fr) 38px !important;
+  }
+
+  .advanced-dashboard #gainers-body .table-row > span:nth-child(3),
+  .advanced-dashboard #losers-body .table-row > span:nth-child(3),
+  .advanced-dashboard #gainers-body .table-row.table-head > span:nth-child(3),
+  .advanced-dashboard #losers-body .table-row.table-head > span:nth-child(3) {
+    display: none !important;
   }
 
   #gainers-body .table-row,
@@ -1601,7 +1740,9 @@
   }
 
   .sector-rank-tag,
-  .ohlc-badge {
+  .ohlc-badge,
+  .pdh-breakout-badge,
+  .pdl-breakdown-badge {
     display: inline-flex !important;
     max-width: 100%;
     padding: 3px 6px !important;
@@ -1624,7 +1765,9 @@
   #gainers-body .table-row > span:nth-child(2),
   #losers-body .table-row > span:nth-child(2),
   #gainers-body .table-row > span:nth-child(4),
-  #losers-body .table-row > span:nth-child(4) {
+  #losers-body .table-row > span:nth-child(4),
+  .advanced-dashboard #gainers-body .table-row > span:nth-child(5),
+  .advanced-dashboard #losers-body .table-row > span:nth-child(5) {
     justify-content: flex-end !important;
     text-align: right !important;
   }
@@ -1672,6 +1815,15 @@
   #losers-body .table-row:not(.table-head) {
     grid-template-columns: minmax(104px, 1.12fr) minmax(54px, 0.58fr) minmax(58px, 0.58fr) 34px !important;
     gap: 5px !important;
+  }
+
+  .advanced-dashboard #gainers-body .table-row,
+  .advanced-dashboard #losers-body .table-row,
+  .advanced-dashboard #gainers-body .table-row:not(.table-head),
+  .advanced-dashboard #losers-body .table-row:not(.table-head),
+  .advanced-dashboard #gainers-body .table-row.table-head,
+  .advanced-dashboard #losers-body .table-row.table-head {
+    grid-template-columns: minmax(92px, 1fr) minmax(48px, 0.48fr) minmax(54px, 0.52fr) minmax(58px, 0.58fr) 34px !important;
   }
 
   .dash-shell .cell-symbol-main {
